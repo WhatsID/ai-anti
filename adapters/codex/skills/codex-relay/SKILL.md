@@ -1,0 +1,114 @@
+---
+name: codex-relay
+description: Run an authorized task through a bounded plan-review-implementation-acceptance relay. Use for requests for a complete relay; do not use it to implement an investigation or plan without authorization.
+---
+
+# Codex relay
+
+This is an instruction workflow, not a state machine or a tamper-proof gate.
+A missing evidence item makes the result `partial`, `blocked`, or `plan-only`,
+never `completed`; completion never includes commit, push, deployment, or
+real-data writes.
+
+## Start and preserve scope
+
+Locate this source checkout before changing directory:
+
+```python
+from pathlib import Path
+loaded_skill = Path("/absolute/path/to/ai-anti/adapters/codex/skills/codex-relay/SKILL.md").resolve()
+root = loaded_skill.parents[4]
+```
+
+Replace the placeholder with the actually loaded `SKILL.md` path; Markdown is
+not a Python module, so do not use `__file__` here.
+
+Require readable regular files at `root/core/REVIEW_PRINCIPLES.md` and
+`root/core/CLI_DISCIPLINE.md`, then resolve and read sibling
+`../claude-review/SKILL.md`. Do not infer the root from the business cwd.
+
+Read the business repository's `AGENTS.md` and module authority. Record its
+local `main` HEAD, dirty baseline, explicit file scope, request, and plan.
+Preserve other sessions' work. The request is verbatim and follows R2; the plan
+states scale, files and estimated sizes, rollback, and validation. Keep each
+run record outside the business repository by default; use
+[the template](references/run-record.md).
+
+Resolve every source-scope path before use: it must stay inside the business
+repository and cannot escape through `..` or a symlink. Use argument arrays or
+reliable shell quoting for commands, and pass Git pathspecs after `--`. This
+does not constrain a separately chosen worktree location.
+
+“Complete relay” or explicit use of this Skill requests the workflow, not more
+implementation authority; automatic matching is not implementation authority.
+Investigation or planning stops at its authorized boundary. A later
+implementation authorization resumes its request/plan lineage only after
+comparing HEAD, scope, and request/plan fingerprints. Record an unrelated HEAD
+advance; material request or source changes follow R6 and may require a new
+review round. “Continue” never overrides an explicit no-implement limit.
+Explicit `solo`/skip-review instructions are honored and recorded as a partial
+process, never a complete relay.
+
+## Review and adjudicate
+
+Before implementation, invoke the resolved `claude-review` `plan` entry with
+the explicit scope and project scale. It is the real two-stage review (default
+Opus; Fable only when that Skill's existing `--model fable` option is explicitly
+chosen). Require `status.json: completed`, `manifest.json: mode=plan`, complete
+inventory, successful review, actual review-model evidence, and matching task
+request/plan/source fingerprints. A diff cannot replace plan review; old task
+receipts cannot prove this review. Observe the CLI discipline for external CLI
+calls.
+
+Read the entire report and adjudicate every finding under core R6. Check the
+revised plan against the request. Continue authorized internal choices; handle
+new user-visible differences under the business project's confirmation rules.
+Do not implement before adjudication. A second review is only for the R6
+conditions; unresolved mandatory items after it block implementation.
+
+## Isolated implementation
+
+Create an isolated worktree manually from the recorded exact local `main` HEAD,
+using the business project's sparse-checkout pattern. Send one native subagent
+the settled plan, request, adjudication, worktree/base, scope/baseline, allowed
+commands, and boundaries. It must not recurse into this Skill, review its own
+plan, commit, push, deploy, or write production/real data. Only that implementer
+writes the candidate; the primary may prepare non-overlapping read-only checks.
+
+If implementation needs an existing dirty input, prepare the worktree so that
+the exact recorded input and fingerprint are present; a clean worktree must not
+silently omit it. Resolve overlapping dirty work before dispatch.
+
+Request the secondary model by explicit tool field when the actual tool schema
+supports it: a model the user specifies for this task, otherwise
+`codex_relay.secondary_model` from the user config `~/.config/ai-anti/config.json`
+(stop and report if that file exists but is not valid JSON). If neither is set,
+no model can be explicitly selected: apply the rule below. When a model
+field is specified, use a non-`all` fork context if the schema requires it. An
+agent name or self-reported identity is not evidence. Record the agent ID,
+creation parameters and tool receipt, plus runtime metadata associated with that
+returned agent ID when exposed (for example its session `turn_context.model`).
+Provider-internal routing that is not observable is `unknown`. If the model
+cannot be explicitly selected or its runtime model cannot be evidenced, or quota
+fails, stop and record `blocked`/`partial`: do not substitute a model, retry in a
+loop, or implement it in the primary. Explicit request plus evidence that an
+independent agent performed the work and runtime model metadata are required for
+the specified-secondary-model full-chain claim.
+
+Before landing, compare each scoped target's current fingerprint and identity
+(including absent, new, and deleted files) with the dispatched baseline. Any
+change means stop and resolve the overlap; never copy a directory over it. Land
+only checked increments while retaining concurrent changes. Keep a blocked or
+partial worktree/branch until all increments are landed or persistently exported;
+then clean only this task's worktree and branch under the project rules.
+
+## Primary acceptance
+
+Inspect every increment, including untracked files. Independently run the
+settled checks and prove they used the candidate artifact; implementer self-test
+is not acceptance. Return behavior defects to that implementer. The primary may
+fix only mechanical documentation errors and must record them. Apply the
+project's UI evidence and first-open review where relevant. A diff review is
+optional and never replaces plan review or primary acceptance. Record results,
+uncovered boundaries, landing, cleanup, and the strictly qualified conclusion in
+the template.

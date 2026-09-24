@@ -1,0 +1,8 @@
+# 禁词放行表。格式：<相对路径或 *>:<固定字符串>
+# 该文件中出现的固定字符串先被抹去，再对剩余内容做禁词匹配；* 表示任意文件。
+# 只放行精确字符串，不放行整条模式。
+
+# 公开仓库地址
+*:github.com/WhatsID/ai-anti
+# 测试夹具里的占位邮箱（.invalid 保留域名）
+adapters/codex/tests/test_thin_review.py:fixture@example.invalid

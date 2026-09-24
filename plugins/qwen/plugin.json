@@ -1,0 +1,11 @@
+{
+  "name": "qwen",
+  "kind": "cross-model",
+  "label": "qwen 评审",
+  "commands": ["commands/qwen-review.md"],
+  "requires": {
+    "cli": ["claude", "python3"],
+    "config": ["plugins.qwen.model", "plugins.qwen.base_url", "plugins.qwen.credential_paths"],
+    "credential_keys": ["tokenplan.value"]
+  }
+}

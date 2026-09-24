@@ -1,0 +1,18 @@
+{
+  "review": {"channels": ["codex", "same-family"]},
+  "defaults": {"deployment_scale": null},
+  "claude_review": {
+    "model_families": {
+      "opus": "claude-opus-[0-9]+(?:-[0-9]+)*",
+      "fable": "claude-fable-[0-9]+(?:-[0-9]+)*"
+    }
+  },
+  "codex_relay": {"secondary_model": null},
+  "plugins": {
+    "qwen": {
+      "model": "<model name served by the endpoint>",
+      "base_url": "https://<anthropic-compatible-endpoint>",
+      "credential_paths": ["~/.config/ai-anti/secrets.json"]
+    }
+  }
+}

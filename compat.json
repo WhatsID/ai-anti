@@ -1,0 +1,9 @@
+{
+  "schema_version": 1,
+  "description": "CLI versions on which the ai-anti paths were verified end to end; see docs/COMPATIBILITY.md. Other versions only produce a warning.",
+  "tested": {
+    "claude": ["2.1.258", "2.1.280"],
+    "codex": ["0.156.0"]
+  },
+  "python_min": "3.9"
+}

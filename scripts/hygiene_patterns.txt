@@ -1,0 +1,22 @@
+# 公开导出树的禁词（扩展正则，一行一个，匹配不区分大小写）。
+# 命中即说明有维护者本机或私人背景混进了公开文件；确属正常用法的在 hygiene_allowlist.txt 放行。
+# 只写通用模式：维护者私人专有名词放在带 export-ignore 的补充禁词表里，由 export_public.sh
+# 传入；补充表不随公开版导出，以免禁词表本身泄露私人信息。
+
+# 本机路径与邮箱
+/Users/
+[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}
+# 账号名（仓库 URL 在放行表里）
+whatsid
+# 私有模型代号与订阅
+gpt-5\.
+qwen3\.
+terra
+Token Plan
+llm_secrets
+# 设备名
+Mac mini
+MacBook
+# 不随公开版导出的私人记录
+(^|[^/A-Za-z0-9_.-])private/
+a2-root

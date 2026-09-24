@@ -1,0 +1,20 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Hygiene self-test
+        run: bash scripts/check_hygiene.sh --self-test < /dev/null
+      # 先导出公开树再在其中跑全部检查：带 export-ignore 的维护者记录不参与。
+      # 导出脚本依次跑禁词、相对链接、Codex 适配测试、安装器测试。
+      - name: Export public tree and run checks
+        run: bash scripts/export_public.sh "$RUNNER_TEMP/public" < /dev/null
