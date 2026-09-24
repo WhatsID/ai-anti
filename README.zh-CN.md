@@ -2,37 +2,62 @@
 
 [English](README.md) | 简体中文
 
-面向 AI 编程代理的对抗性跨模型评审。装一次，之后在任何仓库里从 Claude Code 或 Codex 使用。
+面向 AI 编程开发过程中的跨模型对抗评审及分模型实施验收机制。
 
 ## 是什么，为什么
 
-单个模型独立完成「出方案 → 写代码 → 自我检查」时，自己的盲区会一路带到结果里。ai-anti
+AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验收」时，如果有单点盲区会一路带到结果里。ai-anti
 把这条链拆开，交给立场不同的角色接力：
 
 1. **出方案**——主模型写方案文件，并逐字保留用户的原始需求；
 2. **交叉评审**——**另一个**模型只读仓库，对照原始需求审方案，立场是「这是别人做的方案，
    挑会导致返工的硬伤」；
 3. **分诊**——主模型逐条裁决评审意见：必修、登记备查、或驳回，避免评审轮次膨胀；
-4. **实施**——由独立的实施者按定稿方案落地；
+4. **实施**——由独立的模型按定稿方案实施落地；
 5. **终审**——主模型对照方案审查全部增量，再向用户汇报。
 
-名字取自 **a**dversarial（对抗性）：重点不是让更多模型分担更多工作，而是让立场不同的第二个
-模型去找第一个模型看不见的错。
+这套机制重点不是让更多模型分担更多工作，而是让立场不同的第二个模型去找第一个模型看不见的错，避免单模型盲区导致的隐藏问题或后期返工。
 
 ## 两条主路径
+
+目前支持两条接力路径：Claude → Codex 与 Codex → Claude。箭头左边是主导的主模型（出方案、裁决、终审），右边是评审或接手实施的模型。
 
 | 方向 | 入口 | 做什么 |
 |------|------|--------|
 | Claude → Codex | `/codex-review plan <方案.md>`、`/codex-review diff`、`/codex-implement <方案.md>` | Claude Code 主导；Codex 在只读沙箱里评审，或在实施子代理因 API 故障受阻时接手实施 |
 | Codex → Claude | `$claude-review`、`$codex-relay` | Codex 主导；Claude 在 fail-closed 检查下评审方案（两阶段）或指定范围的 diff；`$codex-relay` 跑完整接力 |
 
-在 Claude Code 里，大任务与高风险任务会自动走接力流程；`/relay-mode` 在 `solo`、`required`
-（默认）、`auto`、`force` 之间切换。
+## 四级接力档位
 
-## 最小上手
+跨模型接力等级分为四级：
 
-前置：macOS、[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、
-[Codex CLI](https://github.com/openai/codex)、Python 3.9+。
+- solo：禁用接力机制，全部工作都由主模型完成
+- required（默认）：按固定规则判断是否走接力流程——新功能或新模块、预计改动 3 个及以上会影响运行行为的生产文件（测试与纯文档不计）、跨两个及以上顶层子系统、需求含糊需要先定方案，满足任一即走流程，其余任务直接做。同样的改动总是同样处理，结果可预期
+- auto：上述规则只作参考，由主模型综合判断任务是否值得走流程。例如改动文件多但都是机械替换时可以直接做，只改一个文件但逻辑微妙时也可以主动走流程。更灵活，但结果取决于模型当时的判断
+- force：每个任务都强制走接力流程
+
+无论 required 还是 auto，命中高风险触发器的任务（接力机制自身的改动，以及项目在自己 `CLAUDE.md` 里列出的数据库结构、部署、认证等）都必须走流程；两者的区别只在一般任务上。
+
+可以使用 `/relay-mode` 命令在四种模式之间进行切换。
+
+## 接力要点
+
+- **五步接力**：出方案（用户需求逐字存入同名 `.request.md`）→ 跨模型评审 → 分诊 → 独立实施者
+  实施 → 主模型终审增量并汇报。实施前，定稿方案与原始需求之间凡用户可见的差异，逐项请用户确认。
+- **分诊**：每条意见必须给出具体失败场景（输入或状态 → 错误结果）。只有导致数据丢失或不可逆
+  损坏、让本次需求核心功能不工作、或让未授权的人拿到数据或获得访问，才算**必修**；其余**登记**
+  即算关闭；说不出具体场景的**驳回**并记理由。
+- **两轮上限**：采纳必修项不自动复审；只有架构被推翻或出现 blocker 级新事实才开第二轮。两轮后
+  仍有未解决的必修项，转用户裁决。
+- **降级顺序**：按配置顺序逐档尝试（默认 Codex → 同族）。每档只报告本档结果，由主模型进入
+  下一档；本会话已确认额度耗尽的档不再重试。全部不可用时，普通任务注明「未经交叉评审」继续，
+  高风险任务停下问用户。
+- **同族评审补偿**：同族评审是受限例外，只在全部跨模型通道不可用时启用，且必须同时做到空上下文、
+  固定对抗立场、3–5 个不同视角、自跑只读探针、每条 blocker 独立复核，缺一不算通过。
+
+## 安装使用
+
+前置条件：macOS、[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex CLI](https://github.com/openai/codex)、Python 3.9+，且 Claude Code 与 Codex CLI 都已登录可用。
 
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
@@ -41,6 +66,9 @@ cd ~/ai-anti
 ./install.sh --with-codex    # 可选：Codex skill 链到 ~/.agents/skills
 ./install.sh --status        # 只读体检
 ```
+
+需要插件评审通道时再加 `--with-plugin <name>`，并按 [config.example.json](config.example.json) 写好
+`~/.config/ai-anti/config.json`（见下文「模型扩展」「配置」）。
 
 之后在任意仓库打开 Claude Code 或 Codex 即可。项目里不需要复制任何东西，机制由用户级
 `~/.claude/CLAUDE.md` 加载。项目可以在自己的 `CLAUDE.md` 里覆写参数（高风险触发器、评审意见
@@ -53,15 +81,72 @@ Codex → Claude 用法示例：
 使用 $codex-relay 完成下面的任务：……
 ```
 
-`./install.sh --with-hook` 额外加一个 SessionStart hook，开会话时播报当前协作模式。链接与导入
+`./install.sh --with-hook` 会额外加一个 SessionStart hook，开会话时播报当前协作模式。链接与导入
 都是绝对路径：移动仓库位置后重跑一次 `./install.sh`。
 
-## 插件
+## 模型扩展
 
-内置两个评审通道：`codex`（`/codex-review`）与 `same-family`（`/opus-review`，由 Claude 子代理
-做多视角评审）。其他通道以插件形式放在 `plugins/<name>/`：用 `./install.sh --with-plugin <name>`
-安装，再把名字写进配置的 `review.channels`。首个插件是 `qwen`（经 `claude -p` 驱动 anthropic
-兼容端点）。编写插件的契约见 [docs/PLUGINS.md](docs/PLUGINS.md)。
+评审模型不限于 Codex。以 Claude 作为主模型为例，内置两个评审通道：
+
+| 通道 | 配置名 | 命令 | 说明 |
+|------|--------|------|------|
+| Codex 评审 | `codex` | `/codex-review` | 跨模型评审，默认第一档 |
+| Claude 自评审 | `same-family` | `/opus-review` | 由多个 Claude 子代理做多视角评审；属于同族评审，只在全部跨模型通道都不可用时启用 |
+
+其他模型支持以**插件**形式接入评审：放在 `plugins/<name>/`，用 `./install.sh --with-plugin <name>` 安装，
+再把插件名写进配置的 `review.channels`，排在第几位就是第几档。首个插件 `qwen` 通过 `claude -p`
+驱动任意 anthropic 兼容端点，模型名与端点地址都在配置里填写，换模型只改配置，不改代码。
+编写新插件的契约见 [docs/PLUGINS.md](docs/PLUGINS.md)。
+
+### 用更经济的模型做评审
+
+评审的价值主要来自**换一个立场、换一套盲区**，而不是用最强的模型。评审方只读仓库、挑方案硬伤，
+不写代码，用价格更低的模型或包月订阅通常就够。常见用法：
+
+- **成本优先**：把插件通道排在最前，例如 `["qwen", "codex", "same-family"]`，日常评审走更便宜的模型，
+  它不可用时再降到 Codex；
+- **质量优先、插件兜底**：保持 `["codex", "qwen", "same-family"]`，Codex 额度用完时自动降到插件通道，
+  而不是直接落到成本最高、且只是同族视角的 Claude 自评审。
+
+无论哪种顺序，同族评审都只在全部跨模型通道不可用时启用。
+
+### 接入示例：qwen 插件
+
+1. 安装插件：`./install.sh --with-plugin qwen`
+2. 在 `~/.config/ai-anti/config.json` 里填写插件配置，并把 `qwen` 加进通道顺序：
+
+   ```json
+   {
+     "review": {"channels": ["codex", "qwen", "same-family"]},
+     "plugins": {
+       "qwen": {
+         "model": "qwen3.8-max",
+         "base_url": "https://<你的 anthropic 兼容端点>",
+         "credential_paths": ["~/.config/ai-anti/secrets.json"]
+       }
+     }
+   }
+   ```
+
+3. 把 API key 写进凭证文件 `~/.config/ai-anti/secrets.json`，并执行 `chmod 600` 限制权限：
+
+   ```json
+   {"tokenplan": {"value": "<你的 API key>"}}
+   ```
+
+   插件按 `credential_paths` 的顺序读取每个文件里的 `tokenplan.value`，取第一个非空值。凭证路径
+   请写绝对路径或 `~` 开头的路径（相对路径按调用时的当前目录解析）。配置或凭证缺失时，这一档
+   判为不可用并降到下一档，不会发起半配置的调用。
+
+### 实测过的评审模型
+
+实测清单和实测程度见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#实测过的评审模型)；只验证过端点可调用的模型也在其中单独标注。其他厂商的 anthropic 兼容端点理论上可以同样接入，但尚未实测，接入后建议先做一次最小调用再用于真实评审。
+
+### Codex 主导的路径
+
+上述通道顺序和插件只作用于 **Claude 主导**的路径（Claude → Codex）。**Codex 主导**的路径
+（Codex → Claude）目前固定由 Claude 评审，可用 `--model` 选择 `opus` 或 `fable`（可在配置
+`claude_review.model_families` 里扩展），但没有插件通道和自动降级；Claude 不可用时评审直接失败并报告。
 
 ## 配置
 
@@ -80,13 +165,26 @@ Codex → Claude 用法示例：
 
 ## 兼容性
 
-实测通过的版本列在 [compat.json](compat.json)，说明见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。
-其他版本只给警告、不阻断，结果仍由 fail-closed 检查决定。只在 macOS 上验证过。
+以下版本实测通过：
+
+| 组件 | 实测通过的版本 |
+|------|----------------|
+| Claude Code | 2.1.258、2.1.280 |
+| Codex CLI | 0.156.0 |
+| Python | 3.9 及以上 |
+
+实测清单以 [compat.json](compat.json) 为准，`./install.sh --status` 会对照它检查本机版本。说明见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。其他版本只给警告、不阻断，结果仍由 fail-closed 检查决定。只在 macOS 上验证过。
 
 ## 成本
 
-每次评审与实施调用都走你自己的账号，消耗对应服务的额度（Claude、Codex 或插件端点）。
-`$claude-review` 的方案评审每轮调用两次模型；接力流程的评审最多两轮。
+采用模型接力机制后，每个走流程的需求都会增加外部模型的评审调用，token 消耗会有所上升：
+
+- **Claude → Codex**：每轮方案评审调用一次 Codex，终审时可再做一次增量评审；降到插件或 Claude
+  自评审时，消耗对应服务的额度（Claude 自评审会并发多个子代理，是最贵的一档）。
+- **Codex → Claude**：`$claude-review` 的方案评审每轮调用两次 Claude（先独立列清单，再审方案），
+  增量评审每次调用一次。
+
+两条路径的评审都最多两轮。评审模型可以换成更经济的模型，见[用更经济的模型做评审](#用更经济的模型做评审)。
 
 ## 卸载
 
@@ -101,39 +199,6 @@ Codex → Claude 用法示例：
 ## 安全
 
 见 [SECURITY.md](SECURITY.md)：外部 CLI 的沙箱方式、凭证的读取方式、安装器写哪些位置、如何报告漏洞。
-
-## 语言与机制概述
-
-规则正文（`core/`、`adapters/claude-code/CLAUDE.global.md`、命令模板）只有中文，是唯一权威；
-它们由模型读取。英文 README 附有一屏机制概述，对应下列要点：
-
-- **五步接力**：出方案（用户需求逐字存入同名 `.request.md`）→ 跨模型评审 → 分诊 → 独立实施者
-  实施 → 主模型终审增量并汇报。实施前，定稿方案与原始需求之间凡用户可见的差异，逐项请用户确认。
-- **分诊**：每条意见必须给出具体失败场景（输入或状态 → 错误结果）。只有导致数据丢失或不可逆
-  损坏、让本次需求核心功能不工作、或让未授权的人拿到数据或获得访问，才算**必修**；其余**登记**
-  即算关闭；说不出具体场景的**驳回**并记理由。
-- **两轮上限**：采纳必修项不自动复审；只有架构被推翻或出现 blocker 级新事实才开第二轮。两轮后
-  仍有未解决的必修项，转用户裁决。
-- **降级顺序**：按配置顺序逐档尝试（默认 Codex → 同族）。每档只报告本档结果，由主模型进入
-  下一档；本会话已确认额度耗尽的档不再重试。全部不可用时，普通任务注明「未经交叉评审」继续，
-  高风险任务停下问用户。
-- **同族评审补偿**：同族评审是受限例外，只在全部跨模型通道不可用时启用，且必须同时做到空上下文、
-  固定对抗立场、3–5 个不同视角、自跑只读探针、每条 blocker 独立复核，缺一不算通过。
-
-每条规则背后的实际事故见 `core/DESIGN_RATIONALE.md`。
-
-## 仓库结构
-
-```
-core/                     共用评审原则、CLI 调用纪律、规则由来
-adapters/claude-code/     Claude Code 接力流程、命令、子代理、hook
-adapters/codex/skills/    Codex 侧的 claude-review 与 codex-relay
-adapters/codex/tests/     Codex skill 的离线测试
-plugins/                  评审通道插件（qwen）
-scripts/                  发布卫生检查与公开导出
-tests/                    安装器测试
-install.sh                安装器（bash 3.2，除 python3 外无依赖）
-```
 
 ## 许可证
 

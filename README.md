@@ -2,13 +2,14 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Adversarial cross-model review for AI coding agents. Install once, then use it from Claude Code
-or Codex in any repository.
+Cross-model adversarial review, with implementation and acceptance split across models, for
+AI-assisted software development.
 
 ## What it is and why
 
-When one model plans, writes and checks its own work, its blind spots travel all the way to the
-result. ai-anti splits that chain across roles with different stances:
+In AI-assisted coding, when a single model does "plan → write code → accept" on its own, any blind
+spot it has travels all the way into the result. ai-anti splits that chain across roles with
+different stances:
 
 1. **Plan** — the primary model writes a plan file and keeps the user's original request verbatim.
 2. **Cross review** — a *different* model reads the repository (read-only) and reviews the plan
@@ -16,109 +17,45 @@ result. ai-anti splits that chain across roles with different stances:
    rework".
 3. **Triage** — the primary model rules on every finding: must-fix, register for later, or reject.
    This keeps review rounds from exploding.
-4. **Implement** — a separate implementer carries out the settled plan.
+4. **Implement** — a separate model carries out the settled plan.
 5. **Final check** — the primary model reviews the whole increment against the plan and reports.
 
-The name comes from **a**dversarial: the point is not more models doing more work, but a second
-model with a different stance looking for the mistakes the first one cannot see.
+The point is not more models doing more work, but a second model with a different stance finding
+the mistakes the first one cannot see — before they turn into hidden defects or late rework.
 
 ## Two main paths
+
+Two relay paths are supported: Claude → Codex and Codex → Claude. The left side is the primary
+model that leads (plans, adjudicates, does the final check); the right side reviews or takes over
+implementation.
 
 | Direction | Entry points | What happens |
 |-----------|--------------|--------------|
 | Claude → Codex | `/codex-review plan <plan.md>`, `/codex-review diff`, `/codex-implement <plan.md>` | Claude Code leads; Codex reviews in a read-only sandbox, or takes over implementation when the implementer subagent is blocked by API failures |
 | Codex → Claude | `$claude-review`, `$codex-relay` | Codex leads; Claude reviews a plan (two stages) or a scoped diff under fail-closed checks; `$codex-relay` runs the full relay |
 
-In Claude Code the relay runs automatically for large or high-risk tasks; `/relay-mode` switches
-between `solo`, `required` (default), `auto` and `force`.
+## Four relay modes
 
-## Quick start
+- **solo**: the relay is disabled; the primary model does all the work.
+- **required** (default): fixed rules decide whether a task goes through the relay — a new feature
+  or module, an expected change to 3 or more production files that affect runtime behavior (tests
+  and pure docs do not count), a change spanning two or more top-level subsystems, or a vague
+  request that needs a plan first. Any one of these triggers the relay; everything else is done
+  directly. The same change is always handled the same way, so the outcome is predictable.
+- **auto**: the rules above are only guidance; the primary model decides whether a task is worth
+  the relay. For example, many files changed by a mechanical replacement can be done directly,
+  while a single file with subtle logic can still go through the relay. More flexible, but the
+  outcome depends on the model's judgment at the time.
+- **force**: every substantive task goes through the relay.
 
-Prerequisites: macOS, [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
-[Codex CLI](https://github.com/openai/codex), Python 3.9+.
+In both required and auto, tasks that hit a high-risk trigger (changes to the relay mechanism
+itself, plus whatever a project lists in its own `CLAUDE.md`, such as database schema,
+deployment, or authentication) must go through the relay; the two modes differ only on ordinary
+tasks.
 
-```bash
-git clone https://github.com/WhatsID/ai-anti ~/ai-anti
-cd ~/ai-anti
-./install.sh                 # Claude Code side: commands, subagents, CLAUDE.md import
-./install.sh --with-codex    # optional: Codex skills into ~/.agents/skills
-./install.sh --status        # read-only health check
-```
+Switch modes with the `/relay-mode` command.
 
-Then open Claude Code or Codex in any repository. Nothing needs to be copied into your projects;
-the workflow is loaded from your user-level `~/.claude/CLAUDE.md`. Projects may override
-parameters (high-risk triggers, where to register findings, deployment scale, ...) in their own
-`CLAUDE.md`; see the override table in `adapters/claude-code/CLAUDE.global.md`.
-
-Codex → Claude examples:
-
-```text
-Use $claude-review to review the plan .claude/plans/20260101-task.md
-Use $codex-relay to complete the following task: ...
-```
-
-`./install.sh --with-hook` additionally adds a SessionStart hook that announces the current
-collaboration mode. Links and imports are absolute paths: after moving the checkout, run
-`./install.sh` again.
-
-## Plugins
-
-Two review channels are built in: `codex` (`/codex-review`) and `same-family` (`/opus-review`,
-a multi-perspective review by Claude subagents). Other channels are plugins under `plugins/<name>/`.
-Install one with `./install.sh --with-plugin <name>` and add its name to `review.channels` in your
-config. The first plugin is `qwen` (an Anthropic-compatible endpoint driven through `claude -p`).
-The contract for writing a plugin is in [docs/PLUGINS.md](docs/PLUGINS.md).
-
-## Configuration
-
-Optional user config: `~/.config/ai-anti/config.json` (template:
-[config.example.json](config.example.json)). The installer never creates or edits it. Missing file
-or keys mean built-in defaults; a file that is not valid JSON stops the workflow instead of
-silently falling back.
-
-| Key | Meaning | Default |
-|-----|---------|---------|
-| `review.channels` | Review channel order | `["codex", "same-family"]` |
-| `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
-| `claude_review.model_families` | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
-| `codex_relay.secondary_model` | Model requested for the implementer in `$codex-relay` | unset → specify per task |
-| `plugins.<name>` | Plugin settings, e.g. qwen `model`, `base_url`, `credential_paths` | none |
-
-Credentials live outside the repository, e.g. `~/.config/ai-anti/secrets.json`; plugins only read
-the paths you configure.
-
-## Compatibility
-
-Versions verified end to end are listed in [compat.json](compat.json) and explained in
-[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Other versions produce a warning, not a failure;
-the fail-closed checks still decide. Only macOS has been verified.
-
-## Cost
-
-Every review and implementation call runs on your own accounts and consumes the corresponding
-service quota (Claude, Codex, or a plugin endpoint). A plan review through `$claude-review` makes
-two model calls per round; the workflow caps review at two rounds.
-
-## Uninstall
-
-```bash
-./install.sh --uninstall
-```
-
-Removes only what the manifest (`~/.claude/ai-anti.manifest.json`) records and still points into
-this checkout, plus its own marker block in `~/.claude/CLAUDE.md`. Your own files and hooks are left
-untouched. Individual parts: `--without-hook`, `--without-codex`, `--remove-plugin <name>`.
-
-## Security
-
-See [SECURITY.md](SECURITY.md): how external CLIs are sandboxed, how credentials are read, what the
-installer writes, and how to report a vulnerability.
-
-## Language and mechanism overview
-
-The rule texts (`core/`, `adapters/claude-code/CLAUDE.global.md`, command templates) are written
-in Chinese and are the only authority; they are loaded by the models, which read Chinese fine.
-This overview is a summary, not a translation.
+## Relay essentials
 
 - **Five-step relay.** Plan (with the user's request kept verbatim in a sibling `.request.md`) →
   cross-model review → triage → implementation by a separate implementer → final check of the
@@ -141,20 +78,180 @@ This overview is a summary, not a translation.
   context, a fixed adversarial stance, 3–5 distinct perspectives, its own read-only probes, and an
   independent rebuttal of every blocker.
 
+**About language:** the rule texts (`core/`, `adapters/claude-code/CLAUDE.global.md`, command
+templates) and the docs under `docs/` are written in Chinese and are the only authority; they are
+read by the models, which handle Chinese fine. This README is a summary, not a translation.
 `core/DESIGN_RATIONALE.md` records the real failure behind each rule.
 
-## Repository layout
+## Install and use
 
+Prerequisites: macOS, [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
+[Codex CLI](https://github.com/openai/codex), Python 3.9+, with both Claude Code and Codex CLI
+logged in and working.
+
+```bash
+git clone https://github.com/WhatsID/ai-anti ~/ai-anti
+cd ~/ai-anti
+./install.sh                 # Claude Code side: commands, subagents, CLAUDE.md import
+./install.sh --with-codex    # optional: Codex skills into ~/.agents/skills
+./install.sh --status        # read-only health check
 ```
-core/                     shared review principles, CLI discipline, rule rationale
-adapters/claude-code/     Claude Code workflow, commands, subagents, hook
-adapters/codex/skills/    claude-review and codex-relay skills for Codex
-adapters/codex/tests/     offline tests for the Codex skills
-plugins/                  review-channel plugins (qwen)
-scripts/                  release hygiene and public export
-tests/                    installer tests
-install.sh                installer (bash 3.2, no dependencies beyond python3)
+
+To use a plugin review channel, also pass `--with-plugin <name>` and write
+`~/.config/ai-anti/config.json` following [config.example.json](config.example.json) (see
+"Model extensions" and "Configuration" below).
+
+Then open Claude Code or Codex in any repository. Nothing needs to be copied into your projects;
+the workflow is loaded from your user-level `~/.claude/CLAUDE.md`. Projects may override
+parameters (high-risk triggers, where to register findings, deployment scale, ...) in their own
+`CLAUDE.md`; see the override table in `adapters/claude-code/CLAUDE.global.md`.
+
+Codex → Claude examples:
+
+```text
+Use $claude-review to review the plan .claude/plans/20260101-task.md
+Use $codex-relay to complete the following task: ...
 ```
+
+`./install.sh --with-hook` additionally adds a SessionStart hook that announces the current relay
+mode. Links and imports are absolute paths: after moving the checkout, run `./install.sh` again.
+
+## Model extensions
+
+The reviewer is not limited to Codex. With Claude as the primary model, two review channels are
+built in:
+
+| Channel | Config name | Command | Notes |
+|---------|-------------|---------|-------|
+| Codex review | `codex` | `/codex-review` | Cross-model review; first by default |
+| Claude self-review | `same-family` | `/opus-review` | Several Claude subagents review from different perspectives; same-family, so it runs only when every cross-model channel is unavailable |
+
+Other models join as **plugins** under `plugins/<name>/`: install one with
+`./install.sh --with-plugin <name>`, then add its name to `review.channels` in your config — its
+position there is its place in the fallback order. The first plugin, `qwen`, drives any
+Anthropic-compatible endpoint through `claude -p`; the model name and endpoint are set in config,
+so switching models means editing config, not code. The contract for writing a plugin is in
+[docs/PLUGINS.md](docs/PLUGINS.md).
+
+### Using cheaper models for review
+
+Review gets its value from **a different stance and a different set of blind spots**, not from the
+strongest model. The reviewer only reads the repository and looks for flaws in the plan; it writes
+no code, so a cheaper model or a flat-rate subscription is usually enough. Common setups:
+
+- **Cost first:** put the plugin first, e.g. `["qwen", "codex", "same-family"]`, so everyday reviews
+  use the cheaper model and fall back to Codex when it is unavailable.
+- **Quality first, plugin as backup:** keep `["codex", "qwen", "same-family"]`, so when Codex runs
+  out of quota the review falls back to the plugin instead of going straight to Claude
+  self-review, which is the most expensive channel and only a same-family perspective.
+
+Whatever the order, same-family review only runs when every cross-model channel is unavailable.
+
+### Example: the qwen plugin
+
+1. Install the plugin: `./install.sh --with-plugin qwen`
+2. Add the plugin settings to `~/.config/ai-anti/config.json` and put `qwen` into the channel order:
+
+   ```json
+   {
+     "review": {"channels": ["codex", "qwen", "same-family"]},
+     "plugins": {
+       "qwen": {
+         "model": "qwen3.8-max",
+         "base_url": "https://<your anthropic-compatible endpoint>",
+         "credential_paths": ["~/.config/ai-anti/secrets.json"]
+       }
+     }
+   }
+   ```
+
+3. Put the API key in the credential file `~/.config/ai-anti/secrets.json` and restrict it with
+   `chmod 600`:
+
+   ```json
+   {"tokenplan": {"value": "<your API key>"}}
+   ```
+
+   The plugin reads `tokenplan.value` from each file in `credential_paths`, in order, and uses the
+   first non-empty value. Use absolute or `~`-prefixed paths (relative paths resolve against the
+   current directory at call time). If config or credentials are missing, the channel is marked
+   unavailable and the review falls back to the next one; it never makes a half-configured call.
+
+### Verified reviewer models
+
+The list of verified reviewer models and how far each was tested is in
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#实测过的评审模型); models only checked for endpoint
+reachability are marked separately. Other vendors' Anthropic-compatible endpoints should work the
+same way but have not been tested; do one minimal call before using one for real reviews.
+
+### The Codex-led path
+
+The channel order and plugins above apply only to the **Claude-led** path (Claude → Codex). The
+**Codex-led** path (Codex → Claude) is always reviewed by Claude: `--model` selects `opus` or
+`fable` (extensible through `claude_review.model_families`), but there are no plugin channels and
+no automatic fallback. If Claude is unavailable, the review fails and reports why.
+
+## Configuration
+
+Optional user config: `~/.config/ai-anti/config.json` (template:
+[config.example.json](config.example.json)). The installer never creates or edits it. A missing file
+or key means the built-in default; a file that is not valid JSON stops the workflow instead of
+silently falling back.
+
+| Key | Meaning | Default |
+|-----|---------|---------|
+| `review.channels` | Review channel order | `["codex", "same-family"]` |
+| `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
+| `claude_review.model_families` | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
+| `codex_relay.secondary_model` | Model requested for the implementer in `$codex-relay` | unset → specify per task |
+| `plugins.<name>` | Plugin settings, e.g. qwen `model`, `base_url`, `credential_paths` | none |
+
+Credentials live outside the repository, e.g. `~/.config/ai-anti/secrets.json`; plugins only read
+the paths you configure.
+
+## Compatibility
+
+Verified versions:
+
+| Component | Verified versions |
+|-----------|-------------------|
+| Claude Code | 2.1.258, 2.1.280 |
+| Codex CLI | 0.156.0 |
+| Python | 3.9 or later |
+
+[compat.json](compat.json) is the authoritative list, and `./install.sh --status` checks your
+local versions against it. Details are in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Other
+versions produce a warning, not a failure; the fail-closed checks still decide. Only macOS has been
+verified.
+
+## Cost
+
+With the relay, every task that goes through it adds calls to external review models, so token
+usage goes up:
+
+- **Claude → Codex:** each plan-review round calls Codex once, and the final check may add one diff
+  review. Falling back to a plugin or to Claude self-review uses that service's quota instead
+  (Claude self-review runs several subagents in parallel and is the most expensive channel).
+- **Codex → Claude:** each `$claude-review` plan-review round calls Claude twice (an independent
+  inventory first, then the plan review); a diff review calls it once.
+
+Both paths cap review at two rounds. You can switch the reviewer to a cheaper model; see
+[Using cheaper models for review](#using-cheaper-models-for-review).
+
+## Uninstall
+
+```bash
+./install.sh --uninstall
+```
+
+Removes only what the manifest (`~/.claude/ai-anti.manifest.json`) records and still points into
+this checkout, plus its own marker block in `~/.claude/CLAUDE.md`. Your own files and hooks are left
+untouched. Individual parts: `--without-hook`, `--without-codex`, `--remove-plugin <name>`.
+
+## Security
+
+See [SECURITY.md](SECURITY.md): how external CLIs are sandboxed, how credentials are read, what the
+installer writes, and how to report a vulnerability.
 
 ## License
 

@@ -6,3 +6,12 @@
 *:github.com/WhatsID/ai-anti
 # 测试夹具里的占位邮箱（.invalid 保留域名）
 adapters/codex/tests/test_thin_review.py:fixture@example.invalid
+# README 里公开的实测评审模型名（qwen3\. 禁词原本用于拦私有模型代号）
+README.zh-CN.md:qwen3.8-max
+README.zh-CN.md:qwen3.7-max
+README.md:qwen3.8-max
+README.md:qwen3.7-max
+docs/COMPATIBILITY.md:qwen3.8-max
+docs/COMPATIBILITY.md:qwen3.7-max
+# 提交信息里 AI 协作者署名行使用的公开地址（Co-Authored-By）
+*:noreply@anthropic.com
