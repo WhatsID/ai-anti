@@ -49,6 +49,27 @@ review round. “Continue” never overrides an explicit no-implement limit.
 Explicit `solo`/skip-review instructions are honored and recorded as a partial
 process, never a complete relay.
 
+## Default collaboration mode
+
+Before automatic workflow matching, resolve mode from the user’s explicit instructions
+for this task, otherwise the business repository root `.claude/relay-mode.local`,
+otherwise user config `~/.config/ai-anti/config.json` `relay.default_mode`, otherwise
+`required`. Locate the project root with `git rev-parse --show-toplevel`, falling
+back to the working directory only outside Git. Report the effective source.
+Only `solo`, `required`, `auto`, `force` are valid. An existing unreadable or invalid
+project file, invalid global JSON/object/relay section or mode stops with an error;
+never silently substitute `required`.
+
+`solo` means primary-only work, without cross-review or an independent implementer;
+report large/high-risk work as unreviewed and a partial process, not a complete relay.
+`required` matches the business project's scale/high-risk rules; `auto` lets the
+primary judge scale while preserving mandatory high-risk review; `force` requests
+relay for substantive work, not simple questions. Explicit requests for a complete
+relay take precedence over defaults but do not grant implementation authority.
+These defaults only affect workflows that load this Skill; they do not register
+rules for every Codex session. `desktop.primary_host` is an editor preference,
+never evidence of the actual executor or permission to switch the running session.
+
 ## Review and adjudicate
 
 Before implementation, invoke the resolved `claude-review` `plan` entry with

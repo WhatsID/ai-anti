@@ -15,3 +15,8 @@ docs/COMPATIBILITY.md:qwen3.8-max
 docs/COMPATIBILITY.md:qwen3.7-max
 # 提交信息里 AI 协作者署名行使用的公开地址（Co-Authored-By）
 *:noreply@anthropic.com
+
+# 菜单栏产品说明沿用已公开的历史实测名称，非私人模型代号
+apps/macos/Sources/AIReviewBar/SettingsView.swift:qwen3.8-max
+docs/MACOS_REVIEW_APP.md:qwen3.8-max
+docs/MACOS_REVIEW_APP.md:qwen3.7-max

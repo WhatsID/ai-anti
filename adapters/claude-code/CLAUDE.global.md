@@ -19,7 +19,7 @@
 
 | 参数 | 默认值 | 说明 |
 |------|--------|------|
-| 模式文件路径 | 仓库根 `.claude/relay-mode.local` | 缺省 `required` |
+| 模式文件路径 | 仓库根 `.claude/relay-mode.local` | 优先于全局 `relay.default_mode`，两者缺失才为 `required` |
 | 方案文件目录 | 仓库根 `.claude/plans/` | request 文件为同名 sibling `.request.md` |
 | 「跨子系统」判定口径 | 跨两个及以上顶层子系统的改动 | 项目按自己的顶层目录划分覆写 |
 | 业务高风险触发器清单 | 空（只有机制自身那条是默认值） | 项目按自身风险面在其 `CLAUDE.md` 列出，见下「任务规模判定」注 |
@@ -30,7 +30,7 @@
 
 ## 协作模式开关
 
-- 当前模式存于 `.claude/relay-mode.local`（单行：`solo` / `required` / `auto` / `force`；文件不存在按 `required`）。用 `/relay-mode` 查看或切换。用户当前消息里的明确指令（「直接改」「走流程」「跳过评审」）优先于模式文件，仅对当次任务生效。
+- 模式优先级：用户当前消息里的明确指令（「直接改」「走流程」「跳过评审」）> 仓库根 `.claude/relay-mode.local`（单行 `solo` / `required` / `auto` / `force`）> 用户级 `~/.config/ai-anti/config.json` 的 `relay.default_mode` > 内置 `required`。用 `/relay-mode` 查看来源或切换项目模式；当次指令仅对当次任务生效。项目文件存在但不可读或无效、全局 JSON 损坏或模式类型/值无效时停止并明确报错，不静默回落。菜单栏修改的是全局默认，不能覆盖已有项目模式。
 - `solo`：所有任务由主模型独立完成——不调 Codex、不派 implementer，高风险触发器也不例外（切入 solo 即视为用户对其间任务概括授权跳过评审）；涉及大任务或高风险的汇报须标注「未经交叉评审」。
 - `required`（默认）：按下方「任务规模判定」执行——大任务与高风险任务走接力流程，其余直接做。
 - `auto`：是否走流程由主模型自行判定，下方规模标准仅作参考；高风险触发器仍强制走流程。

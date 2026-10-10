@@ -215,3 +215,15 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
 ## 许可证
 
 [Apache-2.0](LICENSE)
+
+## macOS 菜单栏配置工具（首期）
+
+[ai-anti 菜单栏应用](apps/macos/README.md) 提供菜单栏＋小设置窗口，管理默认模型、评审通道、协作模式与检测。
+首期支持 Claude→Codex、Claude→Qwen、Codex→Qwen；业务评审仍从现有 Claude/Codex 入口发起。
+主导工具只是编辑哪组配置，默认值影响后续调用，当前会话不会切换；既有项目模式优先。
+`solo` 同时停用评审和独立实施，Codex 模式只在加载 codex-relay 工作流时生效。
+
+首次启动只读，不自动调用模型或读密钥正文；免费本地检查不证明登录/额度，手动真实合成检测消耗额度。
+密钥复用已有文件或存入受限明文 secrets.json，不是钥匙串；保存有指纹、备份与冲突检查，支持恢复上次保存。
+构建交付本地签名 `.app`，不自动安装/登录自启；Finder启动不依赖交互shell PATH，需要 Python3.11+ 和 CLI。
+功能边界、配置契约、历史证据与检测限制见 [产品说明](docs/MACOS_REVIEW_APP.md)。

@@ -1,18 +1,37 @@
 {
-  "review": {"channels": ["codex", "same-family"]},
-  "defaults": {"deployment_scale": null},
+  "review": {
+    "channels": [
+      "codex",
+      "same-family"
+    ],
+    "codex_model": "gpt-6-astra"
+  },
+  "defaults": {
+    "deployment_scale": null
+  },
   "claude_review": {
     "model_families": {
       "opus": "claude-opus-[0-9]+(?:-[0-9]+)*",
       "fable": "claude-fable-[0-9]+(?:-[0-9]+)*"
     }
   },
-  "codex_relay": {"review_channel": "claude", "secondary_model": null},
+  "codex_relay": {
+    "review_channel": "claude",
+    "secondary_model": null
+  },
   "plugins": {
     "qwen": {
       "model": "<model name served by the endpoint>",
       "base_url": "https://<anthropic-compatible-endpoint>",
-      "credential_paths": ["~/.config/ai-anti/secrets.json"]
+      "credential_paths": [
+        "~/.config/ai-anti/secrets.json"
+      ]
     }
+  },
+  "relay": {
+    "default_mode": "required"
+  },
+  "desktop": {
+    "primary_host": "claude"
   }
 }

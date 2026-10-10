@@ -16,3 +16,8 @@ secrets.json
 
 # --- 系统噪音 ----------------------------------------------------------------
 .DS_Store
+
+# macOS Swift/Python derived products (build script uses external scratch paths)
+apps/macos/.build/
+apps/macos/.swiftpm/
+**/__pycache__/

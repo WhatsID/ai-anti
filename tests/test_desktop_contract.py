@@ -1,0 +1,89 @@
+"""Real entry/config contract checks; no model calls or real user config."""
+import json
+import os
+from pathlib import Path
+import re
+import subprocess
+import sys
+import tempfile
+import unittest
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPTS = ROOT / 'adapters/codex/skills/claude-review/scripts'
+sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(ROOT / 'apps/macos/backend'))
+from config_store import Store, atomic
+from review import parser
+
+class DesktopContract(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.root = Path(self.temp.name).resolve()
+        self.env = dict(os.environ, HOME=str(self.root), AI_ANTI_PYTHON=sys.executable, PYTHONDONTWRITEBYTECODE='1', PYTHONPYCACHEPREFIX=str(self.root/'cache'))
+        self.repo = self.root/'repo'; self.repo.mkdir()
+    def tearDown(self): self.temp.cleanup()
+    def hook(self):
+        return subprocess.run(['bash',str(ROOT/'adapters/claude-code/hooks/session-start.sh')],cwd=self.repo,env=self.env,capture_output=True,text=True)
+    def test_mode_defaults_and_global_and_project(self):
+        value=self.hook(); self.assertEqual(value.returncode,0); self.assertIn('required（来源：内置默认）',value.stdout)
+        store=Store(self.root); atomic(store.paths['ai'],b'{"relay":{"default_mode":"solo"}}')
+        value=self.hook(); self.assertIn('solo（来源：全局默认）',value.stdout)
+        (self.repo/'.claude').mkdir(); (self.repo/'.claude/relay-mode.local').write_text('force\n')
+        value=self.hook(); self.assertIn('force（来源：项目模式文件）',value.stdout)
+    def test_broken_global_and_project_fail_closed(self):
+        store=Store(self.root)
+        for value in (b'', b'[]', b'{"relay":[]}',b'{"relay":{"default_mode":"oops"}}'):
+            atomic(store.paths['ai'],value); result=self.hook(); self.assertNotEqual(result.returncode,0); self.assertIn('停止',result.stderr)
+        (self.repo/'.claude').mkdir(); (self.repo/'.claude/relay-mode.local').write_text('nonsense')
+        self.assertNotEqual(self.hook().returncode,0)
+    def test_project_git_root_from_subdir(self):
+        subprocess.run(['/usr/bin/git','init'],cwd=self.repo,capture_output=True,check=True)
+        (self.repo/'.claude').mkdir(); (self.repo/'.claude/relay-mode.local').write_text('auto\n')
+        sub=self.repo/'sub'; sub.mkdir()
+        result=subprocess.run(['bash',str(ROOT/'adapters/claude-code/hooks/session-start.sh')],cwd=sub,env=self.env,capture_output=True,text=True)
+        self.assertIn('auto（来源：项目模式文件）',result.stdout)
+    def test_codex_review_executable_model_snippet(self):
+        command=(ROOT/'adapters/claude-code/commands/codex-review.md').read_text()
+        code=next(x for x in re.findall(r'```python\n(.*?)```',command,re.S) if 'model_args' in x)
+        scratch=self.root/'scratch'; scratch.mkdir(); (scratch/'review_prompt.txt').write_text('synthetic prompt')
+        store=Store(self.root); atomic(store.paths['ai'],b'{"review":{"codex_model":"gpt-6-astra"}}')
+        harness='from pathlib import Path\nscratchpad=Path('+repr(str(scratch))+')\n'+code
+        fake=self.root/'codex'; fake.write_text('#!'+sys.executable+'\nimport sys,json\nprint(json.dumps(sys.argv[1:]))\n'); fake.chmod(0o700)
+        env=dict(self.env,PATH=str(self.root)+':/usr/bin:/bin')
+        process=subprocess.run([sys.executable,'-c',harness],env=env,capture_output=True,text=True)
+        self.assertEqual(process.returncode,0,process.stderr)
+        argv=json.loads((scratch/'review_out.txt').read_text()); self.assertEqual(argv[argv.index('--model')+1],'gpt-6-astra')
+        for model in ('', 'x\ny', 4, None):
+            atomic(store.paths['ai'],json.dumps({'review':{'codex_model':model}}).encode())
+            process=subprocess.run([sys.executable,'-c',harness],env=env,capture_output=True,text=True)
+            self.assertNotEqual(process.returncode,0)
+        atomic(store.paths['ai'],b'{}')
+        subprocess.run([sys.executable,'-c',harness],env=env,check=True)
+        self.assertNotIn('--model',json.loads((scratch/'review_out.txt').read_text()))
+    def test_qwen_formal_entry_prepare_contract(self):
+        # Real parser/preflight/snapshot gates, with fixture HOME and a new output.
+        store=Store(self.root)
+        atomic(store.paths['ai'],b'{"plugins":{"qwen":{"model":"qwen-fixture","base_url":"https://example.invalid/anthropic","credential_paths":["~/.config/ai-anti/secrets.json"]}}}')
+        atomic(store.paths['secrets'],b'{"tokenplan":{"value":"FAKE_OFFLINE_KEY"}}')
+        (self.repo/'sample.txt').write_text('baseline\n')
+        for argv in (['init'],['add','sample.txt'],['-c','user.name=Fixture','-c','user.email=fixture.invalid','commit','-m','合成检测基线']):
+            subprocess.run(['/usr/bin/git',*argv],cwd=self.repo,capture_output=True,check=True)
+        (self.repo/'sample.txt').write_text('changed\n')
+        out=self.root/'out'
+        argv=[sys.executable,str(SCRIPTS/'review.py'),'diff','--repo',str(self.repo),'--files','sample.txt','--scale','单用户本机合成检测，无部署','--out',str(out),'--channel','qwen','--prepare-only']
+        result=subprocess.run(argv,env=self.env,capture_output=True,text=True)
+        self.assertEqual(result.returncode,0,result.stderr)
+        status=json.loads((out/'status.json').read_text()); self.assertEqual(status['status'],'prepared')
+        manifest=json.loads((out/'manifest.json').read_text()); self.assertEqual(manifest['mode'],'diff')
+        self.assertNotIn('FAKE_OFFLINE_KEY',json.dumps(manifest))
+        # The UI wrapper must match actual parameter names, not an invented runner.
+        actual=parser().parse_args(argv[2:]); self.assertEqual(actual.channel,'qwen')
+    def test_mode_skill_scope_and_incident_notes(self):
+        skill=(ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()
+        self.assertIn('relay.default_mode',skill); self.assertIn('never a complete relay',skill)
+        rules=(ROOT/'adapters/claude-code/CLAUDE.global.md').read_text()
+        for date in ('2026-08-06','08-07','08-11','08-12'):
+            # Historical notes remain somewhere in their original mechanism files.
+            all_mechanism=''.join(p.read_text() for p in (ROOT/'core').glob('*.md'))+rules
+            self.assertIn(date,all_mechanism)
+
+if __name__ == '__main__': unittest.main()

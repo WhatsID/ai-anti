@@ -18,6 +18,8 @@
   - `adapters/codex/skills/codex-relay/`
   - `core/CLI_DISCIPLINE.md`、`core/REVIEW_PRINCIPLES.md`、`core/DESIGN_RATIONALE.md`
   - `plugins/`、`tests/`、`scripts/`、`.github/`
+  - `apps/macos/backend/`、`apps/macos/Sources/AIReviewBar/Bridge.swift`、
+    `apps/macos/Sources/AIReviewBar/AppModel.swift`（配置与凭证控制面）
   - `compat.json`、`config.example.json`
   - `install.sh`、`.claude/settings.json`
 - 只改 `README.md`、`README.zh-CN.md`、`CHANGELOG.md` 的错别字或链接这类**无行为影响**的编辑
