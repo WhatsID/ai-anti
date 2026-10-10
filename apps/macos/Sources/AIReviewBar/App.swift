@@ -25,6 +25,14 @@ import AppKit
 @main struct AIReviewBar: App {
     @NSApplicationDelegateAdaptor(Delegate.self) var delegate
     @StateObject private var model = AppModel.shared
+    private static let menuIcon: NSImage = {
+        let image = Bundle.main.url(forResource: "MenuBarTemplate", withExtension: "png")
+            .flatMap { NSImage(contentsOf: $0) }
+            ?? NSImage(systemSymbolName: "checkmark.bubble", accessibilityDescription: "ai-anti")!
+        image.size = NSSize(width: 22, height: 22)
+        image.isTemplate = true
+        return image
+    }()
     var body: some Scene {
         MenuBarExtra {
             Text("当前选中配置（非运行中会话）")
@@ -47,7 +55,12 @@ import AppKit
             Divider()
             Button("设置…") { delegate.model = model; delegate.showSettings() }.keyboardShortcut(",")
             Button("退出", action: model.quit).keyboardShortcut("q")
-        } label: { Label("ai-anti", systemImage: "checkmark.bubble").onAppear { delegate.model = model; if CommandLine.arguments.contains("--settings") { delegate.showSettings() } } }
+        } label: {
+            Image(nsImage: Self.menuIcon)
+                .renderingMode(.template)
+                .accessibilityLabel("ai-anti")
+                .onAppear { delegate.model = model; if CommandLine.arguments.contains("--settings") { delegate.showSettings() } }
+        }
         .commands { CommandGroup(replacing: .appSettings) { Button("设置…") { delegate.model = model; delegate.showSettings() } } }
         Settings { SettingsView(model: model).onAppear { delegate.model = model } }
     }
