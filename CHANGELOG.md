@@ -22,3 +22,7 @@ First public release.
   with `--with-codex`), ownership manifest, fail-closed on conflicts, coexists with the user's own
   SessionStart hooks.
 - **Release hygiene**: `scripts/export_public.sh`, `scripts/check_hygiene.sh` and CI.
+
+- Codex 评审入口增加显式 Claude/Qwen 通道及用户默认配置，保留 Claude CLI 与旧 Claude 行为。
+- Qwen 使用子进程环境隔离、精确模型/提示校验；默认每阶段 1800 秒，prepare-only 不读凭证。
+- 增加离线通道回归测试；正式新入口在独立临时 Git 小仓库的真实 Qwen plan 两阶段与 scoped diff 验证通过。

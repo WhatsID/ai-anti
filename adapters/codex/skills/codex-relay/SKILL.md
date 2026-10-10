@@ -52,9 +52,11 @@ process, never a complete relay.
 ## Review and adjudicate
 
 Before implementation, invoke the resolved `claude-review` `plan` entry with
-the explicit scope and project scale. It is the real two-stage review (default
-Opus; Fable only when that Skill's existing `--model fable` option is explicitly
-chosen). Require `status.json: completed`, `manifest.json: mode=plan`, complete
+the explicit scope and project scale. Resolve the channel from explicit user instructions,
+otherwise `codex_relay.review_channel` (default `claude`); invalid configuration stops.
+Pass `--channel qwen` for Qwen and omit `--model`, using `plugins.qwen.model`.
+Claude defaults to Opus; Fable requires explicit `--model fable`. This is the real
+two-stage review, and neither path automatically falls back. Require `status.json: completed`, `manifest.json: mode=plan`, complete
 inventory, successful review, actual review-model evidence, and matching task
 request/plan/source fingerprints. A diff cannot replace plan review; old task
 receipts cannot prove this review. Observe the CLI discipline for external CLI
@@ -112,3 +114,7 @@ project's UI evidence and first-open review where relevant. A diff review is
 optional and never replaces plan review or primary acceptance. Record results,
 uncovered boundaries, landing, cleanup, and the strictly qualified conclusion in
 the template.
+
+The primary model is selected by the user/runtime, never dynamically switched by this
+Skill. `codex_relay.secondary_model` selects only the independent implementer; it does
+not select the reviewer. Both review channels retain the same evidence and scope gates.

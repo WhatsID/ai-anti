@@ -1,6 +1,6 @@
 ---
 name: claude-review
-description: Run a bounded, repeatable Claude cross-model review of a plan or scoped Git working-tree diff. Use for the ai-anti review relay; do not use for implementation or deployment.
+description: Run a bounded, repeatable Claude or Qwen cross-model review of a plan or scoped Git working-tree diff. Use for the ai-anti review relay; do not use for implementation or deployment.
 ---
 
 # Claude review
@@ -37,10 +37,10 @@ LF-delimited physical lines. The manifest records source hashes, byte sizes, lin
 ranges and block hashes; every block must be fully Read, including inventory
 generated between plan stages. Grep/Glob do not satisfy this requirement.
 Oversized or long-line materials are rejected rather than summarized. Use `--prepare-only` to
-freeze and inspect materials and the first-stage prompt without calling Claude.
-The plan review prompt is generated only after its independent inventory exists. The default model is Opus;
+freeze and inspect materials and the first-stage prompt without reading credentials or calling the CLI.
+The plan review prompt is generated only after its independent inventory exists. The default Claude-channel model is Opus;
 choose Fable only with `--model fable`.
-Actual model IDs must fully match the requested family with numeric version segments only
+On the Claude channel, actual model IDs must fully match the requested family with numeric version segments only
 (`scripts/review_runner.py`); cross-family IDs and non-numeric suffixes fail closed.
 `claude_review.model_families` in `~/.config/ai-anti/config.json` may override or add
 aliases (`--model` choices come from the merged table). Each key must be a value the
@@ -56,7 +56,7 @@ The init capability gate admits no plugins except the CLI's built-in `agents-md`
 The project governance document supplies `--scale`. A plan review performs two
 serial calls per round: an inventory call without the plan, then a fresh review
 call with the frozen plan and original inventory. Each call has its own timeout
-and bounded output (default 600 seconds total, 300 seconds without output,
+and bounded output (default 600 seconds total for Claude or 1800 for Qwen, 300 seconds without output,
 2 MiB log per call; configure with `--timeout`, `--idle-timeout`,
 `--max-output-bytes`). The entry does not retry a failed call or silently fall back
 to another model. New material or a material change requires a new review round;
@@ -80,3 +80,28 @@ present every finding and its disposition under R7. Unselected paths appear only
 in the inventory/status: missing content remains unverified, not assumed safe.
 See [compatibility](../../../../docs/COMPATIBILITY.md) for the CLI versions verified
 live; offline fixtures do not establish live success.
+
+## Channel selection
+
+The Skill name remains `claude-review`. Select `--channel claude|qwen`; explicit CLI
+selection wins over `codex_relay.review_channel`, whose missing/null default is `claude`.
+`review.channels` only routes the Claude-led workflow. Invalid types or values fail closed.
+Qwen reuses `plugins.qwen.model`, `base_url`, and `credential_paths`; it requires a valid
+HTTP(S) URL and non-empty single-line model. Qwen rejects explicit `--model`: its model
+comes from configuration, while the retained Claude CLI receives `--model sonnet` and
+three default-model mappings. Init must report the configured model exactly.
+Credential paths expand `~`; relative paths resolve against `--repo`, regardless of cwd.
+The first non-empty string at `tokenplan.value` is used only in a child environment;
+prepare-only validates public configuration without reading these files. Missing Qwen
+configuration or credentials fails without trying Claude. Network proxy/certificate
+environment is preserved; conflicting Anthropic keys and Bedrock/Vertex/Foundry switches
+are removed from the child copy.
+
+Only Qwen admits complete standalone `[claude-code:unrecognized_model]` lines with
+exact payload `{"model": <configured model>, "query_source": "sdk"}`. Repeated valid lines
+are transport warnings recorded per stage; raw logs remain unchanged. Unknown noise,
+wrong model, malformed payload, tool errors and permission denials still fail closed.
+Manifest/status record selected channel and configured/requested/CLI model; manifest
+records actual init model and effective limits. These fields do not prove endpoint-internal
+routing. Explicit resource overrides win; upper bounds remain 3600 seconds total,
+600 seconds idle, and 8 MiB output per call.

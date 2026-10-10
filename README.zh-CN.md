@@ -20,12 +20,12 @@ AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验�
 
 ## 两条主路径
 
-目前支持两条接力路径：Claude → Codex 与 Codex → Claude。箭头左边是主导的主模型（出方案、裁决、终审），右边是评审或接手实施的模型。
+目前支持两条接力路径：Claude → Codex 与 Codex → Claude/Qwen。箭头左边是主导的主模型（出方案、裁决、终审），右边是评审或接手实施的模型。
 
 | 方向 | 入口 | 做什么 |
 |------|------|--------|
 | Claude → Codex | `/codex-review plan <方案.md>`、`/codex-review diff`、`/codex-implement <方案.md>` | Claude Code 主导；Codex 在只读沙箱里评审，或在实施子代理因 API 故障受阻时接手实施 |
-| Codex → Claude | `$claude-review`、`$codex-relay` | Codex 主导；Claude 在 fail-closed 检查下评审方案（两阶段）或指定范围的 diff；`$codex-relay` 跑完整接力 |
+| Codex → Claude/Qwen | `$claude-review`、`$codex-relay` | Codex 主导；选定的 Claude/Qwen 模型在 fail-closed 检查下评审方案（两阶段）或指定范围的 diff；`$codex-relay` 跑完整接力 |
 
 ## 四级接力档位
 
@@ -74,7 +74,7 @@ cd ~/ai-anti
 `~/.claude/CLAUDE.md` 加载。项目可以在自己的 `CLAUDE.md` 里覆写参数（高风险触发器、评审意见
 登记去处、部署规模等），可覆写项见 `adapters/claude-code/CLAUDE.global.md` 的覆写表。
 
-Codex → Claude 用法示例：
+Codex → Claude/Qwen 用法示例：
 
 ```text
 使用 $claude-review 评审方案 .claude/plans/20260101-task.md
@@ -144,9 +144,20 @@ Codex → Claude 用法示例：
 
 ### Codex 主导的路径
 
-上述通道顺序和插件只作用于 **Claude 主导**的路径（Claude → Codex）。**Codex 主导**的路径
-（Codex → Claude）目前固定由 Claude 评审，可用 `--model` 选择 `opus` 或 `fable`（可在配置
-`claude_review.model_families` 里扩展），但没有插件通道和自动降级；Claude 不可用时评审直接失败并报告。
+上述 `review.channels` 只路由 Claude 主导路径。Codex 主导路径由 `--channel claude|qwen`
+选择，显式参数优先，其次 `codex_relay.review_channel`，缺省 `claude`；失败不自动降级。
+Claude 默认 Opus，可用 `--model fable` 或配置家族。Qwen 直接复用 `plugins.qwen`，
+无需安装插件；保留 Claude CLI，用 sonnet 别名映射配置模型，拒绝显式 `--model`。
+相对凭证路径按 `--repo` 解析，推荐绝对路径或 `~`；Claude 插件按调用 cwd 解析。
+`--prepare-only` 不读凭证、不调用 CLI。Qwen 默认每阶段 1800 秒，Claude 600 秒，
+idle 均 300 秒；显式覆盖优先，上限仍为总时间 3600 秒、idle 600 秒。
+manifest/status 留证通道与模型，init 模型精确校验不证明端点内部路由。
+
+```bash
+REVIEW_SOURCE=/absolute/path/to/ai-anti/adapters/codex/skills/claude-review/scripts/review.py
+python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
+  --files src/a.py --scale 'single user local tool' --out /private/tmp/qwen-review
+```
 
 ## 配置
 
@@ -155,9 +166,10 @@ Codex → Claude 用法示例：
 
 | 键 | 含义 | 默认 |
 |----|------|------|
-| `review.channels` | 评审通道顺序 | `["codex", "same-family"]` |
+| `review.channels` | 仅 Claude 主导路径的评审通道顺序 | `["codex", "same-family"]` |
 | `defaults.deployment_scale` | 项目未声明时传给评审方的部署规模 | 未设置 → 评审提示写明「未声明部署规模」 |
-| `claude_review.model_families` | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
+| `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
+| `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
 | `codex_relay.secondary_model` | `$codex-relay` 为实施者请求的模型 | 未设置 → 每次任务指定 |
 | `plugins.<name>` | 插件配置，如 qwen 的 `model`、`base_url`、`credential_paths` | 无 |
 
@@ -181,7 +193,7 @@ Codex → Claude 用法示例：
 
 - **Claude → Codex**：每轮方案评审调用一次 Codex，终审时可再做一次增量评审；降到插件或 Claude
   自评审时，消耗对应服务的额度（Claude 自评审会并发多个子代理，是最贵的一档）。
-- **Codex → Claude**：`$claude-review` 的方案评审每轮调用两次 Claude（先独立列清单，再审方案），
+- **Codex → Claude/Qwen**：`$claude-review` 的方案评审每轮调用两次选定的 Claude/Qwen 模型（先独立列清单，再审方案），
   增量评审每次调用一次。
 
 两条路径的评审都最多两轮。评审模型可以换成更经济的模型，见[用更经济的模型做评审](#用更经济的模型做评审)。

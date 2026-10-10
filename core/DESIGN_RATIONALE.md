@@ -233,3 +233,13 @@ tool_use 名字另有独立门禁，本次均不动。因此只放行名字、�
 **hook 按对象认领**：开源前的交叉评审核实，安装器按整条 `SessionStart` 条目认领本工具的 hook，
 条目里同时放着用户自己的 hook 对象时，重装或卸载会把用户的对象一起删掉（数据丢失，R6①）。
 改为只增删 command 等于本工具命令的那一个对象，并补了混合条目的隔离测试与变异证明。
+
+## 2026-10-10｜Codex 主导的 Qwen 适配
+
+真实临时调用中 Claude CLI 2.1.280 在 stream-json 合流日志打印一行
+`[claude-code:unrecognized_model]` 提示，纯 JSON 解析器因此拒绝。仅 Qwen
+通道精确校验 model/query_source 两字段后记录 transport warning；重复提示
+逐行校验，未知噪音仍失败。第二阶段曾改写独立清单，因此继续由程序拼接
+第一阶段原文。有效真实仓库评审超过 600 秒，Qwen 默认总时限设 1800 秒；
+Claude 保持 600，idle 保持 300，上限不变。正式新入口临时小仓库 plan/diff
+独立实测结果见 `docs/COMPATIBILITY.md`，不外推到未测材料规模。

@@ -16,6 +16,7 @@ from review_material import (MaterialError, diff_material, enforce_limit, full_g
                              git_root, read_text, safe_out, selected, sha, validate_plan, write_snapshot)
 from review_runner import MODEL_FAMILIES, RunError, capability, run_stage
 from ai_anti_config import ConfigError, load as load_config, model_families
+from review_channels import resolve, evidence, child_environment
 from review_chunks import chunk_stage, chunk_file, required_files, source_labels
 
 ROOT = Path(__file__).resolve().parents[5]
@@ -112,8 +113,9 @@ def parser(families=None):
     result.add_argument("--plan")
     result.add_argument("--scale", required=True)
     result.add_argument("--out", required=True)
-    result.add_argument("--model", choices=sorted(families or MODEL_FAMILIES), default="opus")
-    result.add_argument("--timeout", type=int, default=600)
+    result.add_argument("--channel", choices=("claude", "qwen"))
+    result.add_argument("--model", choices=sorted(families or MODEL_FAMILIES), default=None)
+    result.add_argument("--timeout", type=int, default=None)
     result.add_argument("--idle-timeout", type=int, default=300)
     result.add_argument("--max-output-bytes", type=int, default=2 * 1024 * 1024)
     result.add_argument("--prepare-only", action="store_true")
@@ -132,7 +134,7 @@ def check_arguments(args, parser_instance):
         parser_instance.error("invalid bounded resource limits")
 
 
-def prepare(args, repo, output, coretext, families):
+def prepare(args, repo, output, coretext, families, channel):
     logs = output / "logs"
     logs.mkdir()
     metadata = full_git_metadata(repo)
@@ -160,8 +162,9 @@ def prepare(args, repo, output, coretext, families):
     inventory.mkdir(parents=True)
     review.mkdir(parents=True)
     manifest = {
-        "status": "preparing", "mode": args.mode, "requested_model": args.model,
-        "model_family_pattern": families[args.model].pattern,
+        "status": "preparing", "mode": args.mode, **evidence(channel),
+        "model_family_pattern": channel["pattern"].pattern,
+        "limits": {"timeout": args.timeout, "idle_timeout": args.idle_timeout, "max_output_bytes": args.max_output_bytes},
         "scale": args.scale, "core_root": str(ROOT), "core_sha256": sha(coretext.encode("utf-8")),
         "discipline_sha256": sha(DISCIPLINE.read_bytes()), "repo": str(repo),
         "head": metadata["head"], "git_status": metadata["status"],
@@ -195,13 +198,13 @@ def prepare(args, repo, output, coretext, families):
 
 def main():
     try:
-        families = model_families(load_config(), MODEL_FAMILIES)
+        config = load_config()
+        families = model_families(config, MODEL_FAMILIES)
     except ConfigError as exc:
         print("review preparation failed: " + str(exc), file=sys.stderr)
         return 2
     argument_parser = parser(families)
     args = argument_parser.parse_args()
-    check_arguments(args, argument_parser)
     output = None
     manifest = None
     warnings = []
@@ -211,8 +214,11 @@ def main():
         coretext = CORE.read_text(encoding="utf-8")
         rules = core_sections(coretext, args.mode)
         repo = git_root(args.repo)
+        channel = resolve(config, args.channel, args.model, repo, families)
+        args.timeout = args.timeout if args.timeout is not None else (1800 if channel["channel"] == "qwen" else 600)
+        check_arguments(args, argument_parser)
         output = safe_out(args.out, repo)
-        output, logs, inventory, review, manifest, files, context = prepare(args, repo, output, coretext, families)
+        output, logs, inventory, review, manifest, files, context = prepare(args, repo, output, coretext, families, channel)
         initial_mode = "inventory" if args.mode == "plan" else "diff"
         initial_sources = manifest["sources"]["inventory" if args.mode == "plan" else "review"]
         initial_required = required_files(initial_sources)
@@ -224,13 +230,16 @@ def main():
         if args.prepare_only:
             manifest["status"] = "prepared"
             write_json(output / "manifest.json", manifest)
-            write_json(output / "status.json", {"status": "prepared", "completed": False, "out": str(output)})
+            write_json(output / "status.json", {"status": "prepared", "completed": False, "out": str(output), **evidence(channel)})
             print(output)
             return 0
+        env = child_environment(channel)
+        stage_families = {channel["cli_model"]: channel["pattern"]}
+        expected = channel["configured_model"] if channel["channel"] == "qwen" else None
         claude = shutil.which("claude")
         if not claude:
             raise RunError("claude not found on PATH")
-        manifest["capabilities"] = capability(claude, logs)
+        manifest["capabilities"] = capability(claude, logs, env=env)
         manifest["cli_version"] = manifest["capabilities"]["cli_version"]
         warning = compat_warning(manifest["cli_version"])
         if warning:
@@ -241,7 +250,7 @@ def main():
         write_json(output / "manifest.json", manifest)
         if args.mode == "plan":
             inventory_required = initial_required
-            first = run_stage(claude, inventory, initial_prompt, logs / "inventory.jsonl", args.model, args.timeout, args.idle_timeout, args.max_output_bytes, families)
+            first = run_stage(claude, inventory, initial_prompt, logs / "inventory.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected)
             require_full_reads(first, inventory_required, initial_sources)
             if snapshot_hashes(inventory) != manifest["snapshots"]["inventory"]:
                 raise RunError("inventory snapshot changed during review")
@@ -256,12 +265,12 @@ def main():
             review_prompt = make_prompt("plan", review_required, rules, args.scale, review_sources)
             manifest["prompt_sha256"]["review.prompt.txt"] = sha(review_prompt.encode("utf-8"))
             write_json(output / "manifest.json", manifest)
-            second = run_stage(claude, review, review_prompt, logs / "review.jsonl", args.model, args.timeout, args.idle_timeout, args.max_output_bytes, families)
+            second = run_stage(claude, review, review_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected)
             require_full_reads(second, review_required, review_sources)
             report = "# 独立清单（原样）\n\n" + first["result"] + "\n\n# 方案评审\n\n" + second["result"]
         else:
             required = initial_required
-            second = run_stage(claude, review, initial_prompt, logs / "review.jsonl", args.model, args.timeout, args.idle_timeout, args.max_output_bytes, families)
+            second = run_stage(claude, review, initial_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected)
             require_full_reads(second, required, initial_sources)
             report = second["result"]
         if snapshot_hashes(review) != manifest["snapshots"]["review"]:
@@ -273,7 +282,8 @@ def main():
         manifest.update({"status": "completed", "actual_model": second["model"], "exit_reason": "verified result", "finished_at": time.time()})
         write_json(output / "manifest.json", manifest)
         write_json(output / "status.json", {"status": "completed", "completed": True, "out": str(output),
-                                            "warnings": warnings})
+                                            "warnings": warnings, **evidence(channel), "actual_model": second["model"],
+                                            "limits": manifest["limits"]})
         print(output)
         return 0
     except (MaterialError, RunError, OSError, ValueError, TypeError, KeyboardInterrupt) as exc:
@@ -283,7 +293,7 @@ def main():
                 write_json(output / "manifest.json", manifest)
             write_json(output / "status.json", {"status": "failed", "completed": False, "error": str(exc),
                                                 "failure_kind": getattr(exc, "kind", "preparation_failed"),
-                                                "warnings": warnings})
+                                                "warnings": warnings, **evidence(channel)})
             print(output)
         else:
             print("review preparation failed: " + str(exc), file=sys.stderr)

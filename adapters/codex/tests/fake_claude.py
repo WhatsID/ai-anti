@@ -29,7 +29,7 @@ middle = chunk_names[len(chunk_names) // 2] if chunk_names else None
 audit = Path(os.environ['FAKE_AUDIT'])
 with audit.open('a') as f:
     f.write(json.dumps({'argv': sys.argv[1:], 'cwd': str(root), 'files': files,
-                       'stdin': sys.stdin.read()}) + '\n')
+                       'stdin': sys.stdin.read(), 'env': {k: v for k, v in os.environ.items() if os.environ.get('FAKE_ENV_AUDIT') == '1' and k in ('ANTHROPIC_BASE_URL', 'ANTHROPIC_DEFAULT_OPUS_MODEL', 'ANTHROPIC_DEFAULT_SONNET_MODEL', 'ANTHROPIC_DEFAULT_HAIKU_MODEL', 'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY', 'HTTPS_PROXY')}, 'matches_fixture_token': os.environ.get('ANTHROPIC_AUTH_TOKEN') == 'OFFLINE_FAKE_TOKEN', 'conflicting_anthropic_present': any(k in os.environ for k in ('ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL'))}) + '\n')
 if mode == 'quota':
     emit({'type': 'rate_limit_event', 'rate_limit_info': {'status': 'rejected', 'rateLimitType': 'seven_day'}})
     sys.exit(1)
@@ -51,7 +51,15 @@ if mode == 'flood':
     time.sleep(60)
 model = sys.argv[sys.argv.index('--model') + 1]
 actual = 'claude-opus-5-5' if model == 'opus' else 'claude-fable-5-1'
-actual = os.environ.get('FAKE_ACTUAL_MODEL') or actual
+actual = os.environ.get('FAKE_ACTUAL_MODEL') or (os.environ.get('ANTHROPIC_DEFAULT_SONNET_MODEL') if model == 'sonnet' else None) or actual
+if mode.startswith('noise_'):
+    payload = {'model': actual, 'query_source': 'sdk'}
+    if mode == 'noise_wrong': payload['model'] = 'wrong'
+    if mode == 'noise_extra': payload['extra'] = True
+    for _ in range(2 if mode == 'noise_repeat' else 1):
+        print('[claude-code:unrecognized_model] ' + json.dumps(payload), flush=True)
+    if mode == 'noise_unknown': print('unknown noise', flush=True)
+    if mode == 'noise_truncated': print('[claude-code:unrecognized_model] {', flush=True)
 plugins = ['bad'] if mode == 'plugin' else []
 if 'FAKE_PLUGINS' in os.environ:
     plugins = json.loads(os.environ['FAKE_PLUGINS'])
@@ -95,6 +103,8 @@ if mode == 'long_inventory' and root.name == 'inventory':
     result['result'] = 'x' * 2001
 if mode == 'overflow_inventory' and root.name == 'inventory':
     result['result'] = ('x' * 1000 + '\n') * 1000
+if mode == 'insufficient_quota':
+    result.update(subtype='error_during_execution', is_error=True, result='insufficient_quota')
 if mode == 'missing_error':
     result.pop('is_error')
 if mode == 'missing_denials':

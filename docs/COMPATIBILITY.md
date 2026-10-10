@@ -43,3 +43,16 @@
 1. 跑一遍对应路径的真实冒烟（`/codex-review diff`、`$claude-review diff`、插件最小调用）；
 2. 通过后把版本追加进 `compat.json` 与「实测通过的版本」表，并写明实测了哪条路径；
 3. 失败时不要放松门禁迁就新版本，先查清是哪项能力变了。
+
+## Codex → Qwen 新入口验收
+
+2026-10-10 临时探针与自举方案评审使用 Claude CLI 2.1.280、sonnet 别名及
+三个默认模型映射调用 `qwen3.8-max`，两阶段只读材料门禁已验证；这不是正式
+新入口验收。主模型随后独立验证正式 `review.py --channel qwen`：临时 Git 小仓库
+的 plan 两阶段及 scoped diff 均 `completed`，CLI 2.1.280、init 上报 `qwen3.8-max`，
+默认每阶段 timeout 1800 秒。完整材料读取、权限及指纹门禁通过，plan 命中预置
+除零异常，diff 命中删除除零检查的回归。plan 调用后仅增补 completed status
+的 actual_model/limits 两个留证字段，diff 与最终离线检查使用增补后的代码。
+这不覆盖大材料全量评审、真实业务数据或端点内部路由。
+离线 fixture 只证明协议与失败路径。实测每次调用有一行已知模型提示；新入口
+允许重复但每行 payload 必须精确匹配，保留原始合流日志及 transport warning。

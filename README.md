@@ -25,14 +25,14 @@ the mistakes the first one cannot see — before they turn into hidden defects o
 
 ## Two main paths
 
-Two relay paths are supported: Claude → Codex and Codex → Claude. The left side is the primary
+Two relay paths are supported: Claude → Codex and Codex → Claude/Qwen. The left side is the primary
 model that leads (plans, adjudicates, does the final check); the right side reviews or takes over
 implementation.
 
 | Direction | Entry points | What happens |
 |-----------|--------------|--------------|
 | Claude → Codex | `/codex-review plan <plan.md>`, `/codex-review diff`, `/codex-implement <plan.md>` | Claude Code leads; Codex reviews in a read-only sandbox, or takes over implementation when the implementer subagent is blocked by API failures |
-| Codex → Claude | `$claude-review`, `$codex-relay` | Codex leads; Claude reviews a plan (two stages) or a scoped diff under fail-closed checks; `$codex-relay` runs the full relay |
+| Codex → Claude/Qwen | `$claude-review`, `$codex-relay` | Codex leads; the selected Claude/Qwen model reviews a plan (two stages) or a scoped diff under fail-closed checks; `$codex-relay` runs the full relay |
 
 ## Four relay modes
 
@@ -106,7 +106,7 @@ the workflow is loaded from your user-level `~/.claude/CLAUDE.md`. Projects may 
 parameters (high-risk triggers, where to register findings, deployment scale, ...) in their own
 `CLAUDE.md`; see the override table in `adapters/claude-code/CLAUDE.global.md`.
 
-Codex → Claude examples:
+Codex → Claude/Qwen examples:
 
 ```text
 Use $claude-review to review the plan .claude/plans/20260101-task.md
@@ -186,10 +186,23 @@ same way but have not been tested; do one minimal call before using one for real
 
 ### The Codex-led path
 
-The channel order and plugins above apply only to the **Claude-led** path (Claude → Codex). The
-**Codex-led** path (Codex → Claude) is always reviewed by Claude: `--model` selects `opus` or
-`fable` (extensible through `claude_review.model_families`), but there are no plugin channels and
-no automatic fallback. If Claude is unavailable, the review fails and reports why.
+The `review.channels` order only routes the Claude-led path. Codex selects
+`--channel claude|qwen`, then `codex_relay.review_channel`, defaulting to `claude`.
+Failures never automatically fall back. Claude defaults to Opus; `--model fable` or
+configured families remain supported. Qwen directly reuses `plugins.qwen` without
+plugin installation, retaining Claude CLI with a sonnet alias mapped to the configured
+model. Explicit `--model` is rejected for Qwen. Relative credential paths resolve
+against `--repo`; the Claude plugin resolves them against invocation cwd. Prefer
+absolute paths or `~`. `--prepare-only` reads no credentials and calls no CLI.
+Qwen defaults to 1800 seconds per stage, Claude to 600, both to 300 seconds idle.
+Explicit overrides win; caps remain 3600 seconds total and 600 idle. Model evidence
+and exact init matching do not prove endpoint-internal routing.
+
+```bash
+REVIEW_SOURCE=/absolute/path/to/ai-anti/adapters/codex/skills/claude-review/scripts/review.py
+python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
+  --files src/a.py --scale 'single user local tool' --out /private/tmp/qwen-review
+```
 
 ## Configuration
 
@@ -200,9 +213,10 @@ silently falling back.
 
 | Key | Meaning | Default |
 |-----|---------|---------|
-| `review.channels` | Review channel order | `["codex", "same-family"]` |
+| `review.channels` | Claude-led review channel order only | `["codex", "same-family"]` |
 | `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
-| `claude_review.model_families` | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
+| `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
+| `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
 | `codex_relay.secondary_model` | Model requested for the implementer in `$codex-relay` | unset → specify per task |
 | `plugins.<name>` | Plugin settings, e.g. qwen `model`, `base_url`, `credential_paths` | none |
 
@@ -232,7 +246,7 @@ usage goes up:
 - **Claude → Codex:** each plan-review round calls Codex once, and the final check may add one diff
   review. Falling back to a plugin or to Claude self-review uses that service's quota instead
   (Claude self-review runs several subagents in parallel and is the most expensive channel).
-- **Codex → Claude:** each `$claude-review` plan-review round calls Claude twice (an independent
+- **Codex → Claude/Qwen:** each `$claude-review` plan-review round calls the selected Claude/Qwen model twice (an independent
   inventory first, then the plan review); a diff review calls it once.
 
 Both paths cap review at two rounds. You can switch the reviewer to a cheaper model; see

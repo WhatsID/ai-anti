@@ -68,7 +68,7 @@ def builtin_plugins_only(plugins):
     return len(names) == len(set(names))
 
 
-def execute(args, cwd, logfile, timeout, idle, cap):
+def execute(args, cwd, logfile, timeout, idle, cap, env=None):
     """Full stdout/stderr on disk; bounded monitoring, no pipe buffering."""
     started = time.monotonic()
     progress_at = last_output = started
@@ -78,7 +78,7 @@ def execute(args, cwd, logfile, timeout, idle, cap):
         try:
             process = subprocess.Popen(
                 args, cwd=str(cwd), stdin=subprocess.DEVNULL,
-                stdout=log, stderr=subprocess.STDOUT, start_new_session=True,
+                stdout=log, stderr=subprocess.STDOUT, start_new_session=True, env=env,
             )
         except OSError as exc:
             raise RunError('could not launch CLI: ' + str(exc)) from exc
@@ -114,11 +114,11 @@ def execute(args, cwd, logfile, timeout, idle, cap):
     return process.returncode
 
 
-def capability(claude, out):
+def capability(claude, out, env=None):
     result = {}
     for flag in ('--version', '--help'):
         path = out / (flag[2:] + '.txt')
-        code = execute([claude, flag], out, path, 20, 15, 65536)
+        code = execute([claude, flag], out, path, 20, 15, 65536, env=env)
         data = path.read_bytes()
         result[flag[2:]] = {
             'exit': code, 'sha256': hashlib.sha256(data).hexdigest(),
@@ -136,15 +136,15 @@ def capability(claude, out):
     return result
 
 
-def run_stage(claude, cwd, prompt, logfile, model, timeout, idle, cap, families=None):
+def run_stage(claude, cwd, prompt, logfile, model, timeout, idle, cap, families=None, env=None, expected_model=None):
     # Prompt is outside material cwd: no accidental recursive reviewer input.
     prompt_file = logfile.with_suffix('.prompt.txt')
     prompt_file.write_text(prompt, encoding='utf-8')
     args = [claude, '-p', prompt_file.read_text(encoding='utf-8'), '--model', model] + FLAGS
     print(logfile.stem + ': started', file=sys.stderr)
     started = time.time()
-    code = execute(args, cwd, logfile, timeout, idle, cap)
-    result = validate(logfile, code, model, cwd, families)
+    code = execute(args, cwd, logfile, timeout, idle, cap, env=env)
+    result = validate(logfile, code, model, cwd, families, expected_model=expected_model)
     result['started_at'] = started
     result['finished_at'] = time.time()
     result['log_sha256'] = hashlib.sha256(logfile.read_bytes()).hexdigest()
@@ -198,10 +198,20 @@ def record_read(event, pending, cwd, coverage):
         raise RunError('invalid Read evidence: ' + str(exc)) from exc
 
 
-def validate(logfile, code, requested, cwd, families=None):
+def validate(logfile, code, requested, cwd, families=None, expected_model=None):
     inits, finals, pending, coverage = [], [], {}, {}
+    warnings = []
     try:
-        events = [json.loads(line) for line in logfile.read_text('utf-8').splitlines()]
+        events = []
+        for line in logfile.read_text('utf-8').splitlines():
+            prefix = '[claude-code:unrecognized_model] '
+            if expected_model is not None and line.startswith(prefix):
+                payload = json.loads(line[len(prefix):])
+                if payload != {'model': expected_model, 'query_source': 'sdk'}:
+                    raise RunError('unexpected Qwen transport warning')
+                warnings.append({'kind': 'unrecognized_model', **payload})
+            else:
+                events.append(json.loads(line))
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise RunError('truncated or malformed stream-json') from exc
     for event in events:
@@ -253,4 +263,4 @@ def validate(logfile, code, requested, cwd, families=None):
         count = len((cwd / relative).read_text(encoding='utf-8').split('\n'))
         if indices == set(range(count)):
             complete.add(relative)
-    return {'model': actual, 'result': final['result'], 'complete_reads': complete}
+    return {'model': actual, 'result': final['result'], 'complete_reads': complete, 'transport_warnings': warnings}

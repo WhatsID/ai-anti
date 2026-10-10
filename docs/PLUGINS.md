@@ -52,3 +52,11 @@ plugins/<name>/
 2. 在 `config.example.json` 的 `plugins` 下补占位配置；
 3. `./install.sh --with-plugin <name>`，再把 `<name>` 写进自己的 `review.channels`；
 4. 先用一次最小调用确认端点与凭证可用，再用于真实评审。
+
+## Codex 主导的 Qwen 接入
+
+Codex 的 `claude-review` skill 的源码入口 `review.py --channel qwen` 直接复用 `plugins.qwen` 配置，不经过
+`review.channels` 插件路由，也不要求安装 qwen 插件。默认通道来自
+`codex_relay.review_channel`，显式参数优先，失败不自动降级。Codex 相对
+`credential_paths` 按 `--repo` 解析；Claude 插件现有 shell 按调用 cwd 解析。
+两侧都展开 `~`，推荐绝对路径或用户级路径。
