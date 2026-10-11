@@ -13,52 +13,52 @@ import AppKit
         guard let model else { return }
         if window == nil {
             let created = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 740, height: 760), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
-            created.title = "ai-anti 设置"; created.isReleasedWhenClosed = false
+            created.title = "设置"; created.isReleasedWhenClosed = false
             created.contentView = NSHostingView(rootView: SettingsView(model: model))
             created.center(); window = created
         }
         window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
     }
-    func applicationWillTerminate(_ notification: Notification) { model?.cancel() }
+    func applicationWillTerminate(_ notification: Notification) { model?.stopBackground(); model?.cancel() }
 }
 
-@main struct AIReviewBar: App {
+@main struct AIAnti: App {
     @NSApplicationDelegateAdaptor(Delegate.self) var delegate
     @StateObject private var model = AppModel.shared
     private static let menuIcon: NSImage = {
         let image = Bundle.main.url(forResource: "MenuBarTemplate", withExtension: "png")
             .flatMap { NSImage(contentsOf: $0) }
-            ?? NSImage(systemSymbolName: "checkmark.bubble", accessibilityDescription: "ai-anti")!
+            ?? NSImage(systemSymbolName: "checkmark.bubble", accessibilityDescription: "AIAnti")!
         image.size = NSSize(width: 22, height: 22)
         image.isTemplate = true
         return image
     }()
     var body: some Scene {
         MenuBarExtra {
-            Text("当前选中配置（非运行中会话）")
-            Text(model.title)
-            Menu("主导工具") {
-                Button("Claude Code") { model.menuHost("claude") }; Button("Codex") { model.menuHost("codex") }
+            Text("当前配置：" + model.title)
+            Menu("主模型") {
+                Button("Claude Code" + (model.saved.host == "claude" ? " ✓" : "")) { model.menuHost("claude") }; Button("Codex" + (model.saved.host == "codex" ? " ✓" : "")) { model.menuHost("codex") }
             }.disabled(model.busy || model.dirty || !model.loaded)
-            Menu("首选评审") {
-                if model.saved.host == "claude" { Button("Codex") { model.menuChannel("codex") } }
-                Button("Qwen") { model.menuChannel("qwen") }
+            Menu("评审模型") {
+                if model.saved.host == "claude" { Button("Codex" + (model.saved.channel == "codex" ? " ✓" : "")) { model.menuChannel("codex") } }
+                Button("Qwen" + (model.saved.channel == "qwen" ? " ✓" : "")) { model.menuChannel("qwen") }
             }.disabled(model.busy || model.dirty || !model.loaded)
-            Menu("默认协作模式：" + (model.modes.first { $0.0 == model.saved.mode }?.1 ?? model.saved.mode)) {
-                ForEach(model.modes, id: \.0) { item in Button(item.1) { model.menuMode(item.0) } }
+            Menu("评审模式：" + model.saved.mode) {
+                ForEach(model.modes, id: \.0) { item in Button(item.0 + (model.saved.mode == item.0 ? " ✓" : "")) { model.menuMode(item.0) } }
             }.disabled(model.busy || model.dirty || !model.loaded)
             Text(model.status)
             if model.checking { Text("检测中 · \(model.elapsed) 秒"); Button("取消检测", action: model.cancel) }
             Text(model.message)
-            Button("检查配置") { model.check() }.disabled(model.busy || model.dirty || !model.loaded)
-            Button("刷新", action: model.refresh).disabled(model.busy || model.dirty)
+            Button("检查配置") { delegate.model = model; delegate.showSettings(); model.check() }.disabled(model.busy || model.dirty || !model.loaded)
+            Button("重新读取配置", action: model.refresh).disabled(model.busy || model.dirty)
+                .help("重新从磁盘读取 Claude、Codex 和 ai-anti 默认配置，不调用模型")
             Divider()
             Button("设置…") { delegate.model = model; delegate.showSettings() }.keyboardShortcut(",")
             Button("退出", action: model.quit).keyboardShortcut("q")
         } label: {
             Image(nsImage: Self.menuIcon)
                 .renderingMode(.template)
-                .accessibilityLabel("ai-anti")
+                .accessibilityLabel("AIAnti")
                 .onAppear { delegate.model = model; if CommandLine.arguments.contains("--settings") { delegate.showSettings() } }
         }
         .commands { CommandGroup(replacing: .appSettings) { Button("设置…") { delegate.model = model; delegate.showSettings() } } }
