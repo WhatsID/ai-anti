@@ -135,6 +135,16 @@ skill installation or per-project copy is required. The methods preserve authori
 and review adjudication; they do not make every task a TDD task. Behavioral validation
 is limited to recorded examples, not a claim of full multi-project coverage.
 
+`./install.sh --status --project DIR` optionally diagnoses an explicit project without
+writing it: Git root/HEAD/local-main baseline, readable project entries, effective mode,
+and global deployment-scale fallback. Missing project entries or parameters are hints,
+not damaged installation; project prose overrides still require the AI to read them.
+No project is scanned unless `--project` is supplied. Plain `--status` checks explicit
+shared sources and installed routing, not `relay`/`defaults` or full user configuration.
+It checks plugin links, not plugin metadata, credentials or channel connectivity.
+Status remains a report: exit 0 means reporting finished, not that every check passed.
+It does not prove model compliance or a complete relay. Parameter errors remain nonzero.
+
 Codex → Claude/Qwen examples:
 
 ```text

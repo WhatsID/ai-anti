@@ -39,6 +39,12 @@
 
 Codex opt-in also maintains an owned block in `${CODEX_HOME:-~/.codex}/AGENTS.md`. User bytes outside it are preserved; nonempty overrides and unsafe objects fail before installation writes. Removal follows the manifest path, not the current environment. No user config JSON or business repository is modified.
 
+Status checks an explicit bounded source list and reads installed routing without repair.
+`--project` uses timed Git plumbing (no project scripts or hooks), reads only relevant
+configuration keys, and never reads secret files or writes the project/configuration.
+The installer uses temporary scratch space; external CLI version commands may create
+CLI-owned caches, so “read-only diagnosis” does not mean zero disk activity.
+
 ## Reporting a vulnerability
 
 Use GitHub's **private vulnerability reporting** for this repository (Security tab →

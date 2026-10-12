@@ -52,6 +52,7 @@ ai-anti 用户级安装器
   ./install.sh --with-codex         安装 Codex 用户入口及 skill（claude-review、codex-relay）
   ./install.sh --without-codex      移除 Codex 入口自有块及 skill 托管链接
   ./install.sh --uninstall          按 manifest 精确卸载
+  ./install.sh --status --project DIR  可选只读项目根/模式/基线诊断
   ./install.sh --status             只报告当前安装状态与 CLI 版本，不做任何改动
   ./install.sh --help               本帮助
 
@@ -80,6 +81,8 @@ in_list() {
 }
 
 MODE=install
+ACTION=""
+PROJECT=""
 WITH_HOOK=""       # 空＝继承 manifest；1＝安装；0＝移除
 WITH_CODEX=""
 ADD_PLUGINS=""
@@ -87,8 +90,14 @@ DEL_PLUGINS=""
 INSTALL_OPTS=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --uninstall) MODE=uninstall ;;
-    --status) MODE=status ;;
+    --uninstall|--status)
+      [ -z "$ACTION" ] || [ "$ACTION" = "$1" ] || die "--status 与 --uninstall 不能同用"
+      ACTION=$1; MODE=${1#--} ;;
+    --project)
+      [ $# -ge 2 ] && [ -n "$2" ] || die "--project 需要目录"
+      [ -z "$PROJECT" ] || die "--project 只能指定一次"
+      PROJECT=$2; shift ;;
+
     --with-hook)
       [ "$WITH_HOOK" != 0 ] || die "--with-hook 与 --without-hook 不能同用"
       WITH_HOOK=1; INSTALL_OPTS=1 ;;
@@ -129,8 +138,14 @@ done <<EOF
 $ADD_PLUGINS
 EOF
 
+if [ -n "$PROJECT" ]; then
+  [ "$MODE" = status ] || die "--project 仅与 --status 同用"
+  [ -d "$PROJECT" ] && [ -r "$PROJECT" ] && [ -x "$PROJECT" ] || die "--project 目录无效或不可访问"
+  PROJECT=$(cd "$PROJECT" && pwd -P) || die "无法访问项目目录"
+fi
+
 command -v "$PY" >/dev/null 2>&1 || die "找不到 ${PY}（manifest 读写需要 python3）"
-[ -f "$GLOBAL_MD" ] || die "缺少 ${GLOBAL_MD}——仓库不完整？"
+
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/ai-anti-install.XXXXXX")
 LINKS="$WORK/links"
@@ -569,11 +584,36 @@ except (OSError, ValueError, KeyError, TypeError) as exc:
 PY
 }
 
+# Shared source contract: bounded explicit list, never follow FIFO/non-regular input.
+check_sources() {
+  "$PY" - "$REPO" "$1" <<'PY'
+import os, pathlib, stat, sys
+root = pathlib.Path(sys.argv[1])
+names = ["core/" + n + ".md" for n in ("WORKFLOW_ENTRY", "DEBUGGING", "TESTING", "REVIEW_PRINCIPLES", "CLI_DISCIPLINE")]
+names += ["adapters/claude-code/CLAUDE.global.md", "adapters/claude-code/agents/implementer.md", "adapters/claude-code/commands/codex-implement.md"]
+if sys.argv[2] == "1":
+    names += ["adapters/codex/AGENTS.global.md"] + ["adapters/codex/skills/" + n + "/SKILL.md" for n in ("claude-review", "codex-relay")]
+errors = 0
+for name in names:
+    path = root / name
+    try:
+        if not stat.S_ISREG(path.lstat().st_mode):
+            raise ValueError("not a regular file")
+        if not os.access(path, os.R_OK) or not path.read_text(encoding="utf-8").strip():
+            raise ValueError("unreadable or empty")
+    except (OSError, UnicodeError, ValueError) as exc:
+        print("错误 共享源缺口：%s (%s)" % (path, exc))
+        errors += 1
+sys.exit(bool(errors))
+PY
+}
+
 do_install() {
   prev_hook=$(manifest_field hook.injected)
   prev_codex=$(manifest_field codex_skills.installed)
   EFF_HOOK=${WITH_HOOK:-${prev_hook:-0}}
   EFF_CODEX=${WITH_CODEX:-${prev_codex:-0}}
+  check_sources "$EFF_CODEX" || die "源完整性预检失败，未做任何改动"
   resolve_plugins
   plan_links
   MANIFEST_REPO=$(manifest_field repo)
@@ -601,7 +641,7 @@ do_install() {
   settings_created=${settings_created:-0}
   check_marker_sanity "$claude_md"
   if [ "$EFF_HOOK" = "1" ]; then
-    [ -x "$HOOK_SH" ] || die "${HOOK_SH} 不存在或不可执行"
+    [ -f "$HOOK_SH" ] && [ ! -L "$HOOK_SH" ] && [ -r "$HOOK_SH" ] && [ -x "$HOOK_SH" ] || die "${HOOK_SH} 不存在或不可执行"
   fi
   if [ "$EFF_HOOK" = "1" ] || [ "$prev_hook" = "1" ]; then
     assert_settings_ok                              # 本次要注入或移除 hook
@@ -914,73 +954,203 @@ sys.exit(1 if problems else 0)
 PY
 }
 
+# Report health independently of legacy helpers: corrupt types never reach them.
+status_installation() {
+  "$PY" - "$REPO" "$CLAUDE_DIR" "$MANIFEST" "$GLOBAL_MD" "$HOOK_SH" "$HOME" "$AGENTS_SKILLS_DIR" <<'PY'
+import json, os, pathlib, shlex, stat, sys
+repo, claude, manifest, global_md, hook, home, skills = sys.argv[1:]
+errors = 0
+def error(text):
+    global errors
+    errors += 1
+    print("错误 " + text)
+def regular(path):
+    return stat.S_ISREG(pathlib.Path(path).lstat().st_mode)
+data = {}
+valid = True
+print("仓库：" + repo)
+print("用户级目录：" + claude)
+try:
+    if not os.path.lexists(manifest):
+        print("manifest：不存在（未安装）")
+        errors += 1
+    else:
+        if not regular(manifest): raise ValueError("not a regular file")
+        data = json.loads(pathlib.Path(manifest).read_text())
+        if not isinstance(data, dict): raise ValueError("root must be object")
+        if "schema_version" in data and (not isinstance(data["schema_version"], int) or isinstance(data["schema_version"], bool)): raise ValueError("schema_version type")
+        types = {"repo": str, "links": list, "created_dirs": list, "plugins": list,
+                 "claude_md": dict, "hook": dict, "codex_skills": dict}
+        for key, kind in types.items():
+            if key in data and not isinstance(data[key], kind): raise ValueError(key + " type")
+        for key in ("plugins", "created_dirs"):
+            if any(not isinstance(n, str) for n in data.get(key, [])): raise ValueError(key + " members")
+        for section, fields in (("hook", {"injected": bool, "command": (str, type(None))}),
+                                ("codex_skills", {"installed": bool, "dir": str}),
+                                ("claude_md", {"path": str, "created_by_install": bool}),
+                                ("codex_entry", {"path": str, "source": str, "created_by_install": bool, "separator_hex": str, "suffix_hex": str})):
+            node = data.get(section)
+            if node is not None:
+                if not isinstance(node, dict): raise ValueError(section + " type")
+                for key, kind in fields.items():
+                    if key in node and not isinstance(node[key], kind): raise ValueError(section + "." + key)
+        for entry in data.get("links", []):
+            if not isinstance(entry, dict) or not all(isinstance(entry.get(k), str) for k in ("path", "target")):
+                raise ValueError("link entry type")
+        print("manifest：" + manifest)
+        if data.get("schema_version") != 3 or any(k not in data for k in ("codex_skills", "plugins", "links")):
+            print("提示 legacy manifest：重跑安装升级")
+            errors += 1
+except (OSError, UnicodeError, ValueError, TypeError) as exc:
+    error("manifest 损坏：" + str(exc))
+    valid = False
+    data = {}
+if valid and data:
+    entries = {n["path"]: n["target"] for n in data.get("links", [])}
+    required = {os.path.join(claude, "agents/implementer.md"): os.path.join(repo, "adapters/claude-code/agents/implementer.md"),
+                os.path.join(claude, "commands/codex-implement.md"): os.path.join(repo, "adapters/claude-code/commands/codex-implement.md")}
+    if data.get("codex_skills", {}).get("installed"):
+        if data["codex_skills"].get("dir") != skills: error("Codex skill 目录与当前安装路径不一致")
+        for name in ("claude-review", "codex-relay"):
+            required[os.path.join(skills, name)] = os.path.join(repo, "adapters/codex/skills", name)
+    for dest, want in required.items():
+        if entries.get(dest) != want: error("托管路由未登记或目标错误：" + dest)
+    for dest, want in entries.items():
+        actual = os.path.realpath(dest)
+        if not os.path.islink(dest) or actual != os.path.realpath(want) or not actual.startswith(repo + os.sep) or not os.path.exists(actual):
+            error("托管链接目标错误/缺失：" + dest)
+        else: print("  OK   %s -> %s" % (dest, actual))
+path = pathlib.Path(claude) / "CLAUDE.md"
+try:
+    if not regular(path): raise ValueError("not a regular file")
+    text = path.read_text()
+    begin, end = "<!-- ai-anti:begin -->", "<!-- ai-anti:end -->"
+    if text.count(begin) != 1 or text.count(end) != 1 or text.index(begin) >= text.index(end):
+        raise ValueError("missing/damaged markers")
+    imported = "~/" + global_md[len(home) + 1:] if global_md.startswith(home + "/") else global_md
+    if "@" + imported not in text[text.index(begin):text.index(end)].splitlines():
+        raise ValueError("wrong import target")
+    print("CLAUDE.md 标记块：已存在（目标正确）")
+except (OSError, UnicodeError, ValueError) as exc:
+    error("CLAUDE.md 标记块：" + str(exc))
+if valid and data.get("hook", {}).get("injected"):
+    try:
+        if not regular(hook) or not os.access(hook, os.R_OK | os.X_OK): raise ValueError("hook source missing/unreadable/not executable")
+        settings_path = pathlib.Path(claude) / "settings.json"
+        if not regular(settings_path): raise ValueError("settings.json not a regular file")
+        settings = json.loads(settings_path.read_text())
+        current = shlex.quote(hook)
+        if data["hook"].get("command") != current: raise ValueError("manifest command not current source")
+        found = any(obj.get("command") == current for entry in settings.get("hooks", {}).get("SessionStart", [])
+                    if isinstance(entry, dict) for obj in entry.get("hooks", []) if isinstance(obj, dict))
+        if not found: raise ValueError("settings command missing")
+        print("SessionStart hook：已注入")
+    except json.JSONDecodeError:
+        error("SessionStart hook：settings.json 不是合法 JSON，修复后重跑")
+    except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc: error("SessionStart hook：" + str(exc))
+else: print("SessionStart hook：未注入或未验证")
+print("评审插件：" + (" ".join(data.get("plugins", [])) or "无"))
+print("提示 插件仅检查托管链接，不检查 plugin.json、配置、凭证或通道可用性")
+if valid and data.get("codex_skills", {}).get("installed"):
+    print("Codex skill：已安装（%s）" % data["codex_skills"].get("dir", ""))
+else: print("Codex skill：未安装或未验证（需要时加 --with-codex）")
+print("Codex 检查标志：%s" % ("1" if valid and data.get("codex_skills", {}).get("installed") else "0"))
+sys.exit(1 if errors else 0)
+PY
+}
+
+report_project() {
+  "$PY" - "$PROJECT" "$HOME" <<'PY'
+import json, os, pathlib, stat, subprocess, sys
+errors = 0
+def error(text):
+    global errors
+    errors += 1
+    print("错误 " + text)
+root = pathlib.Path(sys.argv[1])
+env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+env["GIT_OPTIONAL_LOCKS"] = "0"
+def git(*args):
+    return subprocess.run(["git", "-C", str(root), *args], env=env, timeout=5,
+                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+try:
+    result = git("rev-parse", "--show-toplevel")
+    if result.returncode == 0:
+        root = pathlib.Path(result.stdout.strip()).resolve()
+        def revision(name):
+            check = git("rev-parse", "--verify", "--quiet", name)
+            if check.returncode == 0: return True
+            if check.returncode == 1 and not check.stderr.strip(): return False
+            return None
+        head, main = revision("HEAD"), revision("refs/heads/main")
+        print("Git：%s；local main：%s" % ("已有 HEAD" if head else "无 HEAD" if head is False else "HEAD 未验证",
+                                                   "存在" if main else "缺失" if main is False else "未验证"))
+        if head is False or main is False: print("提示 完整接力缺少基线，不自动初始化或提交")
+        if head is None or main is None: print("提示 Git 引用检测失败，未验证")
+    elif "not a git repository" in result.stderr:
+        print("Git：非 Git 目录；提示 完整接力缺少基线")
+    else: print("提示 Git 检测失败，未验证")
+except (OSError, subprocess.TimeoutExpired, UnicodeError): print("提示 Git 不可用/超时，未验证")
+print("项目根：" + str(root))
+for name in ("AGENTS.md", "CLAUDE.md"):
+    path = root / name
+    if not os.path.lexists(path): print("提示 项目入口 %s 缺失：小任务可用已有平台默认" % name)
+    else:
+        try:
+            if not stat.S_ISREG(path.stat().st_mode) or not os.access(path, os.R_OK): raise ValueError()
+            path.read_text()
+            print("项目入口 %s：可读；正文覆写需 AI 读取" % name)
+        except (OSError, UnicodeError, ValueError): error("项目入口 %s 不可读/不安全" % name)
+config = pathlib.Path(sys.argv[2]) / ".config/ai-anti/config.json"
+data, config_error = {}, None
+try:
+    if os.path.lexists(config):
+        if not stat.S_ISREG(config.stat().st_mode): raise ValueError("config not regular")
+        data = json.loads(config.read_text())
+        if not isinstance(data, dict): raise ValueError("config root type")
+except (OSError, UnicodeError, ValueError) as exc:
+    config_error = str(exc)
+    error("全局配置无法读取：" + config_error)
+modepath = root / ".claude/relay-mode.local"
+try:
+    if os.path.lexists(modepath):
+        if not stat.S_ISREG(modepath.stat().st_mode): raise ValueError("project mode not regular")
+        mode, source = modepath.read_text().strip(), "项目模式文件"
+    else:
+        if config_error: raise ValueError("global config unavailable")
+        relay = data.get("relay", {})
+        if not isinstance(relay, dict): raise ValueError("relay type")
+        mode = relay.get("default_mode", "rules")
+        source = "全局默认" if "default_mode" in relay else "内置默认"
+    if mode not in ("solo", "auto", "rules", "force"): raise ValueError("invalid mode")
+    print("协作模式：%s（来源：%s）" % (mode, source))
+except (OSError, UnicodeError, ValueError, TypeError): error("协作模式无效或不可读；合法值 solo/auto/rules/force，未回落默认")
+try:
+    if config_error: raise ValueError("global config unavailable")
+    defaults = data.get("defaults", {})
+    if not isinstance(defaults, dict): raise ValueError("defaults type")
+    scale = defaults.get("deployment_scale")
+    if scale is not None and (not isinstance(scale, str) or not scale.strip()): raise ValueError("deployment_scale type/value")
+    print("部署规模 fallback：" + (scale or "未声明部署规模"))
+except ValueError as exc: error("全局部署规模无法确认：" + str(exc))
+print("提示 仅显示全局/内置 fallback，项目正文覆写需 AI 读取；当次用户指令可覆盖报告模式")
+print("边界：可供新会话加载，不证明模型遵循、通道联网或完整接力；不执行项目脚本")
+sys.exit(bool(errors))
+PY
+}
+
 do_status() {
   problems=0
-  echo "仓库：$REPO"
-  echo "用户级目录：$CLAUDE_DIR"
-  if [ -f "$MANIFEST" ]; then
-    echo "manifest：${MANIFEST}（updated_at=$(manifest_field updated_at)）"
-    manifest_links > "$WORK/tolink"
-    while IFS= read -r dest; do
-      [ -n "$dest" ] || continue
-      if [ -L "$dest" ]; then
-        current=$(link_target "$dest" || true)
-        if [ -n "$current" ] && inside_dir "$current" "$REPO" && [ -e "$current" ]; then
-          echo "  OK   $dest -> $current"
-        elif [ -n "$current" ] && inside_dir "$current" "$REPO"; then
-          echo "  悬空 $dest -> ${current}（重跑安装刷新）"
-          problems=$((problems + 1))
-        else
-          echo "  外部 $dest -> $current"
-          problems=$((problems + 1))
-        fi
-      elif [ -e "$dest" ]; then
-        echo "  占用 ${dest}（不是符号链接）"
-        problems=$((problems + 1))
-      else
-        echo "  缺失 $dest"
-        problems=$((problems + 1))
-      fi
-    done < "$WORK/tolink"
-  else
-    echo "manifest：不存在（未安装）"
-    problems=$((problems + 1))
-  fi
-  if [ -f "$CLAUDE_DIR/CLAUDE.md" ] && grep -Fq "$MARKER_BEGIN" "$CLAUDE_DIR/CLAUDE.md"; then
-    echo "CLAUDE.md 标记块：已存在"
-  else
-    echo "CLAUDE.md 标记块：不存在"
-    problems=$((problems + 1))
-  fi
-  if [ "$(manifest_field hook.injected)" = "1" ]; then
-    hook_state=$(hook_tool check || true)
-    if [ "$hook_state" = present ]; then
-      echo "SessionStart hook：已注入"
-    elif [ "$hook_state" = invalid ]; then
-      echo "SessionStart hook：settings.json 不是合法 JSON，修复后重跑"
-      problems=$((problems + 1))
-    else
-      echo "SessionStart hook：manifest 记为已注入，但 settings.json 中找不到（重跑 --with-hook）"
-      problems=$((problems + 1))
-    fi
-  else
-    echo "SessionStart hook：未注入"
-  fi
-  plugins=$(manifest_list plugins | tr '\n' ' ')
-  echo "评审插件：${plugins:-无}"
-  if [ "$(manifest_field codex_skills.installed)" = "1" ]; then
-    codex_entry status || problems=$((problems + 1))
-    echo "Codex skill：已安装（$(manifest_field codex_skills.dir)）"
-  else
-    echo "Codex skill：未安装（需要时加 --with-codex）"
-  fi
+  installation_report=$(status_installation) || problems=$((problems + 1))
+  printf '%s\n' "$installation_report" | sed '/^Codex 检查标志:/d'
+  codex=0
+  if printf '%s\n' "$installation_report" | grep -Fxq "Codex 检查标志：1"; then codex=1; fi
+  check_sources "$codex" || problems=$((problems + 1))
+  if [ "$codex" = 1 ]; then codex_entry status || problems=$((problems + 1)); fi
   echo "CLI 版本（实测清单 compat.json）："
   report_versions || problems=$((problems + 1))
-  if [ "$problems" = 0 ]; then
-    echo "状态：全部正常"
-  else
-    echo "状态：有 ${problems} 项需要留意"
-  fi
+  if [ -n "$PROJECT" ]; then report_project || problems=$((problems + 1)); else echo "提示 plain --status 不解析 relay/defaults；需要时加 --project DIR"; fi
+  if [ "$problems" = 0 ]; then echo "状态：全部正常"; else echo "状态：有 ${problems} 项需要留意"; fi
 }
 
 case "$MODE" in

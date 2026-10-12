@@ -22,6 +22,10 @@
 先用 `git rev-parse --show-toplevel` 定位项目根；非 Git 目录才回落当前目录。
 模式文件相对项目根定位，不从启动子目录猜测。
 
+新项目缺入口或参数时沿用已有平台默认，不虚构项目状态或风险配置。
+完整接力仍需要 Git/local main 基线，不通过未授权初始化或提交凑前提。
+需要时可用 `install.sh --status --project DIR` 只读查看，不要求每项任务必跑。
+
 ## 协作模式开关
 
 - 模式优先级：用户当前消息里的明确指令（「直接改」「走流程」「跳过评审」）> 仓库根 `.claude/relay-mode.local`（单行 `solo` / `auto` / `rules` / `force`）> 用户级 `~/.config/ai-anti/config.json` 的 `relay.default_mode` > 内置 `rules`。Claude Code 可用 `/relay-mode` 查看来源或切换项目模式；当次指令仅对当次任务生效。项目文件存在但不可读或无效、全局 JSON 损坏、配置根对象或 relay 节类型无效、或模式类型/值无效时停止并明确报错，不静默回落。菜单栏修改的是全局默认，不能覆盖已有项目模式。
