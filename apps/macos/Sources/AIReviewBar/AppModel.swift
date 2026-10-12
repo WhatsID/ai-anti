@@ -28,7 +28,7 @@ struct Draft: Equatable {
     var reviewerModel = ""
     var qwenModel = ""
     var secondaryModel = ""
-    var mode = "required"
+    var mode = "rules"
     var baseURL = ""
     var secret = ""
     var dictionary: [String: Any] { ["host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "mode": mode, "base_url": baseURL] }
@@ -62,8 +62,27 @@ struct Draft: Equatable {
     private var inspectGeneration = 0
     private var timer: Timer?
     var dirty: Bool { draft != saved }
-    var title: String { "\(saved.host == "claude" ? "Claude" : "Codex") → \(saved.channel.capitalized)" }
-    let modes = [("solo", "独立完成"), ("auto", "自动判断"), ("required", "按规模评审"), ("force", "始终评审")]
+    var reviewFamily: String { ModelCatalog.family(channel: draft.channel, apiModel: draft.qwenModel) }
+    var savedReviewFamily: String { ModelCatalog.family(channel: saved.channel, apiModel: saved.qwenModel) }
+    var title: String { "\(saved.host == "claude" ? "Claude" : "Codex") → \(ModelCatalog.title(savedReviewFamily))" }
+    var primaryOptions: [ModelOption] { ModelCatalog.options(draft.host, preserving: [defaults[draft.host] ?? "", draft.host == saved.host ? saved.primaryModel : "", draft.primaryModel], emptyLabel: "保留当前默认值") }
+    var secondaryOptions: [ModelOption] { ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定") }
+    var reviewerOptions: [ModelOption] {
+        let codex = reviewFamily == "codex"
+        let original = codex ? saved.reviewerModel : saved.qwenModel
+        let originalFamily = codex ? "codex" : ModelCatalog.family(channel: "qwen", apiModel: saved.qwenModel)
+        let current = codex ? draft.reviewerModel : draft.qwenModel
+        return ModelCatalog.options(reviewFamily, preserving: [originalFamily == reviewFamily ? original : "", current],
+                                    emptyLabel: codex ? "CLI 默认" : current.isEmpty ? "请选择模型" : nil)
+    }
+    func switchReviewFamily(_ family: String) {
+        guard !busy, loaded, family != reviewFamily else { return }
+        guard ["codex", "qwen", "deepseek"].contains(family), !(draft.host == "codex" && family == "codex") else { return }
+        draft.channel = family == "deepseek" ? "qwen" : family
+        if family == "deepseek" { draft.qwenModel = ModelCatalog.deepseek[0] }
+        if family == "qwen" { draft.qwenModel = ModelCatalog.qwen[0] }
+    }
+    let modes = [("solo", "独立完成"), ("auto", "自动判断"), ("rules", "按规模评审"), ("force", "始终评审")]
     init(foreground: AppRequesting? = nil, background: AppRequesting? = nil, automatic: Bool = true) {
         self.foreground = foreground ?? BridgeClient(); self.background = background ?? BridgeClient()
         if automatic {
@@ -104,7 +123,7 @@ struct Draft: Equatable {
         if checked {
             elapsed = 0
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in Task { @MainActor in self?.elapsed += 1 } }
-            message = payload["action"] as? String == "real" ? "合成检测进行中；Qwen 可能需要 10–20 分钟，可取消。" : "正在进行本地检查…"
+            message = payload["action"] as? String == "real" ? "合成检测进行中；兼容 API 可能需要 10–20 分钟，可取消。" : "正在进行本地检查…"
         }
         foreground.start(payload) { [weak self] result in
                 guard let self else { return }
@@ -125,9 +144,11 @@ struct Draft: Equatable {
                         self.status = (data["message"] as? String ?? "检测完成") + "\n" + (data["checked_at"] as? String ?? "") + " · 实际模型：" + (data["actual_model"] as? String ?? "未知")
                         self.message = "检测完成，用时 \(self.elapsed) 秒"
                     } else {
+                        let menuAPI = self.menuSaving && self.draft.channel == "qwen"
                         self.menuSaving = false
                         self.apply(data)
                         self.message = payload["action"] as? String == "load" ? "已读取默认配置" : "配置已回读确认；用于后续启动或调用"
+                        if menuAPI { self.message += "；请确认服务地址和密钥支持所选模型" }
                     }
                 }
         }
@@ -165,12 +186,17 @@ struct Draft: Equatable {
         } else { NSApplication.shared.terminate(nil) }
     }
     func switchHost(_ host: String) {
-        guard !dirty else { message = "请先保存或放弃草稿，再切换主模型"; return }
+        guard !busy, loaded, !dirty else { message = "请先保存或放弃草稿，再切换主模型"; return }
         draft.host = host; draft.primaryModel = defaults[host] ?? ""
         draft.channel = channels[host] ?? (host == "codex" ? "qwen" : "codex")
     }
     func menuHost(_ host: String) { switchHost(host); if draft.host == host && !busy { menuSaving = true; save() } }
-    func menuChannel(_ channel: String) { guard !dirty else { message = "设置草稿尚未保存"; return }; draft.channel = channel; menuSaving = true; save() }
+    func menuChannel(_ family: String) {
+        guard !busy, loaded, !dirty else { message = "设置草稿尚未保存或配置忙碌"; return }
+        switchReviewFamily(family)
+        guard dirty else { return }
+        menuSaving = true; save()
+    }
     func menuMode(_ mode: String) { guard !dirty else { message = "设置草稿尚未保存"; return }; draft.mode = mode; menuSaving = true; save() }
     func discard() { draft = saved }
 }

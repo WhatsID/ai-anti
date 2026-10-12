@@ -37,21 +37,23 @@ implementation.
 ## Four relay modes
 
 - **solo**: the relay is disabled; the primary model does all the work.
-- **required** (default): fixed rules decide whether a task goes through the relay — a new feature
+- **auto**: the rules mode criteria are only guidance; the primary model decides whether a task is worth
+  the relay. For example, many files changed by a mechanical replacement can be done directly,
+  while a single file with subtle logic can still go through the relay. More flexible, but the
+  outcome depends on the model's judgment at the time.
+- **rules** (default): fixed rules decide whether a task goes through the relay — a new feature
   or module, an expected change to 3 or more production files that affect runtime behavior (tests
   and pure docs do not count), a change spanning two or more top-level subsystems, or a vague
   request that needs a plan first. Any one of these triggers the relay; everything else is done
   directly. The same change is always handled the same way, so the outcome is predictable.
-- **auto**: the rules above are only guidance; the primary model decides whether a task is worth
-  the relay. For example, many files changed by a mechanical replacement can be done directly,
-  while a single file with subtle logic can still go through the relay. More flexible, but the
-  outcome depends on the model's judgment at the time.
 - **force**: every substantive task goes through the relay.
 
-In both required and auto, tasks that hit a high-risk trigger (changes to the relay mechanism
+In both rules and auto, tasks that hit a high-risk trigger (changes to the relay mechanism
 itself, plus whatever a project lists in its own `CLAUDE.md`, such as database schema,
 deployment, or authentication) must go through the relay; the two modes differ only on ordinary
 tasks.
+
+Only `solo`, `auto`, `rules`, `force` are accepted; the former `required` value is invalid.
 
 Switch modes with the `/relay-mode` command.
 

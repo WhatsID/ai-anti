@@ -29,7 +29,7 @@
     }
   },
   "relay": {
-    "default_mode": "required"
+    "default_mode": "rules"
   },
   "desktop": {
     "primary_host": "claude"

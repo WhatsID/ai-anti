@@ -117,7 +117,7 @@ check has "$C/CLAUDE.md" "@$CHECKOUT/adapters/claude-code/CLAUDE.global.md"
 cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$C/settings.json")
 mkdir -p "$BASE/case-$CASES/cwd"
 hook_out=$(cd "$BASE/case-$CASES/cwd" && /bin/sh -c "$cmd" 2>&1)
-check test "$hook_out" = "[接力协作模式] required（来源：内置默认）——solo/required/auto/force 语义见 CLAUDE.global.md「协作模式开关」节"
+check test "$hook_out" = "[接力协作模式] rules（来源：内置默认）——solo/auto/rules/force 语义见 CLAUDE.global.md「协作模式开关」节"
 check inst
 assert_full_install
 check inst --status

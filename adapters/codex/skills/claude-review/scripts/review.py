@@ -18,6 +18,7 @@ from review_runner import MODEL_FAMILIES, RunError, capability, run_stage
 from ai_anti_config import ConfigError, load as load_config, model_families
 from review_channels import resolve, evidence, child_environment
 from review_chunks import chunk_stage, chunk_file, required_files, source_labels
+from review_materials import build_registry, mcp_config
 
 ROOT = Path(__file__).resolve().parents[5]
 CORE = ROOT / "core" / "REVIEW_PRINCIPLES.md"
@@ -85,15 +86,28 @@ def require_full_reads(result, required, sources):
             labels.get(name, name) for name in missing), "incomplete_reads")
 
 
-def make_prompt(mode, required, rules, scale, sources):
+def make_prompt(mode, required, rules, scale, sources, registry=None):
     lines = [
         "你是独立的跨模型评审者。",
         "只读下列材料。先用 Read 完整读取 Required Read files 的每个文件及块（包括尾空行），不能省略任何块。Grep/Glob 不能替代 Read。按来源映射的顺序拼读分块；块本身无额外标题。不要尝试 shell、写入或越界。",
+        "直接照抄下列短相对路径。仅材料目录内 Read 缺文件可纠正，每阶段累计最多三次；必须随后成功读取必读文件并完整读完全部材料。不得猜读外部路径。",
         "Required Read files: " + json.dumps(required, ensure_ascii=False),
         "Source mapping: " + json.dumps(sources, ensure_ascii=False),
         "项目部署规模：" + scale,
         rules,
     ]
+    if registry is not None:
+        labels = []
+        for mid, item in registry['materials'].items():
+            source_name, block = next((name, block) for name, source in sources.items()
+                                      for block in source['blocks'] if block['path'] == item['path'])
+            labels.append({'id': mid, 'source': source_name,
+                           'start_line': block['start_line'], 'end_line': block['end_line']})
+        lines = [lines[0],
+            '先用 mcp__materials__read_material 完整读取每个必读编号，参数只能是 {"id":"编号"}。逐块按顺序阅读，包括尾空行。来源路径仅为评审位置标签，不能用作工具参数；不得尝试 shell、写入或任意文件访问。',
+            'Required material IDs: ' + json.dumps(list(registry['materials'])),
+            'Material source mapping: ' + json.dumps(labels, ensure_ascii=False),
+            '项目部署规模：' + scale, rules]
     if mode == "inventory":
         lines.append("先读 request 与冻结源码，不读方案。仅输出中文独立改动/检查清单。")
     elif mode == "plan":
@@ -117,7 +131,7 @@ def parser(families=None):
     result.add_argument("--model", choices=sorted(families or MODEL_FAMILIES), default=None)
     result.add_argument("--timeout", type=int, default=None)
     result.add_argument("--idle-timeout", type=int, default=300)
-    result.add_argument("--max-output-bytes", type=int, default=2 * 1024 * 1024)
+    result.add_argument("--max-output-bytes", type=int, default=None)
     result.add_argument("--prepare-only", action="store_true")
     return result
 
@@ -216,13 +230,23 @@ def main():
         repo = git_root(args.repo)
         channel = resolve(config, args.channel, args.model, repo, families)
         args.timeout = args.timeout if args.timeout is not None else (1800 if channel["channel"] == "qwen" else 600)
+        args.max_output_bytes = args.max_output_bytes if args.max_output_bytes is not None else (8 if channel["channel"] == "qwen" else 2) * 1024 * 1024
         check_arguments(args, argument_parser)
         output = safe_out(args.out, repo)
         output, logs, inventory, review, manifest, files, context = prepare(args, repo, output, coretext, families, channel)
         initial_mode = "inventory" if args.mode == "plan" else "diff"
         initial_sources = manifest["sources"]["inventory" if args.mode == "plan" else "review"]
         initial_required = required_files(initial_sources)
-        initial_prompt = make_prompt(initial_mode, initial_required, rules, args.scale, initial_sources)
+        initial_stage = inventory if args.mode == 'plan' else review
+        initial_registry_path = None
+        initial_registry = None
+        manifest['material_transport'] = 'material_ids' if channel['channel'] == 'qwen' else 'filesystem_read'
+        if channel['channel'] == 'qwen':
+            initial_registry_path = logs / (initial_stage.name + '.registry.json')
+            initial_registry = build_registry(initial_stage, initial_sources, initial_registry_path)
+            manifest['material_registries'] = {initial_stage.name: initial_registry}
+            write_json(logs / (initial_stage.name + '.mcp.json'), mcp_config(initial_registry_path))
+        initial_prompt = make_prompt(initial_mode, initial_required, rules, args.scale, initial_sources, initial_registry)
         prompt_name = "inventory.prompt.txt" if args.mode == "plan" else "review.prompt.txt"
         (logs / prompt_name).write_text(initial_prompt, encoding="utf-8")
         manifest["prompt_sha256"] = {prompt_name: sha(initial_prompt.encode("utf-8"))}
@@ -230,7 +254,7 @@ def main():
         if args.prepare_only:
             manifest["status"] = "prepared"
             write_json(output / "manifest.json", manifest)
-            write_json(output / "status.json", {"status": "prepared", "completed": False, "out": str(output), **evidence(channel)})
+            write_json(output / "status.json", {"status": "prepared", "completed": False, "out": str(output), "material_transport": manifest["material_transport"], **evidence(channel)})
             print(output)
             return 0
         env = child_environment(channel)
@@ -239,7 +263,7 @@ def main():
         claude = shutil.which("claude")
         if not claude:
             raise RunError("claude not found on PATH")
-        manifest["capabilities"] = capability(claude, logs, env=env)
+        manifest["capabilities"] = capability(claude, logs, env=env, material_config=mcp_config(initial_registry_path) if initial_registry_path else None)
         manifest["cli_version"] = manifest["capabilities"]["cli_version"]
         warning = compat_warning(manifest["cli_version"])
         if warning:
@@ -250,40 +274,51 @@ def main():
         write_json(output / "manifest.json", manifest)
         if args.mode == "plan":
             inventory_required = initial_required
-            first = run_stage(claude, inventory, initial_prompt, logs / "inventory.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected)
+            first = run_stage(claude, inventory, initial_prompt, logs / "inventory.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected, required=source_labels(initial_sources), registry_path=initial_registry_path)
             require_full_reads(first, inventory_required, initial_sources)
             if snapshot_hashes(inventory) != manifest["snapshots"]["inventory"]:
                 raise RunError("inventory snapshot changed during review")
             manifest["stages"]["inventory"] = {k: v for k, v in first.items() if k not in ("result", "complete_reads")}
             manifest["inventory_sha256"] = sha(first["result"].encode("utf-8"))
             (review / "inventory.md").write_text(first["result"], encoding="utf-8")
-            manifest["sources"]["review"]["inventory.md"] = chunk_file(review, "inventory.md")
+            manifest["sources"]["review"]["inventory.md"] = chunk_file(review, "inventory.md", len(manifest["sources"]["review"]) + 1)
             manifest["snapshots"]["review"] = snapshot_hashes(review)
             write_json(output / "manifest.json", manifest)
             review_sources = manifest["sources"]["review"]
             review_required = required_files(review_sources)
-            review_prompt = make_prompt("plan", review_required, rules, args.scale, review_sources)
+            review_registry_path = None
+            review_registry = None
+            if channel['channel'] == 'qwen':
+                review_registry_path = logs / 'review.registry.json'
+                review_registry = build_registry(review, review_sources, review_registry_path)
+                manifest['material_registries']['review'] = review_registry
+                write_json(logs / 'review.mcp.json', mcp_config(review_registry_path))
+            review_prompt = make_prompt("plan", review_required, rules, args.scale, review_sources, review_registry)
             manifest["prompt_sha256"]["review.prompt.txt"] = sha(review_prompt.encode("utf-8"))
             write_json(output / "manifest.json", manifest)
-            second = run_stage(claude, review, review_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected)
+            second = run_stage(claude, review, review_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected, required=source_labels(review_sources), registry_path=review_registry_path)
             require_full_reads(second, review_required, review_sources)
             report = "# 独立清单（原样）\n\n" + first["result"] + "\n\n# 方案评审\n\n" + second["result"]
         else:
             required = initial_required
-            second = run_stage(claude, review, initial_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected)
+            second = run_stage(claude, review, initial_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected, required=source_labels(initial_sources), registry_path=initial_registry_path)
             require_full_reads(second, required, initial_sources)
             report = second["result"]
         if snapshot_hashes(review) != manifest["snapshots"]["review"]:
             raise RunError("review snapshot changed during review")
         manifest["stages"]["review"] = {k: v for k, v in second.items() if k not in ("result", "complete_reads")}
-        if warnings:
-            report = "".join("> 警告：" + item + "\n" for item in warnings) + "\n" + report
+        read_recoveries = {stage: item["read_recoveries"] for stage, item in manifest["stages"].items()}
+        recovery_warnings = [stage + " 阶段已纠正 " + str(len(items)) + " 次 Read 缺文件错误"
+                             for stage, items in read_recoveries.items() if items]
+        if warnings or recovery_warnings:
+            report = "".join("> 警告：" + item + "\n" for item in warnings + recovery_warnings) + "\n" + report
         (output / "report.md").write_text(report, encoding="utf-8")
         manifest.update({"status": "completed", "actual_model": second["model"], "exit_reason": "verified result", "finished_at": time.time()})
         write_json(output / "manifest.json", manifest)
         write_json(output / "status.json", {"status": "completed", "completed": True, "out": str(output),
                                             "warnings": warnings, **evidence(channel), "actual_model": second["model"],
-                                            "limits": manifest["limits"]})
+                                            "limits": manifest["limits"], "material_transport": manifest["material_transport"], "read_recoveries": read_recoveries,
+                                            "read_recovery_counts": {stage: len(items) for stage, items in read_recoveries.items()}})
         print(output)
         return 0
     except (MaterialError, RunError, OSError, ValueError, TypeError, KeyboardInterrupt) as exc:

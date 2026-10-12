@@ -10,7 +10,7 @@ import tempfile
 import tomllib
 from urllib.parse import urlsplit
 
-MODES = ('solo', 'required', 'auto', 'force')
+MODES = ('solo', 'auto', 'rules', 'force')
 class StoreError(Exception):
     pass
 
@@ -129,9 +129,9 @@ class Store:
             raise StoreError('Codex TOML 损坏') from None
         review, relay, plugins, desktop = (section(ai, k) for k in ('review', 'codex_relay', 'plugins', 'desktop'))
         qwen = section(plugins, 'qwen')
-        mode_value = section(ai, 'relay').get('default_mode', 'required')
+        mode_value = section(ai, 'relay').get('default_mode', 'rules')
         if mode_value not in MODES:
-            raise StoreError('全局协作模式无效')
+            raise StoreError('全局协作模式无效；合法值：' + '/'.join(MODES))
         channels = review.get('channels', ['codex', 'same-family'])
         if not isinstance(channels, list) or not all(isinstance(x, str) for x in channels):
             raise StoreError('review.channels 必须为字符串列表')
@@ -219,7 +219,7 @@ class Store:
         if host not in ('claude', 'codex') or values.get('channel') not in (('codex', 'qwen') if host == 'claude' else ('qwen',)):
             raise StoreError('首期支持 Claude→Codex、Claude→Qwen、Codex→Qwen')
         if values.get('mode') not in MODES:
-            raise StoreError('协作模式无效')
+            raise StoreError('协作模式无效；合法值：' + '/'.join(MODES))
         for key in ('primary_model', 'secondary_model', 'reviewer_model', 'qwen_model'):
             model(values.get(key), optional=True)
         if values['channel'] == 'qwen':
@@ -352,4 +352,9 @@ class Store:
             outputs = {k: bytes.fromhex(v) if v is not None else None for k,v in before.items()}
         except (ValueError, TypeError):
             raise StoreError('恢复记录损坏') from None
+        if outputs.get('ai') is not None:
+            restored_ai = object_json(outputs['ai'])
+            restored_mode = section(restored_ai, 'relay').get('default_mode', 'rules')
+            if restored_mode not in MODES:
+                raise StoreError('恢复记录协作模式无效；合法值：' + '/'.join(MODES) + '；请先完成一次新保存以刷新恢复点')
         return self.transaction(outputs, expected, restoring=True)

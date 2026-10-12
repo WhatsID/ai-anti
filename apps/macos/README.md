@@ -1,7 +1,7 @@
 # AIAnti 菜单栏应用
 
 首期为本机菜单栏与小设置窗口，管理配置和检测。业务评审继续从 Claude Code / Codex 发起。
-支持 Claude→Codex、Claude→Qwen、Codex→Qwen；既有 Codex→Claude 配置可读取，不加入首期新选列表。
+支持 Claude→Codex、Claude→Qwen/DeepSeek、Codex→Qwen/DeepSeek；既有 Codex→Claude 配置可读取，不加入首期新选列表。
 
 ## 本地构建
 
@@ -35,7 +35,7 @@ Claude/Codex CLI 的发现同样覆盖 `/opt/homebrew/bin` 和 `/usr/local/bin`�
 需要点击免费“检查配置”才验证凭证可解析。菜单入口会打开设置窗口，持续显示进度、耗时与结果。
 “重新读取配置”从磁盘读取 Claude、Codex 和 ai-anti 默认配置，不调用模型；设置中有草稿时确认放弃。
 后台每 5 秒静默检查文件指纹，不禁用设置窗口；外部变化使检测失效，字段需手动重新读取。真实“测试评审模型”会消耗额度，必须手动确认；
-Qwen 可能需要 10–20 分钟，显示耗时并支持取消。只用临时合成仓库，不读取业务材料，不重试、不降级。
+兼容 API 可能需要 10–20 分钟，显示耗时并支持取消。只用临时合成仓库，不读取业务材料，不重试、不降级。
 本地检查不证明登录、额度、模型可调用或版本完整兼容；真实成功也只证明当次合成检测。
 Qwen 使用现有正式 `review.py diff --channel qwen` 全部门禁；Codex 需要支持隔离检测参数的新版本，
 验证 JSON 最终 turn 与随机合成文件读取得到的值，不能只凭退出码为零。实际模型没有结构化证据则标“未知”。
@@ -43,9 +43,16 @@ Qwen 使用现有正式 `review.py diff --channel qwen` 全部门禁；Codex 需
 
 保存只改用户默认值，当前会话不会切换；项目模式、命令行、会话覆盖仍可能优先。
 主模型选项决定编辑哪组默认配置，不切换当前会话。项目模式优先于全局默认；solo 同时关闭交叉评审及独立实施。
+仅接受 `solo`、`auto`、`rules`、`force`；旧值 `required` 无效，不作兼容。
+
 Codex 全局模式仅在加载 codex-relay 的工作流中生效。Claude 首选通道放首位，其他回退档位保留顺序。
 空主模型表示保留已有值，保存后以回读值显示；空 Codex 评审模型恢复 CLI 默认（真实检测需明确 ID）。
-已有主/实施模型不自动替换，用户可编辑任意合法 ID；新 ID 显示未验证。
+主模型 ID、实施模型 ID、评审模型 ID 使用固定目录下拉；主模型可保留当前默认值，Codex 评审可选 CLI 默认，实施模型可选未指定；API 模型必须选择 ID。
+已有目录外 ID 作为“已有配置”只读选项保留，切换家族再回来仍可选回加载原值。
+目录包含 Claude、Codex、Qwen 与 DeepSeek，选项不代表可调用性验证。DeepSeek 复用现有兼容 API 执行器，
+持久化仍为 `channel=qwen` 与 `plugins.qwen.model`，没有新增配置字段。服务地址与密钥不会自动改变，
+须使用所选模型所属入口的 Anthropic 兼容地址；菜单切换后提示确认支持情况。DeepSeek 尚未进行实际外部调用测试。
+“取消”仅放弃草稿；检测中的“取消检测”取消检测进程。
 
 密钥输入留空保留现状。新密钥写 `~/.config/ai-anti/secrets.json` 的 `tokenplan.value`，0600受限明文，
 不是钥匙串；原其他键保留，用户级凭证路径提升到首位。桌面仅检查 `~/` 或绝对凭证路径，拒绝 `..` 及意外 symlink。
@@ -66,13 +73,14 @@ AppModel 状态验收使用可手动完成请求的 fake client，不调用 Pyth
 ```bash
 mkdir -p /private/tmp/ai-anti-app-checks
 swiftc -parse-as-library -module-cache-path /private/tmp/ai-anti-app-checks/module-cache \
+  apps/macos/Sources/AIReviewBar/ModelCatalog.swift \
   apps/macos/Sources/AIReviewBar/AppModel.swift \
   apps/macos/Sources/AIReviewBar/Bridge.swift apps/macos/AppModelChecks.swift \
   -o /private/tmp/ai-anti-app-checks/AppModelChecks
 /private/tmp/ai-anti-app-checks/AppModelChecks
 ```
 
-覆盖静默检查不发布 UI、单请求门禁、前台优先、过期成功/失败、草稿保护、保存回读、取消与退出清理。
+覆盖模型目录、已保存未知 ID 保留、API 家族切换与保存回读、静默检查不发布 UI、单请求门禁、前台优先、过期成功/失败、草稿保护、保存回读、取消与退出清理。
 
 
 ```bash

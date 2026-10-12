@@ -150,12 +150,36 @@ class ThinReviewTests(unittest.TestCase):
         r, out = self.run_review(extra=['--prepare-only'])
         self.assert_success(r, out, 'prepared')
         self.assertFalse(self.calls())
+        paths = [b['path'] for source in self.manifest(out)['sources']['review'].values() for b in source['blocks']]
+        self.assertTrue(all(__import__('re').fullmatch(r'chunks/[0-9]{3,}/[0-9]{3,}\.txt', path) for path in paths))
+        self.assertEqual(len(paths), len(set(paths)))
         prompt = (out / "logs/review.prompt.txt").read_text()
         self.assertIn("## R5｜增量（diff）评审", prompt)
         self.assertEqual(out.stat().st_mode & 0o777, 0o700)
         r2, _ = self.run_review(extra=['--prepare-only'], out=out)
         self.assertNotEqual(r2.returncode, 0)
         self.assertEqual(json.loads((out / 'status.json').read_text())['status'], 'prepared')
+
+    def test_read_recovery_status_report_and_per_stage_budget(self):
+        r, out = self.run_review('plan', fake='recover_3', env_extra={'FAKE_VERSION': '9.9.9 (fixture)'})
+        self.assert_success(r, out)
+        manifest = self.manifest(out)
+        status = json.loads((out / 'status.json').read_text())
+        self.assertEqual(status['read_recovery_counts'], {'inventory': 3, 'review': 3})
+        for stage in ('inventory', 'review'):
+            self.assertEqual(manifest['stages'][stage]['read_recovery_count'], 3)
+            self.assertEqual(status['read_recoveries'][stage], manifest['stages'][stage]['read_recoveries'])
+            self.assertEqual(manifest['stages'][stage]['transport_warnings'], [])
+        report = (out / 'report.md').read_text()
+        self.assertLess(report.index(status['warnings'][0]), report.index('inventory 阶段已纠正'))
+        self.assertIn('review 阶段已纠正 3 次', report)
+        r, out = self.run_review(fake='recover_4')
+        self.assertNotEqual(r.returncode, 0)
+        self.assertFalse((out / 'report.md').exists())
+        r, out = self.run_review()
+        self.assert_success(r, out)
+        self.assertEqual(json.loads((out / 'status.json').read_text())['read_recovery_counts'], {'review': 0})
+        self.assertNotIn('已纠正', (out / 'report.md').read_text())
 
     def test_fable_model_selection(self):
         r, out = self.run_review(extra=['--model', 'fable'])

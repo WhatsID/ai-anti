@@ -24,7 +24,7 @@ class DesktopContract(unittest.TestCase):
     def hook(self):
         return subprocess.run(['bash',str(ROOT/'adapters/claude-code/hooks/session-start.sh')],cwd=self.repo,env=self.env,capture_output=True,text=True)
     def test_mode_defaults_and_global_and_project(self):
-        value=self.hook(); self.assertEqual(value.returncode,0); self.assertIn('required（来源：内置默认）',value.stdout)
+        value=self.hook(); self.assertEqual(value.returncode,0); self.assertIn('rules（来源：内置默认）',value.stdout)
         store=Store(self.root); atomic(store.paths['ai'],b'{"relay":{"default_mode":"solo"}}')
         value=self.hook(); self.assertIn('solo（来源：全局默认）',value.stdout)
         (self.repo/'.claude').mkdir(); (self.repo/'.claude/relay-mode.local').write_text('force\n')
@@ -35,6 +35,44 @@ class DesktopContract(unittest.TestCase):
             atomic(store.paths['ai'],value); result=self.hook(); self.assertNotEqual(result.returncode,0); self.assertIn('停止',result.stderr)
         (self.repo/'.claude').mkdir(); (self.repo/'.claude/relay-mode.local').write_text('nonsense')
         self.assertNotEqual(self.hook().returncode,0)
+    def test_all_modes_priority_and_read_only(self):
+        store = Store(self.root)
+        project = self.repo/'.claude/relay-mode.local'
+        project.parent.mkdir()
+        for mode in ('solo', 'auto', 'rules', 'force'):
+            atomic(store.paths['ai'], json.dumps({'relay': {'default_mode': mode}}).encode())
+            before = store.paths['ai'].read_bytes()
+            result = self.hook()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(mode+'（来源：全局默认）', result.stdout)
+            self.assertEqual(store.paths['ai'].read_bytes(), before)
+            project.write_text(mode+'\n')
+            atomic(store.paths['ai'], b'{broken')
+            result = self.hook()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn(mode+'（来源：项目模式文件）', result.stdout)
+            self.assertEqual(project.read_text(), mode+'\n')
+            project.unlink()
+        for mode in ('required', '', None, [], {}, 1, True):
+            atomic(store.paths['ai'], json.dumps({'relay': {'default_mode': mode}}).encode())
+            before = store.paths['ai'].read_bytes()
+            result = self.hook()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('solo/auto/rules/force', result.stderr)
+            self.assertEqual(store.paths['ai'].read_bytes(), before)
+        for mode in ('required', '', 'oops'):
+            project.write_text(mode)
+            result = self.hook()
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('solo/auto/rules/force', result.stderr)
+            self.assertEqual(project.read_text(), mode)
+    def test_ui_mode_order_and_location(self):
+        view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
+        self.assertLess(view.index('Picker("协作模式"'), view.index('Picker("主模型"'))
+        self.assertLess(view.index('solo 同时停用'), view.index('Picker("主模型"'))
+        app = (ROOT/'apps/macos/Sources/AIReviewBar/App.swift').read_text()
+        self.assertIn('Menu("协作模式："', app)
+        self.assertNotIn('评审模式', app)
     def test_project_git_root_from_subdir(self):
         subprocess.run(['/usr/bin/git','init'],cwd=self.repo,capture_output=True,check=True)
         (self.repo/'.claude').mkdir(); (self.repo/'.claude/relay-mode.local').write_text('auto\n')

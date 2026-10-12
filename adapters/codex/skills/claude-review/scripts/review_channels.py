@@ -71,7 +71,8 @@ def child_environment(channel):
     env = dict(os.environ)
     for key in CONFLICTS:
         env.pop(key, None)
-    env.update(ANTHROPIC_AUTH_TOKEN=token, ANTHROPIC_BASE_URL=channel['base_url'])
+    env.pop('ANTHROPIC_AUTH_TOKEN', None)
+    env.update(ANTHROPIC_API_KEY=token, ANTHROPIC_BASE_URL=channel['base_url'])
     for family in ('OPUS', 'SONNET', 'HAIKU'):
         env['ANTHROPIC_DEFAULT_' + family + '_MODEL'] = channel['configured_model']
     return env

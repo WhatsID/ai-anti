@@ -29,7 +29,7 @@ class StoreTests(unittest.TestCase):
         return self.store.save(v, snap['fingerprints'])
     def test_first_load_is_read_only(self):
         reply = dispatch(self.store, {'action':'load'})
-        self.assertEqual(reply['values']['mode'], 'required')
+        self.assertEqual(reply['values']['mode'], 'rules')
         self.assertEqual(list(self.root.iterdir()), [])
     def test_load_does_not_read_secret(self):
         self.write('secrets', {'tokenplan': {'value':'SENTINEL'}})
@@ -78,6 +78,37 @@ class StoreTests(unittest.TestCase):
     def test_bad_mode(self):
         self.write('ai', {'relay': {'default_mode':'mystery'}})
         with self.assertRaises(StoreError): self.snapshot()
+    def test_canonical_modes_and_invalid_values(self):
+        from config_store import MODES
+        self.assertEqual(MODES, ('solo', 'auto', 'rules', 'force'))
+        for mode in MODES:
+            self.assertEqual(self.save(mode=mode)['values']['mode'], mode)
+            self.assertEqual(json.loads(self.store.raw('ai'))['relay']['default_mode'], mode)
+        for mode in ('required', 'mystery', '', None, [], {}, 1, True):
+            with self.subTest(mode=mode):
+                snap = self.snapshot()
+                with self.assertRaisesRegex(StoreError, 'solo/auto/rules/force'):
+                    self.store.save(dict(snap['values'], mode=mode), snap['fingerprints'])
+                self.write('ai', {'relay': {'default_mode': mode}})
+                raw = self.store.raw('ai')
+                with self.assertRaisesRegex(StoreError, 'solo/auto/rules/force'): self.snapshot()
+                self.assertEqual(self.store.raw('ai'), raw)
+                self.write('ai', {'relay': {'default_mode': 'rules'}})
+    def test_restore_invalid_mode_preserves_all_bytes(self):
+        for mode in ('required', '', None, [], {}, 1, True):
+            with self.subTest(mode=mode):
+                reply = self.save(mode='rules', primary_model='fixture')
+                backup = self.store.desktop/'last-save.json'
+                record = json.loads(backup.read_bytes())
+                record['before']['ai'] = json.dumps({'relay': {'default_mode': mode}}).encode().hex()
+                backup.write_text(json.dumps(record))
+                before = {k: p.read_bytes() if p.exists() else None for k,p in self.store.paths.items()}
+                backup_bytes = backup.read_bytes()
+                with patch('config_store.atomic', side_effect=AssertionError('unexpected write')):
+                    with self.assertRaisesRegex(StoreError, 'solo/auto/rules/force.*新保存.*恢复点'):
+                        self.store.restore(reply['fingerprints'])
+                self.assertEqual({k: p.read_bytes() if p.exists() else None for k,p in self.store.paths.items()}, before)
+                self.assertEqual(backup.read_bytes(), backup_bytes)
     def test_conflict_no_overwrite(self):
         snap = self.snapshot(); self.write('claude', {'external':1})
         with self.assertRaisesRegex(StoreError, '刷新'): self.store.save(snap['values'], snap['fingerprints'])

@@ -34,26 +34,26 @@ def split_blocks(data):
     return blocks
 
 
-def chunk_file(stage, name):
+def chunk_file(stage, name, source_id=1):
+    if type(source_id) is not int or source_id < 1:
+        raise MaterialError("invalid source id")
     source = stage / name
     data = read_text(source, name)
     blocks = split_blocks(data)
     records = []
     for index, (content, start, end) in enumerate(blocks, 1):
-        target = name if len(blocks) == 1 else 'chunks/' + sha(name.encode('utf-8')) + '/%06d.txt' % index
+        target = 'chunks/%03d/%03d.txt' % (source_id, index)
         path = stage / target
-        if target != name:
-            path.parent.mkdir(parents=True, exist_ok=True)
-            with path.open('xb') as handle:
-                handle.write(content)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with path.open('xb') as handle:
+            handle.write(content)
         os.chmod(path, 0o600)
         records.append({'path': target, 'sha256': sha(content), 'bytes': len(content),
                         'start_line': start, 'end_line': end})
     restored = b''.join((stage / item['path']).read_bytes() for item in records)
     if restored != data or sha(restored) != sha(data):
         raise MaterialError('source reconstruction mismatch: ' + name)
-    if len(blocks) > 1:
-        source.unlink()
+    source.unlink()
     return {'sha256': sha(data), 'bytes': len(data), 'blocks': records}
 
 
@@ -61,7 +61,8 @@ def chunk_stage(stage):
     paths = sorted(str(path.relative_to(stage)) for path in stage.rglob('*') if path.is_file())
     if sum((stage / name).stat().st_size for name in paths) > MAX_STAGE_BYTES:
         raise MaterialError('stage snapshot exceeds 2MiB')
-    sources = {name: chunk_file(stage, name) for name in paths}
+    sources = {name: chunk_file(stage, name, source_id)
+               for source_id, name in enumerate(paths, 1)}
     if sum(item['bytes'] for source in sources.values() for item in source['blocks']) > MAX_STAGE_BYTES:
         raise MaterialError('chunked stage snapshot exceeds 2MiB')
     return sources

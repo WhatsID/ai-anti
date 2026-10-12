@@ -7,7 +7,7 @@ root=$(git rev-parse --show-toplevel 2>/dev/null) || root=""
 import json
 from pathlib import Path
 import sys
-valid = ('solo', 'required', 'auto', 'force')
+valid = ('solo', 'auto', 'rules', 'force')
 project = Path(sys.argv[1]) / '.claude/relay-mode.local'
 config = Path.home() / '.config/ai-anti/config.json'
 try:
@@ -17,14 +17,14 @@ try:
         data = json.loads(config.read_text())
         if not isinstance(data, dict) or not isinstance(data.get('relay', {}), dict):
             raise ValueError()
-        mode = data.get('relay', {}).get('default_mode', 'required')
+        mode = data.get('relay', {}).get('default_mode', 'rules')
         source = '全局默认' if 'default_mode' in data.get('relay', {}) else '内置默认'
     else:
-        mode, source = 'required', '内置默认'
+        mode, source = 'rules', '内置默认'
     if mode not in valid:
         raise ValueError()
 except (OSError, UnicodeError, ValueError, TypeError):
-    print('[接力协作模式] 配置无效或不可读，停止自动判断；请修复项目/全局配置。', file=sys.stderr)
+    print('[接力协作模式] 配置无效或不可读，停止自动判断；请修复项目/全局配置；合法值：solo/auto/rules/force。', file=sys.stderr)
     sys.exit(1)
-print('[接力协作模式] %s（来源：%s）——solo/required/auto/force 语义见 CLAUDE.global.md「协作模式开关」节' % (mode, source))
+print('[接力协作模式] %s（来源：%s）——solo/auto/rules/force 语义见 CLAUDE.global.md「协作模式开关」节' % (mode, source))
 PY

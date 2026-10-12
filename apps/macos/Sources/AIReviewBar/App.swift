@@ -40,10 +40,11 @@ import AppKit
                 Button("Claude Code" + (model.saved.host == "claude" ? " ✓" : "")) { model.menuHost("claude") }; Button("Codex" + (model.saved.host == "codex" ? " ✓" : "")) { model.menuHost("codex") }
             }.disabled(model.busy || model.dirty || !model.loaded)
             Menu("评审模型") {
-                if model.saved.host == "claude" { Button("Codex" + (model.saved.channel == "codex" ? " ✓" : "")) { model.menuChannel("codex") } }
-                Button("Qwen" + (model.saved.channel == "qwen" ? " ✓" : "")) { model.menuChannel("qwen") }
-            }.disabled(model.busy || model.dirty || !model.loaded)
-            Menu("评审模式：" + model.saved.mode) {
+                if model.saved.host == "claude" { Button("Codex" + (model.savedReviewFamily == "codex" ? " ✓" : "")) { model.menuChannel("codex") } }
+                Button("Qwen" + (model.savedReviewFamily == "qwen" ? " ✓" : "")) { model.menuChannel("qwen") }
+                Button("DeepSeek" + (model.savedReviewFamily == "deepseek" ? " ✓" : "")) { model.menuChannel("deepseek") }
+            }.disabled(model.saved.mode == "solo" || model.busy || model.dirty || !model.loaded)
+            Menu("协作模式：" + model.saved.mode) {
                 ForEach(model.modes, id: \.0) { item in Button(item.0 + (model.saved.mode == item.0 ? " ✓" : "")) { model.menuMode(item.0) } }
             }.disabled(model.busy || model.dirty || !model.loaded)
             Text(model.status)

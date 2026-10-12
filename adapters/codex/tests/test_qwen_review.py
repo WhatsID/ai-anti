@@ -31,16 +31,40 @@ class QwenReviewTests(thin.ThinReviewTests):
             self.assertEqual(status['limits'], m['limits'])
             self.assertEqual(m['model_family_pattern'], 'fixture\\.v1\\-max')
             self.assertEqual(m['limits']['timeout'], 1800)
+            self.assertEqual(m['limits']['max_output_bytes'], 8 * 1024 * 1024)
+            self.assertEqual(m['material_transport'], 'material_ids')
+            self.assertNotIn('Required Read files:', (out / 'logs' / 'review.prompt.txt').read_text())
+            if mode == 'plan':
+                self.assertNotEqual(m['material_registries']['inventory'], m['material_registries']['review'])
+                inventory_blocks = m['sources']['review']['inventory.md']['blocks']
+                self.assertTrue(set(b['path'] for b in inventory_blocks) <= set(v['path'] for v in m['material_registries']['review']['materials'].values()))
             self.assertEqual(m['limits']['idle_timeout'], 300)
             self.assertEqual(len(m['stages']['review']['transport_warnings']), 2)
+            self.assertEqual(m['stages']['review']['read_recoveries'], [])
+            self.assertEqual(status['read_recovery_counts']['review'], 0)
+            self.assertTrue(all(name.startswith('chunks/') for name in self.calls()[-1]['files']))
             self.assertNotIn('OFFLINE_FAKE_TOKEN', (out / 'manifest.json').read_text())
             if mode == 'plan':
                 self.assertEqual((out / 'report.md').read_text().count('FAKE REPORT'), 2)
+
+    def test_qwen_repeated_material_and_rejected_path_recovery(self):
+        r, out = self.run_review('plan', fake='repeat_material')
+        self.assert_success(r, out)
+        for stage in ('inventory', 'review'):
+            self.assertEqual(self.manifest(out)['stages'][stage]['read_recovery_count'], 0)
+        r, out = self.run_review('plan', fake='recover_noise_3')
+        self.assertNotEqual(r.returncode, 0)
 
     def test_explicit_channel_model_and_limits(self):
         r, out = self.run_review(extra=['--channel', 'claude'])
         self.assert_success(r, out)
         self.assertEqual(self.manifest(out)['limits']['timeout'], 600)
+        self.assertEqual(self.manifest(out)['limits']['max_output_bytes'], 2 * 1024 * 1024)
+        r, out = self.run_review(extra=['--max-output-bytes', str(2 * 1024 * 1024)])
+        self.assert_success(r, out)
+        self.assertEqual(self.manifest(out)['limits']['max_output_bytes'], 2 * 1024 * 1024)
+        r, _ = self.run_review(extra=['--max-output-bytes', str(8 * 1024 * 1024 + 1)])
+        self.assertNotEqual(r.returncode, 0)
         r, out = self.run_review(extra=['--timeout', '123', '--idle-timeout', '45'])
         self.assert_success(r, out)
         self.assertEqual(self.manifest(out)['limits']['timeout'], 123)
@@ -94,7 +118,8 @@ class QwenReviewTests(thin.ThinReviewTests):
 
     def test_fail_closed_noise_models_and_gates(self):
         for fake in ('noise_wrong', 'noise_extra', 'noise_unknown', 'noise_truncated', 'wrong_model',
-                     'denied', 'tool_error', 'partial_read', 'extra_tool', 'broken_json', 'insufficient_quota'):
+                     'denied', 'tool_error', 'partial_read', 'extra_tool', 'broken_json', 'insufficient_quota',
+                     'extra_mcp', 'wrong_id', 'path_parameter', 'builtin_read', 'forged_meta', 'duplicate_result', 'no_read'):
             with self.subTest(fake=fake):
                 before = len(self.calls())
                 r, out = self.run_review('plan', fake=fake)

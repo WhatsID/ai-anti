@@ -8,7 +8,7 @@ import unittest
 import test_thin_review as thin
 
 sys.path.insert(0, str(thin.ENTRY.parent))
-from review_chunks import MAX_BLOCK_BYTES, MAX_BLOCK_LINES, chunk_stage, physical_lines
+from review_chunks import MAX_BLOCK_BYTES, MAX_BLOCK_LINES, chunk_stage, chunk_file, physical_lines
 from review_material import MaterialError, read_text, sha
 
 
@@ -38,7 +38,32 @@ class BlockUnitTests(unittest.TestCase):
                     expected_start = block['end_line'] + 1
                     restored.append(content)
                 self.assertEqual(b''.join(restored), data)
-                self.assertEqual(source.exists(), len(mapping['blocks']) == 1)
+                self.assertFalse(source.exists())
+                self.assertTrue(all(b['path'].startswith('chunks/001/') for b in mapping['blocks']))
+
+    def test_sorted_source_ids_and_appended_inventory_never_collide(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            for name in ('中文 空格 very long name.txt', 'a.txt'):
+                (root / name).write_text(name)
+            sources = chunk_stage(root)
+            self.assertEqual(sources['a.txt']['blocks'][0]['path'], 'chunks/001/001.txt')
+            self.assertEqual(sources['中文 空格 very long name.txt']['blocks'][0]['path'], 'chunks/002/001.txt')
+            before = {p: p.read_bytes() for p in root.rglob('*.txt')}
+            (root / 'inventory.md').write_text('inventory')
+            extra = chunk_file(root, 'inventory.md', len(sources) + 1)
+            self.assertEqual(extra['blocks'][0]['path'], 'chunks/003/001.txt')
+            (root / 'inventory.md').write_text('replacement')
+            with self.assertRaises(FileExistsError):
+                chunk_file(root, 'inventory.md', len(sources) + 1)
+            for path, content in before.items():
+                self.assertEqual(path.read_bytes(), content)
+            self.assertEqual((root / 'chunks/003/001.txt').read_text(), 'inventory')
+            (root / 'inventory.md').write_text('second append')
+            self.assertEqual(chunk_file(root, 'inventory.md', len(sources) + 2)['blocks'][0]['path'],
+                             'chunks/004/001.txt')
+            (root / 'large-id').write_text('id')
+            self.assertEqual(chunk_file(root, 'large-id', 1000)['blocks'][0]['path'], 'chunks/1000/001.txt')
 
     def test_lf_line_validation_does_not_hide_long_unicode_separators(self):
         with tempfile.TemporaryDirectory() as tmp:

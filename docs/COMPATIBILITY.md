@@ -56,3 +56,31 @@
 这不覆盖大材料全量评审、真实业务数据或端点内部路由。
 离线 fixture 只证明协议与失败路径。实测每次调用有一行已知模型提示；新入口
 允许重复但每行 payload 必须精确匹配，保留原始合流日志及 transport warning。
+
+## 2026-10-12 Qwen 编号 MCP 合成探针边界
+
+CLI 2.1.280 的真实合成单编号探针使用 `--bare --restricted --tools ''`、
+`--allowedTools mcp__materials__read_material`、dontAsk 和严格单 MCP 配置。
+init 精确上报唯一编号工具、materials connected/source dynamic、空 skills/slash
+commands、既有两项 builtin plugins，实际模型 `qwen3.8-max`。工具返回单个
+text，message.content 与顶层 tool_use_result 均为 text 数组；API_KEY 认证成功，
+结果 OK，原始日志保留完整 unrecognized_model 提示。
+
+该探针只验证合成 MCP 形态与认证，未证明本轮新服务器、正式 review.py 编号
+入口或此前 20 文件真实增量已完成。新实现的离线 stdio/篡改测试亦不证明模型
+调用成功；正式 live 结果由独立主模型验收后追加。旧入口的 2026-10-10 completed
+记录属于此前路径协议，不转算本轮编号协议验收。
+
+## 2026-10-12 Qwen 编号 MCP 正式增量验收
+
+修正后的正式 `review.py` 重新评审此前未完成的 20 文件增量，CLI 2.1.280、
+实际模型 `qwen3.8-max`，状态 `completed`。59/59 冻结块通过读取及内容校验，
+工具错误为零，无路径纠错；使用缺省 8 MiB 日志上限，原始日志完整保留。
+此结果不外推到任意规模或其他 CLI 版本，也不代表范围外执行器源码已获增量评审。
+
+此前两个正式合成调用失败记录原样保留：第一轮暴露 tools/call 附加对象
+`_meta`，服务器现仅忽略该传输元数据；第二轮暴露空文本在 message.content
+中被 CLI 改成固定无输出提示。仅当冻结材料为空且顶层结果精确为空 text 数组
+时接受该提示，非空材料仍逐字校验。诊断回放不改写旧失败状态；上述全新调用
+才是修正后完成证据。独立适配器测试 73 项、桌面契约测试 8 项通过；stdio
+探针覆盖编号、篡改、符号链接与进程 EOF。
