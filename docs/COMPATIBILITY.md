@@ -131,3 +131,27 @@ hook 与托管链接正常，Codex 0.160.0 仅有不在既有实测版本清单�
 这是只读安装与临时项目诊断验收，不证明模型遵循、通道联网或第4步跨业务项目
 完整接力已验证，不扩大 `compat.json` 版本清单。plain status 不解析用户默认参数，
 插件仅查链接，不查凭证和通道可调用性。
+
+## 跨项目 Codex 侧验收（2026-10-12）
+
+成熟业务仓库、早期产品仓库和空目录各启动一次 Codex CLI 0.160.0 只读新会话，
+提示词没有提供基础设施源路径。三次均退出 0，实际模型 metadata 为 gpt-6-astra；
+工具返回证明实际读取用户入口、共享入口及 DEBUGGING/TESTING 全文。空目录没有
+复制项目入口，正确报告尚无 Git 基线。部分失败命令的完整返回仅在底层会话记录中
+可见，核对时合并 CLI 事件与底层工具返回，不能仅采信最终文字声明。
+
+三个上下文另在隔离临时 Git 副本运行受主模型编排的完整接力样本：Qwen 正式 plan
+两阶段均 completed，实际模型 qwen3.8-max；原生独立实施者显式选择 gpt-6.1-sol
+并核对运行 metadata，实际读取共享方法后修复同一类合成计数缺陷。主模型分别用
+相同测试验证原版 AssertionError 红灯与候选绿灯，并核对两文件范围后落入临时
+main。真实项目不写入，既有未提交上下文按原字节保留；不涉及产品功能或业务 CI。
+
+这证明本轮的入口发现与隔离接力样本，不保证任意任务均能无人引导遵循规则。
+CLI 入口冒烟与原生宿主接力分别留证，不据此扩大 compat.json 的全路径兼容声明。
+旧项目仍发现 required 默认值、机制权威和部署边界描述漂移，已登记维护待办。
+本机完整证据位于 ai-anti-cross-project-20261012：REPORT.md、discovery-runtime.json、
+各样本 review/report.md、adjudication.md、primary/verified.json 及实现与测试日志。
+
+Claude 正常会话返回 Login expired，仅 hook 播报成功。用户明确裁决先完成 Codex
+侧、Claude 留待补验；Qwen bare 鉴权成功不代表 Claude 正常登录或主导接力通过。
+补验时机及关闭判据见 [维护待办](FEATURE_TODOS.md)。
