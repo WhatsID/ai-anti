@@ -28,13 +28,16 @@
 
 ## Installer
 
-- `install.sh` writes only under `~/.claude` (symlinks, a marked block in `CLAUDE.md`, an optional
+- `install.sh` writes under `~/.claude` (symlinks, a marked block in `CLAUDE.md`, an optional
   SessionStart hook object in `settings.json`, the ownership manifest) and, with `--with-codex`,
   under `~/.agents/skills`. It never creates or edits `~/.config/ai-anti/`.
 - It fails closed: an existing target that is not its own symlink, a corrupt `settings.json`, or
   misordered markers in `CLAUDE.md` stop the run before anything is written or removed.
 - Uninstall removes only objects recorded in the manifest that still point into this checkout. The
   installer never uses `rm -rf`.
+
+
+Codex opt-in also maintains an owned block in `${CODEX_HOME:-~/.codex}/AGENTS.md`. User bytes outside it are preserved; nonempty overrides and unsafe objects fail before installation writes. Removal follows the manifest path, not the current environment. No user config JSON or business repository is modified.
 
 ## Reporting a vulnerability
 

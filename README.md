@@ -95,7 +95,7 @@ logged in and working.
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
 cd ~/ai-anti
 ./install.sh                 # Claude Code side: commands, subagents, CLAUDE.md import
-./install.sh --with-codex    # optional: Codex skills into ~/.agents/skills
+./install.sh --with-codex    # optional: Codex user-level entry and ~/.agents/skills
 ./install.sh --status        # read-only health check
 ```
 
@@ -104,9 +104,28 @@ To use a plugin review channel, also pass `--with-plugin <name>` and write
 "Model extensions" and "Configuration" below).
 
 Then open Claude Code or Codex in any repository. Nothing needs to be copied into your projects;
-the workflow is loaded from your user-level `~/.claude/CLAUDE.md`. Projects may override
+Claude Code loads `~/.claude/CLAUDE.md`, and Codex loads
+`${CODEX_HOME:-~/.codex}/AGENTS.md`. Projects may override
 parameters (high-risk triggers, where to register findings, deployment scale, ...) in their own
 `CLAUDE.md`; see the override table in `adapters/claude-code/CLAUDE.global.md`.
+
+Both entries read `core/WORKFLOW_ENTRY.md`; review details and relay skills load only
+when needed. `--with-codex` installs the skills and an owned instruction block that
+explicitly reads `adapters/codex/AGENTS.global.md`. User content outside the block is
+preserved byte for byte. Reinstallation inherits optional components and upgrades
+legacy manifests; reinstall after moving the source checkout to refresh its paths.
+
+A nonempty `AGENTS.override.md` shadows the entry, so installation stops and asks you
+to resolve it manually. Unsafe instruction files or path ancestors and damaged markers
+also stop installation before writes. Before changing `CODEX_HOME`, run
+`./install.sh --without-codex`: it removes the owned block at the manifest's recorded
+path and both Codex skills. Then run `--with-codex` with the new environment.
+Uninstall keeps user content, deleting an empty file only when the installer created it.
+It never edits user configuration JSON or business repositories.
+
+The entry loads in a new session. Status checks installation, not model compliance;
+external CLI version commands may create their own caches. Full multi-project relay
+validation is outside this entry change.
 
 Codex → Claude/Qwen examples:
 
@@ -261,7 +280,7 @@ Both paths cap review at two rounds. You can switch the reviewer to a cheaper mo
 ```
 
 Removes only what the manifest (`~/.claude/ai-anti.manifest.json`) records and still points into
-this checkout, plus its own marker block in `~/.claude/CLAUDE.md`. Your own files and hooks are left
+this checkout, plus its own marker blocks in `~/.claude/CLAUDE.md` and Codex `AGENTS.md`. Your own files and hooks are left
 untouched. Individual parts: `--without-hook`, `--without-codex`, `--remove-plugin <name>`.
 
 ## Security

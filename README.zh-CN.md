@@ -65,16 +65,30 @@ AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验�
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
 cd ~/ai-anti
 ./install.sh                 # Claude Code 侧：命令、子代理、CLAUDE.md 导入
-./install.sh --with-codex    # 可选：Codex skill 链到 ~/.agents/skills
+./install.sh --with-codex    # 可选：Codex 用户级入口及 ~/.agents/skills 技能
 ./install.sh --status        # 只读体检
 ```
 
 需要插件评审通道时再加 `--with-plugin <name>`，并按 [config.example.json](config.example.json) 写好
 `~/.config/ai-anti/config.json`（见下文「模型扩展」「配置」）。
 
-之后在任意仓库打开 Claude Code 或 Codex 即可。项目里不需要复制任何东西，机制由用户级
-`~/.claude/CLAUDE.md` 加载。项目可以在自己的 `CLAUDE.md` 里覆写参数（高风险触发器、评审意见
+之后在任意仓库打开 Claude Code 或 Codex 即可。项目里不需要复制任何东西，Claude Code 由用户级
+`~/.claude/CLAUDE.md` 加载，Codex 由 `${CODEX_HOME:-~/.codex}/AGENTS.md` 加载。项目可以在自己的 `CLAUDE.md` 里覆写参数（高风险触发器、评审意见
 登记去处、部署规模等），可覆写项见 `adapters/claude-code/CLAUDE.global.md` 的覆写表。
+
+Claude Code 的用户级 `@import` 与 Codex 的用户级指令共同读取
+`core/WORKFLOW_ENTRY.md`；评审细节和接力技能只在需要时加载。
+`./install.sh --with-codex` 同时安装技能及 `${CODEX_HOME:-~/.codex}/AGENTS.md`
+自有标记块，显式读取 `adapters/codex/AGENTS.global.md`，块外用户内容按字节保留。
+普通重装继承组件并升级旧 manifest；源仓库移动后重装刷新路径。
+非空 `AGENTS.override.md` 会遮蔽入口，安装器拒绝安装，不自动改写它。
+`AGENTS.md`、override 或路径祖先中的不安全对象、损坏标记也会在写入前拒绝。
+
+更换 `CODEX_HOME` 前先运行 `./install.sh --without-codex`；移除根据 manifest
+记录的旧路径处理，同时移除原有 Codex 技能。再以新环境执行 `--with-codex`。
+`--uninstall` 仅移除自有块，用户内容保留；仅工具创建且移除后为空的文件才删除。
+用户配置 JSON 和业务仓库均不改写。入口在新会话读取；status 检查安装而非证明模型遵循，
+外部 CLI 的版本命令可能产生该 CLI 自有缓存。多项目完整接力验收不在此次入口改动范围。
 
 Codex → Claude/Qwen 用法示例：
 
@@ -207,7 +221,7 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
 ```
 
 只移除 manifest（`~/.claude/ai-anti.manifest.json`）登记且仍指向本仓库的对象，以及
-`~/.claude/CLAUDE.md` 里自己的标记块；你自己的文件与 hook 不受影响。单独移除某部分：
+`~/.claude/CLAUDE.md` 与 Codex `AGENTS.md` 里自己的标记块；你自己的文件与 hook 不受影响。单独移除某部分：
 `--without-hook`、`--without-codex`、`--remove-plugin <name>`。
 
 ## 安全

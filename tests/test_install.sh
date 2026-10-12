@@ -18,7 +18,7 @@ CASES=0
 # make_checkout <目录>：复制安装器所需的最小 checkout。
 make_checkout() {
   mkdir -p "$1"
-  for part in install.sh compat.json core adapters/claude-code adapters/codex/skills plugins; do
+  for part in install.sh compat.json core adapters/claude-code adapters/codex plugins; do
     mkdir -p "$(dirname "$1/$part")"
     cp -R "$SRC/$part" "$1/$part"
   done
@@ -57,7 +57,7 @@ new_case() {
 inst_from() {
   co=$1
   shift
-  HOME="$H" CLAUDE_CONFIG_DIR="$C" PATH="$FAKEBIN:$PATH" /bin/bash "$co/install.sh" "$@" \
+  HOME="$H" CODEX_HOME="$H/.codex" CLAUDE_CONFIG_DIR="$C" PATH="$FAKEBIN:$PATH" /bin/bash "$co/install.sh" "$@" \
     < /dev/null > "$OUT" 2>&1
 }
 inst() { inst_from "$CHECKOUT" "$@"; }
@@ -116,7 +116,7 @@ assert_full_install
 check has "$C/CLAUDE.md" "@$CHECKOUT/adapters/claude-code/CLAUDE.global.md"
 cmd=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["hooks"]["SessionStart"][0]["hooks"][0]["command"])' "$C/settings.json")
 mkdir -p "$BASE/case-$CASES/cwd"
-hook_out=$(cd "$BASE/case-$CASES/cwd" && /bin/sh -c "$cmd" 2>&1)
+hook_out=$(cd "$BASE/case-$CASES/cwd" && HOME="$H" CODEX_HOME="$H/.codex" /bin/sh -c "$cmd" 2>&1)
 check test "$hook_out" = "[接力协作模式] rules（来源：内置默认）——solo/auto/rules/force 语义见 CLAUDE.global.md「协作模式开关」节"
 check inst
 assert_full_install
@@ -162,7 +162,7 @@ write_json "$C/settings.json" "{\"hooks\": {\"SessionStart\": [{\"hooks\": [{\"t
 write_json "$C/ai-anti.manifest.json" "{\"schema_version\": 1, \"repo\": $(python3 -c 'import json,sys;print(json.dumps(sys.argv[1]))' "$CHECKOUT"), \"links\": [], \"created_dirs\": [], \"claude_md\": {\"created_by_install\": true}, \"hook\": {\"injected\": true}}"
 check inst
 check pyjson "$C/settings.json" "[i['command'] for e in data['hooks']['SessionStart'] for i in e['hooks']] == [$HOOK_QUOTED_PY]"
-check pyjson "$C/ai-anti.manifest.json" "data['hook']['injected'] and data['schema_version'] == 2"
+check pyjson "$C/ai-anti.manifest.json" "data['hook']['injected'] and data['schema_version'] == 3"
 check inst --uninstall
 check pyjson "$C/settings.json" "data == {}"
 

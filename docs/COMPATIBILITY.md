@@ -84,3 +84,16 @@ text，message.content 与顶层 tool_use_result 均为 text 数组；API_KEY �
 时接受该提示，非空材料仍逐字校验。诊断回放不改写旧失败状态；上述全新调用
 才是修正后完成证据。独立适配器测试 73 项、桌面契约测试 8 项通过；stdio
 探针覆盖编号、篡改、符号链接与进程 EOF。
+
+## 用户级入口验证边界
+
+安装器生命周期在隔离用户目录验证。2026-10-12 真实安装后，Codex CLI 0.160.0
+在空目录中新建 `--ephemeral --sandbox read-only` 会话，退出码为 0。提示词未提供
+源码路径；结构化 `command_execution` 记录证明会话主动读取实际主仓库的
+`adapters/codex/AGENTS.global.md` 和 `core/WORKFLOW_ENTRY.md`，并选择性读取
+`relay.default_mode=rules`，最终正确复述普通小任务与重大任务的分流。
+
+该冒烟仅证明本次入口发现与读取，不证明规则完整遵循（本次未执行 Git 根定位命令），
+也不证明跨项目完整接力。Claude Code 本轮只有安装状态与离线回归证据，未做新会话
+行为冒烟。本记录不扩大 `compat.json` 既有兼容版本清单。原始证据由本次主模型验收
+保存于本机 `ai-anti-entry-evidence-20261012` 的 `smoke.jsonl`、提示词、结果与状态记录。

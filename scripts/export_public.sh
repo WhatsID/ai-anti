@@ -93,6 +93,7 @@ step() {
 step hygiene bash "$SRC/scripts/check_hygiene.sh" "$@" "$DEST"
 step links bash "$DEST/scripts/check_links.sh" "$DEST"
 step codex-tests sh -c 'cd "$1" && "$2" -m unittest discover -s adapters/codex/tests < /dev/null' _ "$DEST" "$PY"
+step global-entry-tests sh -c 'cd "$1" && "$2" tests/test_global_entry.py < /dev/null' _ "$DEST" "$PY"
 step install-tests sh -c 'cd "$1" && bash tests/test_install.sh < /dev/null' _ "$DEST"
 
 if [ -n "$FAILED" ]; then

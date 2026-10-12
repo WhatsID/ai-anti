@@ -1,5 +1,5 @@
 #!/bin/bash
-# ai-anti 用户级安装器：把 Claude Code 适配层分发到 ~/.claude，可选组件分发到 ~/.agents/skills。
+# ai-anti 用户级安装器：把 Claude Code 适配层分发到 ~/.claude，可选 Codex 入口写入 ${CODEX_HOME:-~/.codex}/AGENTS.md 自有块，技能分发到 ~/.agents/skills。
 #
 # 设计要点（方案 20260813-collab-infra-extraction.md 关键实现点 2/5；20260924 开源整理 P1-6）：
 #   - 逐文件托管 symlink（不做整目录链接），源始终是本仓库里的文件或目录；
@@ -28,6 +28,9 @@ MARKER_END="<!-- ai-anti:end -->"
 GLOBAL_MD="$REPO/adapters/claude-code/CLAUDE.global.md"
 HOOK_SH="$REPO/adapters/claude-code/hooks/session-start.sh"
 COMPAT="$REPO/compat.json"
+CODEX_HOME_DIR=${CODEX_HOME:-$HOME/.codex}
+CODEX_GLOBAL_MD="$REPO/adapters/codex/AGENTS.global.md"
+CODEX_ENTRY_META=""
 CODEX_SKILLS="claude-review codex-relay"
 PY=${AI_ANTI_PYTHON:-python3}
 TAB=$(printf '\t')
@@ -46,8 +49,8 @@ ai-anti 用户级安装器
   ./install.sh --without-hook       移除本工具注入的 SessionStart hook
   ./install.sh --with-plugin NAME   安装评审插件 plugins/NAME（可重复）
   ./install.sh --remove-plugin NAME 移除评审插件 NAME 的托管链接（可重复）
-  ./install.sh --with-codex         把 Codex skill（claude-review、codex-relay）链到 ~/.agents/skills
-  ./install.sh --without-codex      移除 Codex skill 的托管链接
+  ./install.sh --with-codex         安装 Codex 用户入口及 skill（claude-review、codex-relay）
+  ./install.sh --without-codex      移除 Codex 入口自有块及 skill 托管链接
   ./install.sh --uninstall          按 manifest 精确卸载
   ./install.sh --status             只报告当前安装状态与 CLI 版本，不做任何改动
   ./install.sh --help               本帮助
@@ -56,6 +59,7 @@ ai-anti 用户级安装器
   ~/.claude/commands/*.md   -> adapters/claude-code/commands/ 与已选插件 commands/ 的逐文件符号链接
   ~/.claude/agents/*.md     -> adapters/claude-code/agents/ 的逐文件符号链接
   ~/.claude/CLAUDE.md       -> 标记块内一行 @import 指向 CLAUDE.global.md
+  ${CODEX_HOME:-~/.codex}/AGENTS.md -> 自有标记块，显式读取 AGENTS.global.md
   ~/.agents/skills/<skill>  -> adapters/codex/skills/<skill>（仅 --with-codex）
   ~/.claude/ai-anti.manifest.json  所有权清单（卸载依据）
 
@@ -476,6 +480,95 @@ assert_takeable() {
   return 0
 }
 
+# Codex entry uses bytes: user text, including missing final newline, survives removal.
+# Check and prepare metadata before any install/uninstall mutation.
+codex_entry() {
+  CODEX_HOME_DIR="$CODEX_HOME_DIR" CODEX_SOURCE="$CODEX_GLOBAL_MD" \
+  "$PY" - "$1" "$MANIFEST" "${2:-}" <<'PY'
+import json, os, pathlib, stat, sys
+mode, manifest_path, prepared = sys.argv[1:]
+try:
+    old = json.loads(pathlib.Path(manifest_path).read_text()) if os.path.isfile(manifest_path) else {}
+    meta = old.get("codex_entry") or {}
+    home = pathlib.Path(os.path.abspath(os.environ["CODEX_HOME_DIR"]))
+    target = pathlib.Path(meta["path"]) if mode in ("remove", "check-remove") and meta else home / "AGENTS.md"
+    if mode in ("remove", "check-remove") and not meta:
+        sys.exit(0)  # v1/v2 manifests never owned a Codex instruction file.
+    def regular(path, directory=False):
+        if os.path.lexists(path):
+            st = path.lstat()
+            if not (stat.S_ISDIR(st.st_mode) if directory else stat.S_ISREG(st.st_mode)):
+                raise ValueError("unsafe object: %s" % path)
+    # Do not follow a symlink at any ancestor, even a dangling one.
+    for parent in [target.parent, *target.parent.parents]:
+        regular(parent, True)
+    regular(target)
+    if mode not in ("remove", "check-remove"):
+        override = home / "AGENTS.override.md"
+        regular(override)
+        if override.exists() and override.stat().st_size:
+            raise ValueError("AGENTS.override.md shadows the entry; resolve it manually")
+        if meta and meta.get("path") != str(target):
+            raise ValueError("CODEX_HOME changed; run --without-codex using the recorded installation first")
+    source = pathlib.Path(os.environ["CODEX_SOURCE"])
+    if mode not in ("remove", "check-remove"):
+        for required in (source, source.parents[2] / "core/WORKFLOW_ENTRY.md"):
+            if not required.is_file():
+                raise ValueError("unreadable Codex source: %s" % required)
+            required.read_bytes()
+    begin, end = b"<!-- ai-anti:codex:begin -->", b"<!-- ai-anti:codex:end -->"
+    original = target.read_bytes() if target.exists() else b""
+    if original.count(begin) != original.count(end) or original.count(begin) > 1:
+        raise ValueError("damaged or duplicate Codex markers")
+    start = original.find(begin); finish = original.find(end)
+    if start >= 0 and finish < start:
+        raise ValueError("reversed Codex markers")
+    block = (begin + b"\n" + ("Read the ai-anti user-level workflow entry explicitly from this JSON-quoted absolute path: "
+             + json.dumps(str(source), ensure_ascii=False) + "\nThis instruction does not expand user authorization.\n").encode() + end)
+    if start >= 0:
+        if not meta:
+            raise ValueError("unowned Codex marker block; resolve manually")
+        finish += len(end)
+    if mode == "status":
+        if not meta or start < 0 or original[start:finish] != block:
+            raise ValueError("Codex entry missing or differs from current source routing")
+        print("Codex entry: OK (%s)" % target)
+    elif mode == "prepare":
+        if start < 0:
+            separator = b"\n\n" if original else b""
+            suffix = b"\n"
+        else:
+            separator = bytes.fromhex(meta.get("separator_hex", ""))
+            suffix = bytes.fromhex(meta.get("suffix_hex", ""))
+        print(json.dumps({"path": str(target), "source": str(source),
+              "created_by_install": meta.get("created_by_install", not target.exists()),
+              "separator_hex": separator.hex(), "suffix_hex": suffix.hex()}, ensure_ascii=False))
+    elif mode == "write":
+        new = json.loads(prepared)
+        if start >= 0:
+            updated = original[:start] + block + original[finish:]
+        else:
+            updated = original + bytes.fromhex(new["separator_hex"]) + block + bytes.fromhex(new["suffix_hex"])
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if updated != original:
+            target.write_bytes(updated)
+    elif mode == "remove" and start >= 0:
+        separator = bytes.fromhex(meta.get("separator_hex", ""))
+        suffix = bytes.fromhex(meta.get("suffix_hex", ""))
+        # Remove only the installer-owned adjacent bytes if they still match.
+        left = start - len(separator) if separator and original[:start].endswith(separator) else start
+        right = finish + len(suffix) if suffix and original[finish:].startswith(suffix) else finish
+        updated = original[:left] + original[right:]
+        if not updated and meta.get("created_by_install"):
+            target.unlink()
+        else:
+            target.write_bytes(updated)
+except (OSError, ValueError, KeyError, TypeError) as exc:
+    print("ai-anti: Codex entry: %s" % exc, file=sys.stderr)
+    sys.exit(1)
+PY
+}
+
 do_install() {
   prev_hook=$(manifest_field hook.injected)
   prev_codex=$(manifest_field codex_skills.installed)
@@ -512,6 +605,12 @@ do_install() {
   fi
   if [ "$EFF_HOOK" = "1" ] || [ "$prev_hook" = "1" ]; then
     assert_settings_ok                              # 本次要注入或移除 hook
+  fi
+
+  if [ "$EFF_CODEX" = 1 ]; then
+    CODEX_ENTRY_META=$(codex_entry prepare) || die "Codex 入口预检失败，未做任何改动"
+  elif [ -n "$(manifest_field codex_entry.path)" ]; then
+    codex_entry check-remove || die "Codex 入口移除预检失败，未做任何改动"
   fi
 
   # 第二遍：落盘。先收回本次不再托管的旧链接（--remove-plugin、--without-codex、
@@ -558,6 +657,13 @@ do_install() {
     info "已移除 SessionStart hook（${result}）"
   else
     info "未注入 SessionStart hook（默认关闭；需要时加 --with-hook）"
+  fi
+
+  if [ "$EFF_CODEX" = 1 ]; then
+    ensure_dir "$CODEX_HOME_DIR"
+    codex_entry write "$CODEX_ENTRY_META"
+  else
+    codex_entry remove
   fi
 
   write_manifest "$created_claude_md" "$EFF_HOOK" "$settings_created"
@@ -607,7 +713,7 @@ write_manifest() {
   REPO_PATH="$REPO" CLAUDE_DIR="$CLAUDE_DIR" MANIFEST_PATH="$MANIFEST" \
   LINKS_FILE="$LINKS" NEWDIRS_FILE="$NEWDIRS" \
   CREATED_CLAUDE_MD="$1" HOOK_INJECTED="$2" SETTINGS_CREATED="$3" \
-  PLUGINS="$EFF_PLUGINS" CODEX="$EFF_CODEX" AGENTS_SKILLS_DIR="$AGENTS_SKILLS_DIR" HOOK_SH="$HOOK_SH" \
+  CODEX_ENTRY_META="$CODEX_ENTRY_META" PLUGINS="$EFF_PLUGINS" CODEX="$EFF_CODEX" AGENTS_SKILLS_DIR="$AGENTS_SKILLS_DIR" HOOK_SH="$HOOK_SH" \
   "$PY" - <<'PY'
 import json, os, shlex, time
 
@@ -630,7 +736,7 @@ with open(os.environ["NEWDIRS_FILE"], encoding="utf-8") as handle:
 claude_dir = os.environ["CLAUDE_DIR"]
 hook_injected = os.environ["HOOK_INJECTED"] == "1"
 manifest = {
-    "schema_version": 2,
+    "schema_version": 3,
     "repo": os.environ["REPO_PATH"],
     "claude_dir": claude_dir,
     "updated_at": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
@@ -647,6 +753,7 @@ manifest = {
         "settings_created_by_install": os.environ["SETTINGS_CREATED"] == "1",
     },
     "plugins": [name for name in os.environ["PLUGINS"].split("\n") if name],
+    "codex_entry": json.loads(os.environ["CODEX_ENTRY_META"]) if os.environ["CODEX_ENTRY_META"] else None,
     "codex_skills": {
         "installed": os.environ["CODEX"] == "1",
         "dir": os.environ["AGENTS_SKILLS_DIR"],
@@ -673,6 +780,7 @@ do_uninstall() {
     assert_settings_ok
   fi
   check_marker_sanity "$CLAUDE_DIR/CLAUDE.md"
+  codex_entry check-remove || die "Codex 入口移除预检失败，未删除任何对象"
 
   removed=0
   skipped=0
@@ -688,6 +796,7 @@ do_uninstall() {
   done < "$WORK/tolink"
   info "已移除 $removed 个托管链接，跳过 $skipped 个"
 
+  codex_entry remove
   remove_marker_block "$CLAUDE_DIR/CLAUDE.md"
 
   if [ "$(manifest_field hook.injected)" = "1" ]; then
@@ -860,6 +969,7 @@ do_status() {
   plugins=$(manifest_list plugins | tr '\n' ' ')
   echo "评审插件：${plugins:-无}"
   if [ "$(manifest_field codex_skills.installed)" = "1" ]; then
+    codex_entry status || problems=$((problems + 1))
     echo "Codex skill：已安装（$(manifest_field codex_skills.dir)）"
   else
     echo "Codex skill：未安装（需要时加 --with-codex）"

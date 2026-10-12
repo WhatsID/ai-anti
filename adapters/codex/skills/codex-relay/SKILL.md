@@ -1,6 +1,6 @@
 ---
 name: codex-relay
-description: Run an authorized task through a bounded plan-review-implementation-acceptance relay. Use for requests for a complete relay; do not use it to implement an investigation or plan without authorization.
+description: Run an authorized task through a bounded plan-review-implementation-acceptance relay. Use for requests for a complete relay or authorized tasks routed by user-level or project-level collaboration modes; do not use it to implement an investigation or plan without authorization.
 ---
 
 # Codex relay
@@ -51,26 +51,12 @@ process, never a complete relay.
 
 ## Default collaboration mode
 
-Before automatic workflow matching, resolve mode from the user’s explicit instructions
-for this task, otherwise the business repository root `.claude/relay-mode.local`,
-otherwise user config `~/.config/ai-anti/config.json` `relay.default_mode`, otherwise
-`rules`. Locate the project root with `git rev-parse --show-toplevel`, falling
-back to the working directory only outside Git. Report the effective source.
-Only `solo`, `auto`, `rules`, `force` are valid. An existing unreadable or invalid
-project file, invalid global JSON/object/relay section or mode stops with an error;
-never silently substitute `rules`.
-
-Only `solo`, `auto`, `rules`, `force` are accepted; the former `required` value is invalid. Mode errors must list the valid values solo/auto/rules/force.
-
-`solo` means primary-only work, without cross-review or an independent implementer;
-report large/high-risk work as unreviewed and a partial process, not a complete relay.
-`auto` lets the primary judge scale while preserving mandatory high-risk review;
-`rules` matches the business project's scale/high-risk rules; `force` requests
-relay for substantive work, not simple questions. Explicit requests for a complete
-relay take precedence over defaults but do not grant implementation authority.
-These defaults only affect workflows that load this Skill; they do not register
-rules for every Codex session. `desktop.primary_host` is an editor preference,
-never evidence of the actual executor or permission to switch the running session.
+Read `root/core/WORKFLOW_ENTRY.md` for shared mode priority (including `relay.default_mode`) and scale routing.
+The Skill itself does not register permanent rules; the installer’s user-level
+Codex entry supplies that routing. Report the effective mode and source.
+Explicit relay requests do not grant implementation authority. `solo` remains
+primary-only and is reported as partial, never a complete relay.
+`desktop.primary_host` is an editor preference, not executor or permission evidence.
 
 ## Review and adjudicate
 

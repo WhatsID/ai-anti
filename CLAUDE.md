@@ -11,6 +11,7 @@
 - **全部机制文件都是高风险触发器**——不论改动几个文件、改动多小，一律走接力流程
   （出方案 → 需求原文 → 跨模型交叉评审 → 分诊裁决 → 需求核对 → implementer 实施 →
   终审 → 汇报）。具体清单：
+  - `core/WORKFLOW_ENTRY.md`、`adapters/codex/AGENTS.global.md`
   - `adapters/claude-code/CLAUDE.global.md`
   - `adapters/claude-code/commands/`、`adapters/claude-code/agents/`、
     `adapters/claude-code/hooks/`
@@ -46,7 +47,7 @@
 
 ## 硬边界
 
-- 不执行部署、不推送、不改任何真实数据库；`install.sh` 只写 `~/.claude` 与 `~/.agents/skills`。
+- 不执行部署、不推送、不改任何真实数据库；`install.sh` 只写 `~/.claude`、`~/.agents/skills`，以及可选的 `${CODEX_HOME:-~/.codex}/AGENTS.md` 自有块。
 - 安装器的破坏性动作只允许 `rm`（单个已知对象）与 `rmdir`（空目录），**禁止 `rm -rf`**。
 - 凭证不入库：用户级密钥放 `~/.config/ai-anti/secrets.json`，仓库内只写查找接口。
 - 发布公开版前跑 `scripts/export_public.sh`，导出树必须通过 `scripts/check_hygiene.sh`。
