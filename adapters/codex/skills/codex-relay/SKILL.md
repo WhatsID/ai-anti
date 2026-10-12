@@ -29,6 +29,9 @@ Require readable regular files at `root/core/REVIEW_PRINCIPLES.md` and
 
 From the resolved `root`, read applicable `core/DEBUGGING.md` for investigation
 or attribution and `core/TESTING.md` for behavior changes, verification or acceptance.
+The primary also reads `core/PLANNING.md` while clarifying and preparing the plan.
+The independent implementer follows the settled plan; do not dispatch PLANNING
+to make it replan. Applicable DEBUGGING/TESTING dispatch below remains unchanged.
 Use them while preparing the plan; missing required sources are a loading gap,
 never evidence that the method was followed. Do not guess from the business cwd.
 

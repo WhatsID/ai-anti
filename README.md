@@ -127,6 +127,11 @@ The entry loads in a new session. Status checks installation, not model complian
 external CLI version commands may create their own caches. Full multi-project relay
 validation is outside this entry change.
 
+The planning primary loads `core/PLANNING.md` for clarification, specifications and
+verifiable behavior slices when needed. Clear small tasks do not require a full plan.
+It preserves mode and permission boundaries and does not create tickets, agents or
+per-project setup. Independent implementers follow the settled plan.
+
 Shared methods also load on demand: `core/DEBUGGING.md` guides diagnosis and
 root-cause evidence; `core/TESTING.md` guides behavioral verification and acceptance.
 This applies to direct work and solo as well as relays. Implementers receive explicit

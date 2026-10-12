@@ -20,3 +20,12 @@ docs/COMPATIBILITY.md:qwen3.7-max
 apps/macos/Sources/AIReviewBar/SettingsView.swift:qwen3.8-max
 docs/MACOS_REVIEW_APP.md:qwen3.8-max
 docs/MACOS_REVIEW_APP.md:qwen3.7-max
+
+# 菜单栏通用模型目录、公开产品来源标签与断言样例（非用户配置）
+apps/macos/AppModelChecks.swift:qwen3.7-plus
+apps/macos/Sources/AIReviewBar/ModelCatalog.swift:qwen3.8-max
+apps/macos/Sources/AIReviewBar/ModelCatalog.swift:qwen3.8-flash
+apps/macos/Sources/AIReviewBar/ModelCatalog.swift:qwen3.7-max
+apps/macos/Sources/AIReviewBar/ModelCatalog.swift:qwen3.7-plus
+apps/macos/Sources/AIReviewBar/ModelCatalog.swift:（官方 API / 阿里云 Token Plan）
+apps/macos/Sources/AIReviewBar/ModelCatalog.swift:（阿里云 Token Plan）

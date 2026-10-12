@@ -75,6 +75,45 @@ class HealthTests(unittest.TestCase):
                 self.run_install('--with-codex', ok=False)
                 self.assertEqual(before, self.snapshot())
 
+    def test_planning_source_preflight(self):
+        path = self.repo / 'core/PLANNING.md'
+        for kind in ('missing', 'empty', 'bad-utf8', 'fifo', 'directory'):
+            with self.subTest(kind=kind):
+                if path.is_dir(): path.rmdir()
+                elif path.exists(): path.unlink()
+                if kind == 'empty': path.write_text('')
+                elif kind == 'bad-utf8': path.write_bytes(b'\xff')
+                elif kind == 'fifo': os.mkfifo(path)
+                elif kind == 'directory': path.mkdir()
+                before = self.snapshot()
+                output = self.run_install('--with-codex', ok=False)
+                self.assertIn('PLANNING.md', output)
+                self.assertEqual(before, self.snapshot())
+
+    def test_planning_source_status_and_uninstall(self):
+        self.run_install('--with-codex')
+        path = self.repo / 'core/PLANNING.md'
+        for kind in ('missing', 'empty', 'bad-utf8', 'fifo', 'directory'):
+            with self.subTest(kind=kind):
+                if path.is_dir(): path.rmdir()
+                elif path.exists(): path.unlink()
+                if kind == 'empty': path.write_text('')
+                elif kind == 'bad-utf8': path.write_bytes(b'\xff')
+                elif kind == 'fifo': os.mkfifo(path)
+                elif kind == 'directory': path.mkdir()
+                before = self.snapshot()
+                source = self.tree_snapshot(self.repo)
+                project = self.tree_snapshot(self.project)
+                output = self.status()
+                self.assertIn('PLANNING.md', output)
+                self.assertNotIn('状态：全部正常', output)
+                self.assertEqual(before, self.snapshot())
+                self.assertEqual(source, self.tree_snapshot(self.repo))
+                self.assertEqual(project, self.tree_snapshot(self.project))
+        path.rmdir()  # Leave the required source missing for uninstall.
+        self.run_install('--uninstall')
+        self.assertFalse(self.manifest.exists())
+
     def test_claude_block_and_wrong_link(self):
         self.run_install()
         md = self.home / '.claude/CLAUDE.md'
