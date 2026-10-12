@@ -27,6 +27,11 @@ Require readable regular files at `root/core/REVIEW_PRINCIPLES.md` and
 `root/core/CLI_DISCIPLINE.md`, then resolve and read sibling
 `../claude-review/SKILL.md`. Do not infer the root from the business cwd.
 
+From the resolved `root`, read applicable `core/DEBUGGING.md` for investigation
+or attribution and `core/TESTING.md` for behavior changes, verification or acceptance.
+Use them while preparing the plan; missing required sources are a loading gap,
+never evidence that the method was followed. Do not guess from the business cwd.
+
 Read the business repository's `AGENTS.md` and module authority. Record its
 local `main` HEAD, dirty baseline, explicit file scope, request, and plan.
 Preserve other sessions' work. The request is verbatim and follows R2; the plan
@@ -60,6 +65,16 @@ primary-only and is reported as partial, never a complete relay.
 
 ## Review and adjudicate
 
+When the plan relies on shared method text that the reviewer needs to inspect,
+`--context` accepts only relative files inside the reviewed repository. Use it for
+methods within that repository; it does not accept external absolute paths or `..`.
+For other projects, put applicable method text in this run's plan appendix with the
+actual absolute source path and SHA256, then freeze that plan for review. This is
+one-run transport, not a maintained copy in the business repository. Do not assume
+inherited text or expand fixed runner injection. A diff review without a suitable
+input carrying needed method text must report that gap; do not pretend arbitrary
+external context is supported.
+
 Before implementation, invoke the resolved `claude-review` `plan` entry with
 the explicit scope and project scale. Resolve the channel from explicit user instructions,
 otherwise `codex_relay.review_channel` (default `claude`); invalid configuration stops.
@@ -82,7 +97,10 @@ conditions; unresolved mandatory items after it block implementation.
 Create an isolated worktree manually from the recorded exact local `main` HEAD,
 using the business project's sparse-checkout pattern. Send one native subagent
 the settled plan, request, adjudication, worktree/base, scope/baseline, allowed
-commands, and boundaries. It must not recurse into this Skill, review its own
+commands, and boundaries. Supply absolute paths from the resolved `root` for
+applicable DEBUGGING/TESTING sources and require the implementer to read them first;
+context inheritance is insufficient. Missing necessary inputs must be reported.
+It must not recurse into this Skill, review its own
 plan, commit, push, deploy, or write production/real data. Only that implementer
 writes the candidate; the primary may prepare non-overlapping read-only checks.
 
@@ -115,6 +133,9 @@ then clean only this task's worktree and branch under the project rules.
 
 ## Primary acceptance
 
+Read applicable shared methods from the resolved `root` and independently check
+candidate behavior and verification evidence. These methods supplement quality;
+review adjudication still follows core R6.
 Inspect every increment, including untracked files. Independently run the
 settled checks and prove they used the candidate artifact; implementer self-test
 is not acceptance. Return behavior defects to that implementer. The primary may

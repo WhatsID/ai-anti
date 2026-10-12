@@ -127,6 +127,14 @@ The entry loads in a new session. Status checks installation, not model complian
 external CLI version commands may create their own caches. Full multi-project relay
 validation is outside this entry change.
 
+Shared methods also load on demand: `core/DEBUGGING.md` guides diagnosis and
+root-cause evidence; `core/TESTING.md` guides behavioral verification and acceptance.
+This applies to direct work and solo as well as relays. Implementers receive explicit
+source paths, and the primary independently checks their evidence. No new command,
+skill installation or per-project copy is required. The methods preserve authorization
+and review adjudication; they do not make every task a TDD task. Behavioral validation
+is limited to recorded examples, not a claim of full multi-project coverage.
+
 Codex → Claude/Qwen examples:
 
 ```text

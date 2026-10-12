@@ -31,3 +31,9 @@ First public release.
 
 - 两端共享 `core/WORKFLOW_ENTRY.md`；Codex opt-in 增加用户级显式读取入口。
 - manifest v3 支持入口生命周期、字节保全与 fail-closed 预检，保留旧 manifest 升级。
+
+## 共享调查与验证方法
+
+- 新增按需共享 DEBUGGING / TESTING，直接做与 solo 同样可用。
+- 两端方案、实施派发、容灾及主模型验收引用同源方法，不新增安装对象。
+- 明确行为失败信号、候选来源、反证与未覆盖边界，不改变权限或评审裁决。
