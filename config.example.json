@@ -17,7 +17,8 @@
   },
   "codex_relay": {
     "review_channel": "claude",
-    "secondary_model": null
+    "secondary_model": null,
+    "qwen_executor": "claude"
   },
   "plugins": {
     "qwen": {
@@ -25,7 +26,8 @@
       "base_url": "https://<anthropic-compatible-endpoint>",
       "credential_paths": [
         "~/.config/ai-anti/secrets.json"
-      ]
+      ],
+      "responses_base_url": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1"
     }
   },
   "relay": {

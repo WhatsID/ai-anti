@@ -337,3 +337,19 @@ R6 已记录评审轮次膨胀成本，本方法采用有限澄清，不另加�
 [to-tickets](https://github.com/mattpocock/skills/tree/49dd158d1076134a641b33efb035946536778336/engineering/to-tickets)，独立中文撰写。
 不引入自动工单、提交、每仓 setup 或新权限。PLANNING 只派给负责规划的主模型，
 独立实施者执行定稿方案；既有调查/验证方法派发与共用评审分诊保持原样。
+
+## 2026-10-15｜Qwen Responses 执行器与模型证据
+
+保留 `channel=qwen` 的供应方含义，增加缺省 claude 的 `qwen_executor`；
+Codex 路径使用独立 Responses URL，显式 CLI 覆盖只作用本次。避免将 Anthropic
+端点自动改写或影响 Claude 主导路径。prepare-only 仍不读凭证、不启 CLI。
+
+复用冻结编号 MCP、阶段读取校验、有界直写日志与进程组清理；Codex 独立
+构造配置和逐工具 approval，不借 Claude init 证明 Codex 能力。关闭 shell、
+应用等功能并不清除所有系统/全局指令，因此只如实声明剩余上下文，并以
+严格事件校验拒绝非材料工具、错块、漏块和错误终止，不声称空上下文。
+
+Codex 0.160.0 exec JSONL 没有实际服务模型身份。接受 requested_only 是明确
+例外：actual_model 必须 null、报告提示路由身份未证实，不冒充 Claude init
+证据或已证实跨模型身份。正式 live 与真实增量由主模型独立验收；实施者的
+离线 fixture 不构成端点验收。

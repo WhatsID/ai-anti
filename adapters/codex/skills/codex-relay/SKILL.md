@@ -85,7 +85,15 @@ Pass `--channel qwen` for Qwen and omit `--model`, using `plugins.qwen.model`.
 Claude defaults to Opus; Fable requires explicit `--model fable`. This is the real
 two-stage review, and neither path automatically falls back. Require `status.json: completed`, `manifest.json: mode=plan`, complete
 inventory, successful review, actual review-model evidence, and matching task
-request/plan/source fingerprints. A diff cannot replace plan review; old task
+request/plan/source fingerprints. Explicit exception: Qwen executor=codex has
+`actual_model=null`, `model_evidence=requested_only`; accept completed material/protocol
+validation with the requested-model warning, while reporting server routing identity
+as unproven. It does not prove actual cross-model identity or qualify as the R9
+same-family empty-context exception. Select via `codex_relay.qwen_executor=codex` or
+`--qwen-executor codex`; configure the separate `plugins.qwen.responses_base_url`
+(or per-call `--responses-base-url`). Default executor remains Claude. See
+claude-review's Responses boundaries and pinned CLI capability preflight.
+A diff cannot replace plan review; old task
 receipts cannot prove this review. Observe the CLI discipline for external CLI
 calls.
 

@@ -234,12 +234,12 @@ The `review.channels` order only routes the Claude-led path. Codex selects
 `--channel claude|qwen`, then `codex_relay.review_channel`, defaulting to `claude`.
 Failures never automatically fall back. Claude defaults to Opus; `--model fable` or
 configured families remain supported. Qwen directly reuses `plugins.qwen` without
-plugin installation, retaining Claude CLI with a sonnet alias mapped to the configured
+plugin installation, defaulting to Claude CLI with a sonnet alias mapped to the configured
 model. Explicit `--model` is rejected for Qwen. Relative credential paths resolve
 against `--repo`; the Claude plugin resolves them against invocation cwd. Prefer
 absolute paths or `~`. `--prepare-only` reads no credentials and calls no CLI.
 Qwen defaults to 1800 seconds per stage, Claude to 600, both to 300 seconds idle.
-Explicit overrides win; caps remain 3600 seconds total and 600 idle. Model evidence
+Explicit overrides win; caps are 3600 seconds total and 900 idle. Model evidence
 and exact init matching do not prove endpoint-internal routing.
 
 ```bash
@@ -247,6 +247,24 @@ REVIEW_SOURCE=/absolute/path/to/ai-anti/adapters/codex/skills/claude-review/scri
 python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
   --files src/a.py --scale 'single user local tool' --out /private/tmp/qwen-review
 ```
+
+Qwen can explicitly use Codex CLI's Responses executor without Claude CLI for that review:
+
+```bash
+python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
+  --responses-base-url https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1 \
+  --idle-timeout 900 --timeout 1800 --repo /path/to/repo --files src/a.py \
+  --scale 'single user local tool' --out /private/tmp/qwen-codex-review
+```
+
+Persist the selection with `codex_relay.qwen_executor=codex` and the separate
+`plugins.qwen.responses_base_url`. The Anthropic `base_url` stays separate; model and
+credential paths are reused. This executor requires verified Codex CLI 0.160.0 and
+explicitly requests medium effort; other CLI versions stop at preflight. It records
+`actual_model=null` and `model_evidence=requested_only`, not proven serving-model identity.
+Formal plan and actual diff calls passed. Large diffs can still remain silent for minutes;
+900/1800 seconds is the tested budget, not a latency guarantee. The menu bar does not yet
+offer an executor selector; Claude remains the default. See [verification and limits](docs/COMPATIBILITY.md).
 
 ## Configuration
 
@@ -262,6 +280,8 @@ silently falling back.
 | `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
 | `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
 | `codex_relay.secondary_model` | Model requested for the implementer in `$codex-relay` | unset → specify per task |
+| `codex_relay.qwen_executor` | CLI executor for Qwen review | `claude` |
+| `plugins.qwen.responses_base_url` | Separate Responses URL for the Codex executor | none |
 | `plugins.<name>` | Plugin settings, e.g. qwen `model`, `base_url`, `credential_paths` | none |
 
 Credentials live outside the repository, e.g. `~/.config/ai-anti/secrets.json`; plugins only read
@@ -279,8 +299,8 @@ Verified versions:
 
 [compat.json](compat.json) is the authoritative list, and `./install.sh --status` checks your
 local versions against it. Details are in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Other
-versions produce a warning, not a failure; the fail-closed checks still decide. Only macOS has been
-verified.
+versions generally produce a warning; the Qwen Responses executor separately requires
+0.160.0, which is not yet in the general list. Only macOS has been verified.
 
 ## Cost
 

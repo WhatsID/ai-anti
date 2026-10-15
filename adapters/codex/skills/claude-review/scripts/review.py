@@ -31,17 +31,17 @@ def write_json(path, value):
     os.chmod(path, 0o600)
 
 
-def compat_warning(version_text):
+def compat_warning(version_text, executor="claude"):
     """Warn (never block) when the CLI version is not in the tested list."""
     match = re.search(r"[0-9]+\.[0-9]+\.[0-9]+", version_text or "")
     if not match:
-        return "unrecognized claude CLI version: " + repr(version_text)
+        return "unrecognized " + executor + " CLI version: " + repr(version_text)
     try:
-        tested = json.loads(COMPAT.read_text(encoding="utf-8"))["tested"]["claude"]
+        tested = json.loads(COMPAT.read_text(encoding="utf-8"))["tested"][executor]
     except (OSError, ValueError, KeyError, TypeError):
         return "CLI compatibility list unavailable: " + str(COMPAT)
     if match.group(0) not in tested:
-        return ("claude CLI " + match.group(0) + " is not in the tested list " + json.dumps(tested)
+        return (executor + " CLI " + match.group(0) + " is not in the tested list " + json.dumps(tested)
                 + "; fail-closed gates still decide the result")
     return None
 
@@ -128,6 +128,8 @@ def parser(families=None):
     result.add_argument("--scale", required=True)
     result.add_argument("--out", required=True)
     result.add_argument("--channel", choices=("claude", "qwen"))
+    result.add_argument("--qwen-executor", choices=("claude", "codex"))
+    result.add_argument("--responses-base-url")
     result.add_argument("--model", choices=sorted(families or MODEL_FAMILIES), default=None)
     result.add_argument("--timeout", type=int, default=None)
     result.add_argument("--idle-timeout", type=int, default=300)
@@ -144,7 +146,7 @@ def check_arguments(args, parser_instance):
     if not args.scale.strip():
         parser_instance.error("--scale must not be empty")
     limits = (args.timeout, args.idle_timeout, args.max_output_bytes)
-    if min(limits) <= 0 or args.timeout > 3600 or args.idle_timeout > 600 or args.max_output_bytes > 8 * 1024 * 1024:
+    if min(limits) <= 0 or args.timeout > 3600 or args.idle_timeout > 900 or args.max_output_bytes > 8 * 1024 * 1024:
         parser_instance.error("invalid bounded resource limits")
 
 
@@ -228,7 +230,8 @@ def main():
         coretext = CORE.read_text(encoding="utf-8")
         rules = core_sections(coretext, args.mode)
         repo = git_root(args.repo)
-        channel = resolve(config, args.channel, args.model, repo, families)
+        channel = resolve(config, args.channel, args.model, repo, families, args.qwen_executor, args.responses_base_url)
+        codex_executor = channel.get("executor") == "codex"
         args.timeout = args.timeout if args.timeout is not None else (1800 if channel["channel"] == "qwen" else 600)
         args.max_output_bytes = args.max_output_bytes if args.max_output_bytes is not None else (8 if channel["channel"] == "qwen" else 2) * 1024 * 1024
         check_arguments(args, argument_parser)
@@ -245,7 +248,11 @@ def main():
             initial_registry_path = logs / (initial_stage.name + '.registry.json')
             initial_registry = build_registry(initial_stage, initial_sources, initial_registry_path)
             manifest['material_registries'] = {initial_stage.name: initial_registry}
-            write_json(logs / (initial_stage.name + '.mcp.json'), mcp_config(initial_registry_path))
+            if codex_executor:
+                from review_codex import write_config
+                write_config(channel, initial_registry_path, logs / (initial_stage.name + '.codex-config.json'))
+            else:
+                write_json(logs / (initial_stage.name + '.mcp.json'), mcp_config(initial_registry_path))
         initial_prompt = make_prompt(initial_mode, initial_required, rules, args.scale, initial_sources, initial_registry)
         prompt_name = "inventory.prompt.txt" if args.mode == "plan" else "review.prompt.txt"
         (logs / prompt_name).write_text(initial_prompt, encoding="utf-8")
@@ -260,12 +267,20 @@ def main():
         env = child_environment(channel)
         stage_families = {channel["cli_model"]: channel["pattern"]}
         expected = channel["configured_model"] if channel["channel"] == "qwen" else None
-        claude = shutil.which("claude")
+        executor = "codex" if codex_executor else "claude"
+        stage_run, preflight = run_stage, capability
+        if codex_executor:
+            from functools import partial
+            from review_codex import run_stage as codex_run, capability as preflight
+            stage_run = partial(codex_run, channel=channel)
+            warnings.append("Codex Responses 模型证据仅为 requested_only；actual_model=null，服务端路由身份未证实。")
+        claude = shutil.which(executor)
         if not claude:
-            raise RunError("claude not found on PATH")
-        manifest["capabilities"] = capability(claude, logs, env=env, material_config=mcp_config(initial_registry_path) if initial_registry_path else None)
+            raise RunError(executor + " not found on PATH")
+        manifest["capabilities"] = preflight(claude, logs, env=env, material_config=mcp_config(initial_registry_path) if initial_registry_path else None)
+        manifest["warnings"] = warnings
         manifest["cli_version"] = manifest["capabilities"]["cli_version"]
-        warning = compat_warning(manifest["cli_version"])
+        warning = compat_warning(manifest["cli_version"], executor)
         if warning:
             warnings.append(warning)
             manifest["warnings"] = warnings
@@ -274,7 +289,7 @@ def main():
         write_json(output / "manifest.json", manifest)
         if args.mode == "plan":
             inventory_required = initial_required
-            first = run_stage(claude, inventory, initial_prompt, logs / "inventory.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected, required=source_labels(initial_sources), registry_path=initial_registry_path)
+            first = stage_run(claude, inventory, initial_prompt, logs / "inventory.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected, required=source_labels(initial_sources), registry_path=initial_registry_path)
             require_full_reads(first, inventory_required, initial_sources)
             if snapshot_hashes(inventory) != manifest["snapshots"]["inventory"]:
                 raise RunError("inventory snapshot changed during review")
@@ -292,16 +307,19 @@ def main():
                 review_registry_path = logs / 'review.registry.json'
                 review_registry = build_registry(review, review_sources, review_registry_path)
                 manifest['material_registries']['review'] = review_registry
-                write_json(logs / 'review.mcp.json', mcp_config(review_registry_path))
+                if codex_executor:
+                    write_config(channel, review_registry_path, logs / 'review.codex-config.json')
+                else:
+                    write_json(logs / 'review.mcp.json', mcp_config(review_registry_path))
             review_prompt = make_prompt("plan", review_required, rules, args.scale, review_sources, review_registry)
             manifest["prompt_sha256"]["review.prompt.txt"] = sha(review_prompt.encode("utf-8"))
             write_json(output / "manifest.json", manifest)
-            second = run_stage(claude, review, review_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected, required=source_labels(review_sources), registry_path=review_registry_path)
+            second = stage_run(claude, review, review_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected, required=source_labels(review_sources), registry_path=review_registry_path)
             require_full_reads(second, review_required, review_sources)
             report = "# 独立清单（原样）\n\n" + first["result"] + "\n\n# 方案评审\n\n" + second["result"]
         else:
             required = initial_required
-            second = run_stage(claude, review, initial_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected, required=source_labels(initial_sources), registry_path=initial_registry_path)
+            second = stage_run(claude, review, initial_prompt, logs / "review.jsonl", channel["cli_model"], args.timeout, args.idle_timeout, args.max_output_bytes, stage_families, env=env, expected_model=expected, required=source_labels(initial_sources), registry_path=initial_registry_path)
             require_full_reads(second, required, initial_sources)
             report = second["result"]
         if snapshot_hashes(review) != manifest["snapshots"]["review"]:

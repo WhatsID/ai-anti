@@ -180,10 +180,10 @@ Codex → Claude/Qwen 用法示例：
 上述 `review.channels` 只路由 Claude 主导路径。Codex 主导路径由 `--channel claude|qwen`
 选择，显式参数优先，其次 `codex_relay.review_channel`，缺省 `claude`；失败不自动降级。
 Claude 默认 Opus，可用 `--model fable` 或配置家族。Qwen 直接复用 `plugins.qwen`，
-无需安装插件；保留 Claude CLI，用 sonnet 别名映射配置模型，拒绝显式 `--model`。
+无需安装插件；默认保留 Claude CLI，用 sonnet 别名映射配置模型，拒绝显式 `--model`。
 相对凭证路径按 `--repo` 解析，推荐绝对路径或 `~`；Claude 插件按调用 cwd 解析。
 `--prepare-only` 不读凭证、不调用 CLI。Qwen 默认每阶段 1800 秒，Claude 600 秒，
-idle 均 300 秒；显式覆盖优先，上限仍为总时间 3600 秒、idle 600 秒。
+idle 均 300 秒；显式覆盖优先，上限为总时间 3600 秒、idle 900 秒。
 manifest/status 留证通道与模型，init 模型精确校验不证明端点内部路由。
 
 ```bash
@@ -191,6 +191,22 @@ REVIEW_SOURCE=/absolute/path/to/ai-anti/adapters/codex/skills/claude-review/scri
 python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
   --files src/a.py --scale 'single user local tool' --out /private/tmp/qwen-review
 ```
+
+Qwen 也可显式选择 Codex CLI 的 Responses 执行器，不依赖 Claude CLI 发起该次评审：
+
+```bash
+python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
+  --responses-base-url https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1 \
+  --idle-timeout 900 --timeout 1800 --repo /path/to/repo --files src/a.py \
+  --scale 'single user local tool' --out /private/tmp/qwen-codex-review
+```
+
+持久选择使用 `codex_relay.qwen_executor=codex` 和独立的
+`plugins.qwen.responses_base_url`；不改写原 Anthropic `base_url`，复用模型及凭证路径。
+新执行器固定验证 Codex CLI 0.160.0，显式使用 medium；其他 CLI 版本预检停止。
+该路径记录 `actual_model=null`、`model_evidence=requested_only`，不证明服务端实际模型身份。
+正式 plan 与真实 diff 已通过；大增量仍可能长时间无输出，900/1800秒仅为本次通过的预算。
+菜单栏暂未提供执行器选择，默认仍为 Claude。详见[验证记录与边界](docs/COMPATIBILITY.md)。
 
 ## 配置
 
@@ -204,6 +220,8 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
 | `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
 | `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
 | `codex_relay.secondary_model` | `$codex-relay` 为实施者请求的模型 | 未设置 → 每次任务指定 |
+| `codex_relay.qwen_executor` | Qwen 评审的 CLI 执行器 | `claude` |
+| `plugins.qwen.responses_base_url` | Codex 执行器独立的 Responses 地址 | 无 |
 | `plugins.<name>` | 插件配置，如 qwen 的 `model`、`base_url`、`credential_paths` | 无 |
 
 凭证放在仓库之外，例如 `~/.config/ai-anti/secrets.json`；插件只读取你配置的路径。
@@ -218,7 +236,7 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
 | Codex CLI | 0.156.0 |
 | Python | 3.9 及以上 |
 
-实测清单以 [compat.json](compat.json) 为准，`./install.sh --status` 会对照它检查本机版本。说明见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。其他版本只给警告、不阻断，结果仍由 fail-closed 检查决定。只在 macOS 上验证过。
+通用实测清单以 [compat.json](compat.json) 为准，`./install.sh --status` 会对照它检查本机版本。说明见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。一般未列版本只给警告；Qwen Responses 执行器另有限定0.160.0的预检，且该版本尚未加入通用清单。只在 macOS 上验证过。
 
 ## 成本
 

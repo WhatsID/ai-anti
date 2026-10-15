@@ -52,7 +52,7 @@ that family with ASCII digit version segments. A missing file or key uses the bu
 table; an unparseable config or wrong type fails before any call.
 The manifest records `cli_version`; a version outside `compat.json` adds a warning to
 `status.json`, the manifest and the report but does not block (see `docs/COMPATIBILITY.md`).
-The init capability gate admits no plugins except the CLI's built-in `agents-md` and
+For the Claude executor, the init capability gate admits no plugins except the CLI's built-in `agents-md` and
 `telemetry` (exact `builtin` path and `<name>@builtin` source); any other plugin fails closed.
 
 The project governance document supplies `--scale`. A plan review performs two
@@ -143,4 +143,57 @@ remain unchanged; there are no aliases, automatic CLI restarts or extra model ca
 Manifest/status record selected channel and configured/requested/CLI model; manifest
 records actual init model and effective limits. These fields do not prove endpoint-internal
 routing. Explicit resource overrides win; upper bounds remain 3600 seconds total,
-600 seconds idle, and 8 MiB output per call.
+900 seconds idle, and 8 MiB output per call. The idle default stays 300 seconds;
+use explicit `--idle-timeout 900 --timeout 1800` for the authorized longer wait.
+
+
+## Qwen Responses executor (explicit opt-in)
+
+`codex_relay.qwen_executor` selects `claude|codex` (default `claude`);
+`--qwen-executor` overrides it for this invocation. Codex requires a separate
+`plugins.qwen.responses_base_url`; `--responses-base-url` overrides it for this
+invocation only. Use `--channel qwen --qwen-executor codex --responses-base-url
+https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`. Reuse the configured
+Qwen model and credential paths. An Anthropic URL is never rewritten. URL overrides
+are rejected outside Qwen Codex; URLs forbid credentials, whitespace, query and fragment.
+The UI does not expose an executor selector; its existing save preserves these keys.
+
+Codex configuration semantics are pinned to `codex-cli 0.160.0`; unknown versions
+stop at preflight. Compatibility warnings use `tested.codex`, independently of
+Claude versions. Codex runs ephemeral, no-daemon, ignore-user-config/ignore-rules,
+read-only, approval never, stdin DEVNULL, bounded direct logs and process-group
+cleanup. It disables shell/snapshot, apps/hooks, browser/computer use, image viewing,
+goals, multi-agent, JS REPL and host skill discovery. Global AGENTS and system skill
+catalog may remain visible; request_user_input and generic MCP resource tools
+(list_mcp_resources, list_mcp_resource_templates, read_mcp_resource) may remain available. Every executed
+non-material tool is rejected by the protocol gate; this is not empty context or
+proof that only one tool is visible. The reviewer instructions prohibit recursive relay. No `user_instructions` override
+is used: that key is unrecognized by this CLI. The known unstable-feature notice
+is suppressed through its dedicated setting; all other error items still fail closed.
+
+Only explicitly approved `materials.read_material` with exact `{id}` is accepted.
+Independent `*.codex-config.json` records configuration, never a Claude mcp.json.
+A dedicated child token is erased in the MCP environment; HOME/CODEX_HOME are
+preserved; inherited session/model credential environment variables are removed.
+Same-user credential files under CODEX_HOME may remain readable; this is not
+filesystem credential isolation. Official Model Studio
+qwen3.8-max catalog metadata is narrowed to text review; unknown models use the
+CLI fallback with its exact warning. Global and per-tool output limits are explicit.
+No automatic retry or fallback occurs. Plan still has independent inventory and review.
+
+Codex exec JSONL supplies no actual model identity: `actual_model=null` and
+`model_evidence=requested_only` are mandatory, and the report warns that server routing
+identity is unproven. `cli_model` records the actual requested CLI model, not sonnet.
+This is an explicit acceptance exception to actual-model evidence in this Skill and
+codex-relay; never describe it as equivalent to Claude init or proven cross-model
+identity. A final report must follow complete exact frozen-material reads and a
+single successful turn termination. Ordinary reasoning/progress is not final evidence.
+Raw JSONL hashes and stage durations are recorded; idle timeout still defaults to
+300 seconds, so long Responses silence may fail. Do not invent maximum-silence data.
+
+The Codex executor explicitly sets `model_reasoning_effort=medium`, matching the
+existing Claude review effort. It preserves the official catalog's default xhigh
+metadata. Initially omitting the explicit setting caused observed requests to use
+xhigh, an unintended budget increase; local wire capture confirms the explicit
+medium override and complete 12KiB material transport. This does not establish
+that reasoning effort caused observed live silence, or that live latency is fixed.

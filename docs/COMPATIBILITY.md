@@ -155,3 +155,51 @@ CLI 入口冒烟与原生宿主接力分别留证，不据此扩大 compat.json 
 Claude 正常会话返回 Login expired，仅 hook 播报成功。用户明确裁决先完成 Codex
 侧、Claude 留待补验；Qwen bare 鉴权成功不代表 Claude 正常登录或主导接力通过。
 补验时机及关闭判据见 [维护待办](FEATURE_TODOS.md)。
+
+## 2026-10-15 Qwen Responses / Codex 执行器边界
+
+新增显式 `--channel qwen --qwen-executor codex --responses-base-url URL` 路径，
+默认仍为 Claude CLI。Codex 配置语义固定在 0.160.0，未知版本预检停止；
+版本警告查询 `tested.codex`，本轮不扩大 compat.json 清单。指定端点为
+`https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`。
+
+最小真实探针证明该端点能经 Responses 完成文本与编号材料调用；不等于
+正式入口的 plan/diff 验收。离线 fixture 只验证协议与失败路径。正式 live
+结果须由独立主模型追加，不在实施阶段宣称完成。Codex JSONL 无实际模型
+身份，记录 `actual_model=null`、`model_evidence=requested_only`，不可借 requested
+值证明服务端模型路由。官方 Model Studio Codex 文档提供 qwen3.8-max catalog
+结构，执行器采用文本评审能力与显式输出预算；其他模型不伪造 catalog。
+
+只读子进程不是父 Python 的 OS 隔离。关闭能力与宿主技能发现后仍可能有
+全局 AGENTS、系统技能目录、request_user_input 和通用 MCP resource 工具；
+协议拒绝所有非材料工具
+执行，不能宣称空上下文或只可见一个工具。12KiB 中文传输边界需要本地真实
+Responses 后续请求捕获；JSONL 内容匹配本身不能证明未被上下文截断。
+
+本地真实请求发现 `user_instructions` 配置键在 0.160.0 被忽略并产生 error
+事件，故不使用该键，也不宣称清除用户指令。仅通过专用设置关闭已知实验
+功能提醒；未知配置/运行 error 仍失败，不将所有 error 降为普通日志。
+
+初始候选沿用官方 catalog 的 default xhigh，实际本地请求也为 xhigh；旧
+Claude runner 显式 medium，故这属于意外预算提升。现显式设置
+`model_reasoning_effort=medium`，保留 catalog 默认元数据。独立本地捕获
+已确认两次真实 HTTP 请求均为 medium、12288 字节中文材料完整。此证据
+不证明线上静默由 xhigh 导致，也不证明线上时延已修复。
+
+用户明确允许更长等待后，显式 idle 上限从600秒扩大到900秒；默认仍为
+300秒，单阶段 total 上限仍3600秒。本轮复验使用
+`--idle-timeout 900 --timeout 1800`，这只是等待预算调整，不证明线上问题解决。
+
+主模型独立验收结果：最终 medium 候选的正式两阶段 plan 完成，inventory
+8块/38.99秒、review 10块/83.16秒，并识别故意放入的需求冲突；本次12文件
+真实 diff 完成，33块/531.15秒，33次读取全部匹配、零恢复、单条最终报告。
+两项均使用上述指定域名及900/1800秒预算。81项适配测试通过；此前同一
+配置/回执改动的37项桌面后端与8项桌面契约测试通过。真实本地 Responses
+捕获确认最终候选发送 medium，并完整传递12288字节中文材料。
+
+此前 xhigh 候选的300秒及600秒实测均未完成，超时清理报宿主权限错误；
+普通 Python 子进程也能复现该清理错误，检查未发现残留进程。成功样本
+不消除这个宿主边界，也不能单独证明时延变化由 medium 引起。本轮真实
+diff仍出现超过300秒无输出，默认300秒不保证适用大增量；显式900秒预算
+仅证明本次完成，不是稳定性保证。原始失败、成功日志及逐项裁决保留在
+本次外部运行记录中。仍不声称实际服务端模型身份或全局上下文完全隔离。

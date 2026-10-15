@@ -4,6 +4,11 @@
 
 First public release.
 
+- Qwen 评审新增可选 Codex CLI Responses 执行器，保留默认 Claude CLI 与独立 Anthropic 地址。
+- 新增编号材料完整性与 Codex JSONL 校验，显式 medium；模型证据为 requested_only，不宣称实际服务端身份。
+- 显式 idle 上限支持900秒，默认仍300秒；900/1800秒预算下正式两阶段方案评审及33块真实增量评审通过，81项适配测试通过。
+- README 中英文同步执行器选择与兼容边界，关闭对应文档同步待办；菜单栏执行器选择尚未提供。
+
 - **Claude → Codex**: `/codex-review` (plan or diff, Codex read-only sandbox) and `/codex-implement`
   (Codex takes over implementation when the implementer subagent is blocked by API failures).
 - **Codex → Claude**: `$claude-review` (bounded, repeatable Claude review of a plan or a scoped diff)
