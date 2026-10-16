@@ -133,6 +133,12 @@ project goals, caller contracts and meaningful tradeoffs; implementers follow th
 contract. Small copy/style edits do not trigger a full design process. No per-project setup
 or new installation object is required; existing source links carry the shared method.
 
+For requested retrospectives, rule maintenance, or evidenced recurring collaboration problems, the primary
+loads `core/RETRO.md`: classify evidence, prefer existing deterministic checks, and keep
+project rules local. Rule changes require existing authorization; successful tasks do not
+automatically trigger reports. New-session samples verify bounded behavior, not long-term
+effectiveness or Claude ordinary-login compliance. No new installation object is added.
+
 The planning primary loads `core/PLANNING.md` for clarification, specifications and
 verifiable behavior slices when needed. Clear small tasks do not require a full plan.
 It preserves mode and permission boundaries and does not create tickets, agents or
