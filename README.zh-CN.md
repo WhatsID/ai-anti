@@ -59,6 +59,8 @@ AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验�
 
 ## 安装使用
 
+第一次使用？先看 [最小上手指南](docs/QUICKSTART.zh-CN.md)：选路径、安装、检查入口、完成小任务及排查。
+
 前置条件：基础脚本需要 macOS、Python 3.9+；按所选路径准备相应的
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和/或
 [Codex CLI](https://github.com/openai/codex)，以及所需登录或 API 凭证。

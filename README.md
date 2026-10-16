@@ -87,6 +87,8 @@ read by the models, which handle Chinese fine. This README is a summary, not a t
 
 ## Install and use
 
+New here? Follow the [minimal quickstart (Chinese)](docs/QUICKSTART.zh-CN.md) for setup, entry checks, a first task and troubleshooting.
+
 Prerequisites: macOS and Python 3.9+ for the base scripts. Install the CLI and login or API
 credentials required by your chosen path: [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
 and/or [Codex CLI](https://github.com/openai/codex). Qwen Responses review uses Codex plus the
