@@ -1,20 +1,38 @@
 # CLI 版本兼容性
 
-机器可读清单是仓库根 `compat.json`。`install.sh --status` 打印本机 `claude`、`codex`、`python3`
-的实际版本并标出是否在清单内；`claude-review` 把 `claude --version` 原样记进 manifest 的
-`cli_version`，版本不在清单内时在 `status.json`、manifest 与报告开头各写一条警告。
-**警告不阻断**：不在清单内只说明没有实测过，真正决定结果的仍是各入口的 fail-closed 门禁。
+## 当前支持摘要
 
-## 实测通过的版本
+机器可读版本集合为根 `compat.json`（schema 1），路径级证据以本文为准。
+`install.sh --status` 打印实际版本与清单归属；“在实测清单内”不证明全部路径或安装健康。
+正式评审把 CLI 版本记入 manifest；清单外警告本身不阻断，但执行器另有能力与协议门禁，
+未列版本并不保证可运行。Qwen Responses / Codex 另有精确 0.160.0 版本预检，未放宽。
 
-| 组件 | 版本 | 实测路径 |
-|------|------|----------|
-| Claude Code | 2.1.258 | Codex→Claude：`$claude-review` plan 两阶段与 diff 评审（`completed`，实际模型同家族匹配） |
-| Claude Code | 2.1.280 | Codex→Claude：`$claude-review` diff 评审（`completed`，init 上报内置插件后按白名单放行） |
-| Codex CLI | 0.156.0 | Claude→Codex：`/codex-review` 方案评审（`codex exec --sandbox read-only`） |
-| Python | 3.9+ | `claude-review` 脚本与安装器内嵌脚本只用标准库；没有 `tomllib`，所以用户配置用 JSON |
+| 组件 / 路径 | 版本或前提 | 已验程度与边界 |
+|-------------|------------|----------------|
+| 基础脚本 / 安装器 | Python 3.9+；macOS 已测 | 标准库脚本；其他操作系统未验证 |
+| 可选 macOS 菜单栏 | macOS 13+、Swift 6.1、Python 3.11+ | 本地 ad-hoc 构建；不是公证分发 |
+| Claude 主导 → Codex CLI 评审 | Codex 0.156.0 | 历史 `/codex-review` 方案评审证据；不外推新版本全路径 |
+| Codex 主导 → Claude reviewer | Claude 2.1.258 / 2.1.280 | 2.1.258 plan 两阶段与 diff；2.1.280 diff，既有内置插件白名单门禁 |
+| Qwen 经 Claude CLI | Claude 2.1.280 | 正式 plan / scoped diff，含编号 MCP 正式增量；只支持记录中的模型与材料范围 |
+| Qwen Responses 经 Codex | Codex 0.160.0 | 正式 plan 与历史 scoped diff；`actual_model=null`、`model_evidence=requested_only` |
+| Codex 用户级入口 / 共享方法 | Codex 0.160.0 | 有限跨项目发现、隔离接力与方法样本；不是任意任务遵循保证 |
+| Claude 普通登录主导完整链路 | 待补验 | 历史 Login expired；Qwen bare 鉴权不能代替普通登录验收 |
+| DeepSeek | 历史端点 / 离线能力 | 不代表当前配置、桌面外部调用或完整接力通过 |
 
-只在 macOS 上验证过；其他平台未验证。
+安装健康、模型遵循与完整接力是三类证据。完整接力还依赖主工具原生独立代理、
+显式实施模型及可观察 runtime 证据；普通 CLI 不自动提供全部能力。
+主模型和实施者的 runtime metadata 只支持该宿主运行身份；供应方内部模型路由是另一边界，
+不能从 requested model 推断 actual model。历史模型 ID 不保证任意用户有权使用。
+
+升级后先取得对应路径真实冒烟与失败门禁证据，再登记版本；失败时不要放松门禁。
+Claude 也有 capability / 协议门禁，但并非 Responses 执行器的精确版本 pin。
+历史 `claude -p` 非 Claude 模型直传曾受客户端注册表阻挡；插件使用档位别名及默认映射。
+详细条件与失败记录见下文，维护待办见 [FEATURE_TODOS.md](FEATURE_TODOS.md)。
+
+## 历史验收记录
+
+以下为当时记录，旧清单、默认值与“本轮未扩大清单”等表述不是当前配置；
+失败与补验边界原样保留，不因本次登记追溯改写。
 
 ## 实测过的评审模型
 
@@ -37,12 +55,6 @@
 - **`claude -p` 的模型直传**（2026-08-18 实测）：用 `ANTHROPIC_MODEL` 直传非 Claude 模型名会被
   CLI 客户端侧的模型注册表拦下，插件通道必须走「档位别名 + 档位默认模型映射」，见
   `plugins/qwen/commands/qwen-review.md`。
-
-## 升级 CLI 之后
-
-1. 跑一遍对应路径的真实冒烟（`/codex-review diff`、`$claude-review diff`、插件最小调用）；
-2. 通过后把版本追加进 `compat.json` 与「实测通过的版本」表，并写明实测了哪条路径；
-3. 失败时不要放松门禁迁就新版本，先查清是哪项能力变了。
 
 ## Codex → Qwen 新入口验收
 
@@ -209,3 +221,11 @@ diff仍出现超过300秒无输出，当时默认300秒不保证适用大增量�
 评审脚本所有通道和执行器的 idle 默认值统一为900秒，显式传参仍优先，上限仍为900秒。
 Qwen 每阶段总时间默认1800秒，Claude 仍600秒；总时间上限仍3600秒。
 这是基于上述长静默实测及用户要求的默认预算调整，不新增线上稳定性证据；历史实测预算保持原记录。
+
+## 2026-10-16 支持与安全说明登记
+
+本轮将 Codex 0.160.0 加入通用版本集合，保留 0.156.0 和 Claude 既有版本。
+依据为上述用户级入口、跨项目有限样本及 Responses 正式验收记录，另已核对共享复盘
+正式 plan 的 completed / CLI 0.160.0 / requested_only 留证；本轮没有新增付费模型探针。
+通用评审清单外警告与安装 status 清单归属因此变化；严格 Responses 版本门禁保持不变。
+安全数据流、凭证与本地证据保留边界见 [SECURITY.md](../SECURITY.md)。

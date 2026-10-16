@@ -87,9 +87,14 @@ read by the models, which handle Chinese fine. This README is a summary, not a t
 
 ## Install and use
 
-Prerequisites: macOS, [Claude Code](https://docs.anthropic.com/en/docs/claude-code),
-[Codex CLI](https://github.com/openai/codex), Python 3.9+, with both Claude Code and Codex CLI
-logged in and working.
+Prerequisites: macOS and Python 3.9+ for the base scripts. Install the CLI and login or API
+credentials required by your chosen path: [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
+and/or [Codex CLI](https://github.com/openai/codex). Qwen Responses review uses Codex plus the
+configured API credential; it does not require Claude login.
+
+A full relay additionally needs native independent agents in the primary tool, an explicitly
+selected implementation model and observable runtime evidence. A standalone CLI does not
+automatically supply the complete relay. Listed model IDs do not imply access for every account.
 
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
@@ -302,18 +307,24 @@ the paths you configure.
 
 ## Compatibility
 
-Verified versions:
+Versions with path-scoped evidence:
 
-| Component | Verified versions |
-|-----------|-------------------|
-| Claude Code | 2.1.258, 2.1.280 |
-| Codex CLI | 0.156.0 |
-| Python | 3.9 or later |
+| Component | Registered versions / requirements |
+|-----------|------------------------------------|
+| Claude Code | 2.1.258, 2.1.280 (review paths) |
+| Codex CLI | 0.156.0, 0.160.0 (different verified paths) |
+| Base scripts | Python 3.9+; macOS tested, other systems unverified |
+| Optional macOS menu bar app | macOS 13+, Swift 6.1, Python 3.11+; ad-hoc build, not notarized distribution |
 
-[compat.json](compat.json) is the authoritative list, and `./install.sh --status` checks your
-local versions against it. Details are in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md). Other
-versions generally produce a warning; the Qwen Responses executor separately requires
-0.160.0, which is not yet in the general list. Only macOS has been verified.
+[compat.json](compat.json) is the machine-readable version set; the path matrix and evidence
+limits in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) are authoritative for detailed support.
+Installer status reports membership, not all-path compatibility or health. Unlisted versions
+may warn and still fail independent capability/protocol gates. Qwen Responses remains exactly
+pinned to 0.160.0, now registered in the general set. Installation health, model adherence and
+full relay verification are separate; ordinary Claude login and DeepSeek full flows remain pending.
+
+The optional [macOS app](apps/macos/README.md) edits defaults and runs checks; business reviews
+still start from the CLI entries. Its configured model catalog is not service verification.
 
 ## Cost
 
@@ -341,8 +352,8 @@ untouched. Individual parts: `--without-hook`, `--without-codex`, `--remove-plug
 
 ## Security
 
-See [SECURITY.md](SECURITY.md): how external CLIs are sandboxed, how credentials are read, what the
-installer writes, and how to report a vulnerability.
+See [SECURITY.md](SECURITY.md) for per-path controls, data sent to model services, retained local
+evidence, credentials and desktop recovery backups, installer writes and private vulnerability reporting.
 
 ## License
 

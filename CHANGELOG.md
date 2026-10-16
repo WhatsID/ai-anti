@@ -4,6 +4,11 @@
 
 First public release.
 
+- 统一支持与安全说明：区分路径级证据、配置范围与全链验证，补充外发材料、本地证据和桌面密钥备份边界。
+- 关闭 Codex 0.160.0 兼容登记待办：依据既有正式 plan / scoped diff 及有限入口样本加入 compat.json；
+  安装 status 清单归属同步变化，Qwen Responses 精确版本预检不变。本轮未扩大通道实测范围或新增功能。
+- 发布前私密漏洞入口核对及路径兼容结构化登记等后续事项见 FEATURE_TODOS。
+
 - 评审脚本空闲超时默认统一为900秒，保留显式覆盖和总时间预算；同步各执行器测试与现行文档。
 
 - 设置字段改为“评审模型秘钥”；API 执行器固定跟随主模型，Claude→Codex 保留 Codex CLI，旧 Codex 执行器草稿须保存后生效。
@@ -26,7 +31,7 @@ First public release.
 - **User config** `~/.config/ai-anti/config.json`: channel order, default deployment scale, model
   family table, secondary implementation model, plugin endpoints. Missing keys use built-in defaults;
   an unparseable file stops instead of silently falling back.
-- **CLI compatibility**: `compat.json` lists CLI versions verified end to end; `install.sh --status`
+- **CLI compatibility**: `compat.json` lists CLI versions with path-scoped verification evidence; `install.sh --status`
   and `claude-review` warn on untested versions.
 - **Installer**: idempotent install / status / uninstall into `~/.claude` (and `~/.agents/skills`
   with `--with-codex`), ownership manifest, fail-closed on conflicts, coexists with the user's own

@@ -59,7 +59,12 @@ AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验�
 
 ## 安装使用
 
-前置条件：macOS、[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex CLI](https://github.com/openai/codex)、Python 3.9+，且 Claude Code 与 Codex CLI 都已登录可用。
+前置条件：基础脚本需要 macOS、Python 3.9+；按所选路径准备相应的
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和/或
+[Codex CLI](https://github.com/openai/codex)，以及所需登录或 API 凭证。
+Qwen Responses 评审需要 Codex 与所配置 API 凭证，不要求 Claude 登录。
+完整接力还需主工具原生独立代理、显式实施模型及可观察 runtime 证据；普通 CLI
+不自动具备完整接力能力。文中的模型 ID 不代表任意用户都有使用权限。
 
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
@@ -239,15 +244,20 @@ AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API
 
 ## 兼容性
 
-以下版本实测通过：
+以下版本有路径限定的证据：
 
-| 组件 | 实测通过的版本 |
-|------|----------------|
-| Claude Code | 2.1.258、2.1.280 |
-| Codex CLI | 0.156.0 |
-| Python | 3.9 及以上 |
+| 组件 | 已登记版本 / 要求 |
+|------|------------------|
+| Claude Code | 2.1.258、2.1.280（评审路径） |
+| Codex CLI | 0.156.0、0.160.0（已验路径不同） |
+| 基础脚本 | Python 3.9+；macOS 已测，其他系统未验 |
+| 可选 macOS 菜单栏 | macOS 13+、Swift 6.1、Python 3.11+；ad-hoc 构建，非公证分发 |
 
-通用实测清单以 [compat.json](compat.json) 为准，`./install.sh --status` 会对照它检查本机版本。说明见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md)。一般未列版本只给警告；Qwen Responses 执行器另有限定0.160.0的预检，且该版本尚未加入通用清单。只在 macOS 上验证过。
+[compat.json](compat.json) 为机器可读版本集合，详细路径与证据边界以
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) 为准。安装 status 只报告清单归属，
+不证明全路径兼容或健康；未列版本可能警告，也可能被独立能力/协议门禁拒绝。
+Qwen Responses 仍精确限定 0.160.0，该版本现已登记通用集合。
+安装健康、模型遵循与完整接力分别取证；Claude 普通登录及 DeepSeek 完整流程仍待补验。
 
 ## 成本
 
@@ -272,7 +282,7 @@ AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API
 
 ## 安全
 
-见 [SECURITY.md](SECURITY.md)：外部 CLI 的沙箱方式、凭证的读取方式、安装器写哪些位置、如何报告漏洞。
+见 [SECURITY.md](SECURITY.md)：分路径控制、模型外发数据、本地证据保留、凭证与桌面恢复备份、安装写入和私密漏洞报告。
 
 ## 许可证
 
@@ -281,9 +291,9 @@ AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API
 ## macOS 菜单栏配置工具（首期）
 
 [ai-anti 菜单栏应用](apps/macos/README.md) 提供菜单栏＋小设置窗口，管理默认模型、评审通道、协作模式与检测。
-首期支持 Claude→Codex、Claude→Qwen、Codex→Qwen；业务评审仍从现有 Claude/Codex 入口发起。
+可配置 Claude→Codex、Claude→Qwen/DeepSeek、Codex→Qwen/DeepSeek；配置范围不代表各路径均已验证，业务评审仍从现有入口发起。
 主导工具只是编辑哪组配置，默认值影响后续调用，当前会话不会切换；既有项目模式优先。
-`solo` 同时停用评审和独立实施，Codex 模式只在加载 codex-relay 工作流时生效。
+`solo` 同时停用评审和独立实施，Codex 用户级共享入口读取模式并负责分流，接力时再加载 codex-relay。
 
 首次启动只读，不自动调用模型或读密钥正文；免费本地检查不证明登录/额度，手动真实合成检测消耗额度。
 密钥复用已有文件或存入受限明文 secrets.json，不是钥匙串；保存有指纹、备份与冲突检查，支持恢复上次保存。
