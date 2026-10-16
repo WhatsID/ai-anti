@@ -34,7 +34,8 @@ Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停�
 
 模式优先级：当次明确用户指令 > 项目根 `.claude/relay-mode.local` > 全局 `relay.default_mode` > `rules`。
 坏配置停止；`solo` 独立完成且同时停用交叉评审与独立实施。`auto` 自动判断但保留强制高风险，`rules` 按规模与高风险，
-`force` 所有实质任务走流程。Codex 只在加载 codex-relay 的工作流中应用这些默认，不注册全会话规则。
+`force` 所有实质任务走流程。Codex 用户级共享入口读取模式并负责分流，需要接力时才加载 codex-relay。
+模式权威见 [共享入口](../core/WORKFLOW_ENTRY.md)；入口加载不等于模型完整遵循或接力已验收。
 
 仅接受 `solo`、`auto`、`rules`、`force`；旧值 `required` 无效，不作兼容。
 
