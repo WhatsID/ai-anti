@@ -30,6 +30,21 @@ def model(value, optional=False):
         raise StoreError('模型 ID 必须为非空且不含空白的字符串')
     return value
 
+def endpoint(value):
+    if not isinstance(value, str):
+        raise StoreError('服务地址类型无效')
+    try:
+        parsed = urlsplit(value)
+        valid = not value or (value == value.strip() and not any(c.isspace() for c in value) and parsed.scheme in ('https', 'http') and parsed.hostname and parsed.port != 0 and parsed.username is None and parsed.password is None and '?' not in value and '#' not in value)
+    except ValueError:
+        valid = False
+    if not valid:
+        raise StoreError('服务地址需为 HTTP(S) URL，不能包含凭证、查询参数或片段')
+    return value
+
+def effective_executor(values):
+    return values.get('qwen_executor', 'claude') if values['host'] == 'codex' else 'claude'
+
 def section(value, key):
     result = value.setdefault(key, {})
     if not isinstance(result, dict):
@@ -143,6 +158,7 @@ class Store:
                       channel=(channels[0] if channels else 'codex') if host == 'claude' else relay.get('review_channel', 'claude'),
                       reviewer_model=review.get('codex_model', ''), qwen_model=qwen.get('model', ''),
                       secondary_model=relay.get('secondary_model') or '', mode=mode_value, base_url=qwen.get('base_url', ''),
+                      responses_base_url=qwen.get('responses_base_url', ''), qwen_executor=relay.get('qwen_executor', 'claude'),
                       credential_paths=qwen.get('credential_paths', ['~/.config/ai-anti/secrets.json']), fallback_channels=channels[1:], claude_channel=(channels[0] if channels else 'codex'), codex_channel=relay.get('review_channel', 'claude'))
         for key in ('primary_model', 'claude_model', 'codex_model', 'reviewer_model', 'qwen_model', 'secondary_model', 'base_url'):
             if not isinstance(values[key], str):
@@ -156,9 +172,10 @@ class Store:
             path = self.credential_path(p)
             if path is not None:
                 safe_path(path)
-        endpoint = urlsplit(values['base_url'])
-        if endpoint.username is not None or endpoint.password is not None or endpoint.query or endpoint.fragment:
-            raise StoreError('已有服务地址含凭证或查询信息；请在原文件修复后刷新')
+        if values['qwen_executor'] not in ('claude', 'codex'):
+            raise StoreError('API 评审执行器无效')
+        for key in ('base_url', 'responses_base_url'):
+            endpoint(values[key])
         resolved = [self.credential_path(p) for p in paths]
         values['relative_credentials'] = any(p is None for p in resolved)
         values['credential_present'] = any(p.is_file() for p in resolved if p is not None)
@@ -216,29 +233,54 @@ class Store:
         return hashlib.sha256(encode([config_hashes, stamps])).hexdigest()
     def outputs(self, values, secret):
         host = values.get('host')
-        if host not in ('claude', 'codex') or values.get('channel') not in (('codex', 'qwen') if host == 'claude' else ('qwen',)):
-            raise StoreError('首期支持 Claude→Codex、Claude→Qwen、Codex→Qwen')
+        if host not in ('claude', 'codex'):
+            raise StoreError('主模型无效')
+        updates = values.get('host_updates', {})
+        if not isinstance(updates, dict) or any(h not in ('claude', 'codex') for h in updates):
+            raise StoreError('host_updates 主模型无效')
+        updates = {h: dict(fields) if isinstance(fields, dict) else fields for h, fields in updates.items()}
+        for h, fields in updates.items():
+            if not isinstance(fields, dict) or any(k not in ('primary_model', 'channel') for k in fields):
+                raise StoreError('host_updates 字段无效')
+            if 'primary_model' in fields:
+                model(fields['primary_model'], optional=True)
+            if 'channel' in fields and fields['channel'] not in (('codex', 'qwen') if h == 'claude' else ('qwen',)):
+                raise StoreError('首期支持 Claude→Codex、Claude→Qwen、Codex→Qwen')
+        current = updates.setdefault(host, {})
+        for key in ('primary_model', 'channel'):
+            if key in current and current[key] != values.get(key):
+                raise StoreError('host_updates 与当前主模型字段冲突')
         if values.get('mode') not in MODES:
             raise StoreError('协作模式无效；合法值：' + '/'.join(MODES))
         for key in ('primary_model', 'secondary_model', 'reviewer_model', 'qwen_model'):
             model(values.get(key), optional=True)
-        if values['channel'] == 'qwen':
-            model(values['qwen_model'])
-        url = values.get('base_url', '')
-        parsed = urlsplit(url)
-        if url and (parsed.scheme not in ('https', 'http') or not parsed.hostname or parsed.username is not None or parsed.password is not None or parsed.query or parsed.fragment):
-            raise StoreError('服务地址需为 HTTP(S) URL，不能包含凭证、查询参数或片段')
-        if values['channel'] == 'qwen' and not url:
-            raise StoreError('Qwen 服务地址不能为空')
         ai = object_json(self.raw('ai')) if self.paths['ai'].exists() else {}
         review, relay, qwen = section(ai, 'review'), section(ai, 'codex_relay'), section(section(ai, 'plugins'), 'qwen')
+        executor = values.get('qwen_executor', relay.get('qwen_executor', 'claude'))
+        if executor not in ('claude', 'codex'):
+            raise StoreError('API 评审执行器无效')
+        urls = {key: endpoint(values.get(key, qwen.get(key, ''))) for key in ('base_url', 'responses_base_url')}
         channels = review.get('channels', ['codex', 'same-family'])
         if not isinstance(channels, list) or not all(isinstance(c,str) for c in channels):
             raise StoreError('评审通道列表无效')
-        if host == 'claude':
-            review['channels'] = [values['channel']] + [c for c in channels if c != values['channel']]
-        else:
-            relay['review_channel'] = values['channel']
+        original_channels = {'claude': channels[0] if channels else 'codex', 'codex': relay.get('review_channel', 'claude')}
+        if values.get('channel') != original_channels[host]:
+            current['channel'] = values.get('channel')
+        current['primary_model'] = values['primary_model']
+        for h, fields in updates.items():
+            route = fields.get('channel', original_channels[h])
+            if 'channel' in fields and route not in (('codex', 'qwen') if h == 'claude' else ('qwen',)):
+                raise StoreError('首期支持 Claude→Codex、Claude→Qwen、Codex→Qwen')
+            if route == 'qwen' and (h == host or 'channel' in fields):
+                model(values['qwen_model'])
+                active = 'responses_base_url' if h == 'codex' and executor == 'codex' else 'base_url'
+                if not urls[active]:
+                    raise StoreError('当前 API 执行器的服务地址不能为空')
+            if 'channel' in fields and route != original_channels[h]:
+                if h == 'claude':
+                    review['channels'] = [route] + [c for c in channels if c != route]
+                else:
+                    relay['review_channel'] = route
         if values['reviewer_model']:
             review['codex_model'] = values['reviewer_model']
         else:
@@ -246,7 +288,9 @@ class Store:
         relay['secondary_model'] = values['secondary_model'] or None
         section(ai, 'relay')['default_mode'] = values['mode']
         section(ai, 'desktop')['primary_host'] = host
-        qwen['model'], qwen['base_url'] = values['qwen_model'], url
+        qwen['model'] = values['qwen_model']
+        qwen.update(urls)
+        relay['qwen_executor'] = executor
         paths = qwen.get('credential_paths', ['~/.config/ai-anti/secrets.json'])
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             raise StoreError('凭证路径列表无效')
@@ -264,14 +308,23 @@ class Store:
             own = '~/.config/ai-anti/secrets.json'
             qwen['credential_paths'] = [own] + [p for p in paths if self.credential_path(p) != self.paths['secrets']]
         output['ai'] = encode(ai)
-        primary = values['primary_model']
-        if primary:
-            if host == 'codex':
-                output['codex'] = edit_toml(self.raw('codex'), primary)
+        for h, fields in updates.items():
+            primary = fields.get('primary_model', '')
+            if not primary:
+                continue  # Empty means retain the existing default.
+            if h == 'codex':
+                raw = self.raw('codex')
+                try:
+                    existing = tomllib.loads(raw.decode()).get('model', '') if raw else ''
+                except (ValueError, UnicodeError):
+                    raise StoreError('Codex TOML 损坏，未覆盖') from None
+                if primary != existing:
+                    output['codex'] = edit_toml(raw, primary)
             else:
                 settings = object_json(self.raw('claude')) if self.paths['claude'].exists() else {}
-                settings['model'] = primary
-                output['claude'] = encode(settings)
+                if primary != settings.get('model', ''):
+                    settings['model'] = primary
+                    output['claude'] = encode(settings)
         return output
     def transaction(self, outputs, expected, restoring=False):
         safe_path(self.desktop / 'lock')
@@ -354,6 +407,12 @@ class Store:
             raise StoreError('恢复记录损坏') from None
         if outputs.get('ai') is not None:
             restored_ai = object_json(outputs['ai'])
+            restored_executor = section(restored_ai, 'codex_relay').get('qwen_executor', 'claude')
+            if restored_executor not in ('claude', 'codex'):
+                raise StoreError('恢复记录 API 评审执行器无效；请先完成一次新保存以刷新恢复点')
+            restored_qwen = section(section(restored_ai, 'plugins'), 'qwen')
+            for key in ('base_url', 'responses_base_url'):
+                endpoint(restored_qwen.get(key, ''))
             restored_mode = section(restored_ai, 'relay').get('default_mode', 'rules')
             if restored_mode not in MODES:
                 raise StoreError('恢复记录协作模式无效；合法值：' + '/'.join(MODES) + '；请先完成一次新保存以刷新恢复点')

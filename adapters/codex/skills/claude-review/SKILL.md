@@ -156,7 +156,7 @@ invocation only. Use `--channel qwen --qwen-executor codex --responses-base-url
 https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`. Reuse the configured
 Qwen model and credential paths. An Anthropic URL is never rewritten. URL overrides
 are rejected outside Qwen Codex; URLs forbid credentials, whitespace, query and fragment.
-The UI does not expose an executor selector; its existing save preserves these keys.
+The macOS settings show a disabled executor: Codex hosts use Codex CLI for API review, Claude hosts use Claude Code CLI for API review, and Claude-to-Codex review uses Codex CLI. Legacy Codex API executor changes require an explicit save; Anthropic and Responses URLs remain independent. The CLI executor override remains available.
 
 Codex configuration semantics are pinned to `codex-cli 0.160.0`; unknown versions
 stop at preflight. Compatibility warnings use `tested.codex`, independently of

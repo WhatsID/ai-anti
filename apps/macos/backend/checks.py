@@ -8,7 +8,7 @@ import subprocess
 import tempfile
 import time
 import uuid
-from config_store import StoreError, model
+from config_store import StoreError, model, effective_executor
 
 class CheckError(StoreError):
     def __init__(self, message):
@@ -104,7 +104,7 @@ def local(store, source=None):
     # Validation builds bytes but never writes them.
     store.outputs(v, '')
     source_root(store, source)
-    names = {v['host'], 'claude' if v['channel'] == 'qwen' else 'codex'}
+    names = {v['host'], effective_executor(v) if v['channel'] == 'qwen' else 'codex'}
     with tempfile.TemporaryDirectory(prefix='ai-anti-local-') as temp:
         for name in names:
             cli = discover(name)
@@ -144,11 +144,27 @@ def codex_events(path, marker):
         raise CheckError('Codex 未完成有效合成材料读取；退出码不足以证明成功')
     return actual
 
-def real(store, source=None, timeout=1200):
+def qwen_evidence(status, manifest, values):
+    executor = effective_executor(values)
+    expected = dict(channel='qwen', executor=executor, wire_api='responses' if executor == 'codex' else 'anthropic', requested_model=values['qwen_model'])
+    if status.get('completed') is not True or manifest.get('mode') != 'diff':
+        raise ValueError()
+    for item in (status, manifest):
+        if item.get('status') != 'completed' or any(item.get(k) != v for k, v in expected.items()):
+            raise ValueError()
+        if executor == 'codex':
+            if 'actual_model' not in item or item['actual_model'] is not None or item.get('model_evidence') != 'requested_only':
+                raise ValueError()
+        elif item.get('actual_model') != values['qwen_model']:
+            raise ValueError()
+    return status['actual_model']
+
+def real(store, source=None, timeout=None):
     snapshot = store.read()
     v = snapshot['values']
     store.outputs(v, '')
     root = source_root(store, source)
+    timeout = timeout if timeout is not None else (1800 if v['channel'] == 'qwen' else 1200)
     with tempfile.TemporaryDirectory(prefix='ai-anti-probe-') as temp:
         temp = Path(temp).resolve()
         os.chmod(temp, 0o700)
@@ -174,15 +190,16 @@ def real(store, source=None, timeout=1200):
             import sys
             argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
                     '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
-                    '--out', str(out), '--channel', 'qwen', '--timeout', str(timeout), '--max-output-bytes', str(2*1024*1024)]
-            if run(argv, repo, temp / 'runner.log', timeout=timeout, env=env) != 0:
+                    '--out', str(out), '--channel', 'qwen', '--qwen-executor', effective_executor(v),
+                    '--timeout', str(timeout), '--idle-timeout', '900', '--max-output-bytes', str(8*1024*1024)]
+            if effective_executor(v) == 'codex':
+                argv += ['--responses-base-url', v['responses_base_url']]
+            if run(argv, repo, temp / 'runner.log', timeout=timeout+60, limit=8*1024*1024, env=env) != 0:
                 raise CheckError('Qwen 正式入口检测失败；日志已隐藏，未自动重试或降级')
             try:
                 status = json.loads((out / 'status.json').read_text())
                 manifest = json.loads((out / 'manifest.json').read_text())
-                if status.get('status') != 'completed' or status.get('completed') is not True or status.get('actual_model') != v['qwen_model'] or manifest.get('status') != 'completed' or manifest.get('mode') != 'diff':
-                    raise ValueError()
-                actual = status['actual_model']
+                actual = qwen_evidence(status, manifest, v)
             except (OSError, ValueError, KeyError):
                 raise CheckError('Qwen 正式入口证据不完整或实际模型不匹配') from None
         else:
@@ -207,4 +224,7 @@ def real(store, source=None, timeout=1200):
             actual = codex_events(log, marker)
         if store.read()['signature'] != snapshot['signature']:
             raise CheckError('检测中配置或凭证发生变化，结果作废')
-        return result('real', 'passed', '合成评审检测通过；不代表业务评审全量验证', snapshot, actual)
+        reply = result('real', 'passed', '合成评审检测通过；不代表业务评审全量验证', snapshot, actual)
+        if v['channel'] == 'qwen':
+            reply.update(requested_model=v['qwen_model'], model_evidence='requested_only' if effective_executor(v) == 'codex' else 'actual')
+        return reply

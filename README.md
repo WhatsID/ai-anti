@@ -263,8 +263,9 @@ credential paths are reused. This executor requires verified Codex CLI 0.160.0 a
 explicitly requests medium effort; other CLI versions stop at preflight. It records
 `actual_model=null` and `model_evidence=requested_only`, not proven serving-model identity.
 Formal plan and actual diff calls passed. Large diffs can still remain silent for minutes;
-900/1800 seconds is the tested budget, not a latency guarantee. The menu bar does not yet
-offer an executor selector; Claude remains the default. See [verification and limits](docs/COMPATIBILITY.md).
+900/1800 seconds is the tested budget, not a latency guarantee. The macOS settings display a fixed executor for each supported combination; the CLI still supports explicit executor selection. See [verification and limits](docs/COMPATIBILITY.md).
+
+AIAnti settings use Codex CLI for Codex-led API reviews, Claude Code CLI for Claude-led API reviews, and Codex CLI for Claude-to-Codex reviews. The executor field is disabled. Legacy Codex API executor changes are staged and require an explicit save before checks can run. Anthropic and Responses URLs are stored independently, with only the active protocol shown. Codex checks confirm the requested model only; the server's actual model remains unknown. Synthetic API checks allow 1800 seconds, 900 seconds idle and 8 MiB output, with 1860/1900-second outer cleanup budgets and cancellation. DeepSeek's full workflow remains unverified.
 
 ## Configuration
 

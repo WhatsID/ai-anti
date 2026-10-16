@@ -22,6 +22,62 @@ class CheckTests(unittest.TestCase):
         self.temp.cleanup()
     def script(self, text):
         p = self.root/'fake.py'; p.write_text(text); return p
+    def api_store(self, host='codex'):
+        store = Store(self.root/'home')
+        snap = store.read(); v = snap['values']
+        v.update(host=host, channel='qwen', qwen_model='qwen-fixture', qwen_executor='codex', base_url='https://example.invalid/anthropic', responses_base_url='https://example.invalid/v1')
+        store.save(v, snap['fingerprints'], 'fixture-token')
+        return store
+
+    def test_local_effective_executor_dependencies(self):
+        store = self.api_store()
+        with patch('checks.discover', return_value='/usr/bin/true') as discover:
+            checks.local(store, str(ROOT))
+        self.assertEqual({call.args[0] for call in discover.call_args_list}, {'codex'})
+        snap = store.read(); v = snap['values']; v['host'] = 'claude'; store.save(v, snap['fingerprints'])
+        with patch('checks.discover', return_value='/usr/bin/true') as discover:
+            checks.local(store, str(ROOT))
+        self.assertEqual({call.args[0] for call in discover.call_args_list}, {'claude'})
+
+    def test_formal_executor_limits_and_requested_only(self):
+        for host in ('codex', 'claude'):
+            store = self.api_store(host)
+            executor = 'codex' if host == 'codex' else 'claude'
+            def fake_run(argv, cwd, log, **kwargs):
+                if '--qwen-executor' in argv:
+                    self.assertEqual(argv[argv.index('--qwen-executor')+1], executor)
+                    if executor == 'codex':
+                        self.assertEqual(argv[argv.index('--responses-base-url')+1], 'https://example.invalid/v1')
+                    else:
+                        self.assertNotIn('--responses-base-url', argv)
+                    self.assertEqual(argv[argv.index('--timeout')+1], '1800')
+                    self.assertEqual(argv[argv.index('--idle-timeout')+1], '900')
+                    self.assertEqual(argv[argv.index('--max-output-bytes')+1], str(8*1024*1024))
+                    self.assertEqual(kwargs['timeout'], 1860); self.assertEqual(kwargs['limit'], 8*1024*1024)
+                    out = Path(argv[argv.index('--out')+1]); out.mkdir()
+                    evidence = dict(status='completed', completed=True, mode='diff', channel='qwen', executor=executor, wire_api='responses' if executor == 'codex' else 'anthropic', requested_model='qwen-fixture', actual_model=None if executor == 'codex' else 'qwen-fixture')
+                    if executor == 'codex': evidence['model_evidence'] = 'requested_only'
+                    for name in ('status', 'manifest'): (out/(name+'.json')).write_text(json.dumps(evidence))
+                return 0
+            with patch('checks.discover', return_value='/usr/bin/true'), patch('checks.run', side_effect=fake_run):
+                reply = checks.real(store, str(ROOT))
+            self.assertEqual(reply['actual_model'], None if executor == 'codex' else 'qwen-fixture')
+            self.assertEqual(reply['model_evidence'], 'requested_only' if executor == 'codex' else 'actual')
+
+    def test_evidence_rejects_mismatch_and_claimed_actual(self):
+        values = dict(host='codex', qwen_executor='codex', qwen_model='qwen-fixture')
+        good = dict(status='completed', completed=True, mode='diff', channel='qwen', executor='codex', wire_api='responses', requested_model='qwen-fixture', actual_model=None, model_evidence='requested_only')
+        self.assertIsNone(checks.qwen_evidence(good, good, values))
+        for key, bad in [('status', 'failed'), ('completed', False), ('channel', 'claude'), ('executor', 'claude'), ('wire_api', 'anthropic'), ('requested_model', 'other'), ('actual_model', 'qwen-fixture'), ('model_evidence', 'actual')]:
+            for side in (0, 1):
+                if key == 'completed' and side == 1: continue
+                pair = [dict(good), dict(good)]; pair[side][key] = bad
+                with self.subTest(key=key, side=side), self.assertRaises(ValueError): checks.qwen_evidence(*pair, values)
+        values['host'] = 'claude'
+        claude = dict(good, executor='claude', wire_api='anthropic', actual_model='qwen-fixture')
+        self.assertEqual(checks.qwen_evidence(claude, claude, values), 'qwen-fixture')
+        with self.assertRaises(ValueError): checks.qwen_evidence(dict(claude, actual_model='other'), claude, values)
+
     def test_version_nonzero_and_timeout(self):
         for text, timeout, expected in [('import sys; sys.exit(4)',2,4), ('import time; time.sleep(30)',.2,None)]:
             p=self.script(text)

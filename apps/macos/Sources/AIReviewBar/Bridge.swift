@@ -84,7 +84,7 @@ final class Bridge: @unchecked Sendable {
         }
         try begin(p)
         let action = payload["action"] as? String ?? ""
-        let timeout: Double = action == "real" ? 1230 : (action == "local" ? 40 : 30)
+        let timeout: Double = action == "real" ? 1900 : (action == "local" ? 40 : 30)
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self, weak p] in
             guard let self, let p, p.isRunning else { return }
             self.lock.lock()

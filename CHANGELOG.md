@@ -4,10 +4,13 @@
 
 First public release.
 
+- 设置字段改为“评审模型秘钥”；API 执行器固定跟随主模型，Claude→Codex 保留 Codex CLI，旧 Codex 执行器草稿须保存后生效。
+- 设置统一三种主模型/评审组合布局，协作模式位于实施模型 ID 下；允许来回切换保留两组草稿，统一事务保存并保护菜单入口。
+
 - Qwen 评审新增可选 Codex CLI Responses 执行器，保留默认 Claude CLI 与独立 Anthropic 地址。
 - 新增编号材料完整性与 Codex JSONL 校验，显式 medium；模型证据为 requested_only，不宣称实际服务端身份。
 - 显式 idle 上限支持900秒，默认仍300秒；900/1800秒预算下正式两阶段方案评审及33块真实增量评审通过，81项适配测试通过。
-- README 中英文同步执行器选择与兼容边界，关闭对应文档同步待办；菜单栏执行器选择尚未提供。
+- README 中英文同步执行器选择与兼容边界，关闭对应文档同步待办；设置窗口固定显示对应执行器、双协议地址独立保存、有效执行器检测与 requested_only 展示。
 
 - **Claude → Codex**: `/codex-review` (plan or diff, Codex read-only sandbox) and `/codex-implement`
   (Codex takes over implementation when the implementer subagent is blocked by API failures).

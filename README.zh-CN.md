@@ -206,7 +206,9 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
 新执行器固定验证 Codex CLI 0.160.0，显式使用 medium；其他 CLI 版本预检停止。
 该路径记录 `actual_model=null`、`model_evidence=requested_only`，不证明服务端实际模型身份。
 正式 plan 与真实 diff 已通过；大增量仍可能长时间无输出，900/1800秒仅为本次通过的预算。
-菜单栏暂未提供执行器选择，默认仍为 Claude。详见[验证记录与边界](docs/COMPATIBILITY.md)。
+macOS 设置窗口固定显示各组合的执行器，不可选择；CLI 仍支持显式选择执行器。详见[验证记录与边界](docs/COMPATIBILITY.md)。
+
+AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex API 执行器配置会生成待保存草稿，保存后才能检测。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，不推导或替换域名；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。API 合成检测预算为运行1800秒、空闲900秒、输出8MiB，外围1860秒、界面1900秒留清理余量，可取消。
 
 ## 配置
 

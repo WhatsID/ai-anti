@@ -27,6 +27,112 @@ class StoreTests(unittest.TestCase):
     def save(self, **changes):
         snap = self.snapshot(); v = snap['values']; v.update(changes)
         return self.store.save(v, snap['fingerprints'])
+    def test_batch_hosts_dispatch_restore_and_unchanged_bytes(self):
+        self.write('claude', b'{ "model": "claude-old", "custom": 1 }\n')
+        self.write('codex', b'# keep comment\nmodel = "codex-old"\n')
+        self.write('ai', {'review': {'channels': ['codex', 'same-family', 'qwen']}})
+        before = {k: self.store.raw(k) for k in ('ai', 'claude', 'codex')}
+        snap = self.snapshot(); v = snap['values']
+        v.update(primary_model='claude-new', host_updates={'claude': {'primary_model': 'claude-new'}, 'codex': {'primary_model': 'codex-new', 'channel': 'qwen'}}, qwen_model='fixture-api', base_url='https://fixture.invalid/anthropic')
+        reply = dispatch(self.store, dict(action='save', values=v, fingerprints=snap['fingerprints']))
+        self.assertEqual(reply['values']['claude_model'], 'claude-new')
+        self.assertEqual(reply['values']['codex_model'], 'codex-new')
+        self.assertEqual(reply['values']['codex_channel'], 'qwen')
+        self.store.restore(reply['fingerprints'])
+        self.assertEqual({k: self.store.raw(k) for k in before}, before)
+        reply = self.save(primary_model='claude-new')
+        self.assertEqual(self.store.raw('codex'), before['codex'])
+        self.assertEqual(json.loads(self.store.raw('ai'))['review']['channels'], ['codex', 'same-family', 'qwen'])
+
+    def test_host_updates_validation_and_no_writes(self):
+        snap = self.snapshot()
+        invalid = [None, [], {'other': {}}, {'claude': []}, {'claude': {'unexpected': 'x'}}, {'codex': {'primary_model': 1}}, {'codex': {'channel': 'codex'}}, {'claude': {'primary_model': 'conflict'}}, {'claude': {'channel': 'qwen'}}]
+        for update in invalid:
+            with self.subTest(update=update):
+                v = dict(snap['values'], host_updates=update)
+                with self.assertRaises(StoreError): self.store.save(v, snap['fingerprints'])
+                self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_batch_legacy_id_only_and_api_validation(self):
+        self.write('ai', {'review': {'channels': ['same-family', 'codex']}, 'codex_relay': {'review_channel': 'claude'}})
+        self.save(primary_model='new-claude', host_updates={'codex': {'primary_model': 'new-codex'}})
+        value = self.snapshot()['values']
+        self.assertEqual(value['claude_channel'], 'same-family')
+        self.assertEqual(value['codex_channel'], 'claude')
+        self.save(host='codex', primary_model='another-codex', channel='claude')
+        self.assertEqual(self.snapshot()['values']['codex_channel'], 'claude')
+        v = self.values(host='claude', channel='same-family', host_updates={'codex': {'channel': 'qwen'}}, qwen_model='fixture-api', qwen_executor='codex', base_url='https://fixture.invalid/anthropic')
+        with self.assertRaisesRegex(StoreError, '不能为空'): self.store.outputs(v, '')
+        v['responses_base_url'] = 'https://fixture.invalid/v1'
+        self.store.outputs(v, '')
+        v['host_updates'] = {'claude': {'channel': 'same-family'}}
+        with self.assertRaises(StoreError): self.store.outputs(v, '')
+
+    def test_batch_bad_toml_conflict_and_midwrite_rollback(self):
+        self.write('claude', {'model': 'old'})
+        self.write('codex', b'model = "old"\n')
+        snap = self.snapshot(); v = dict(snap['values'], primary_model='new', host_updates={'codex': {'primary_model': 'new'}})
+        before = {k: self.store.raw(k) for k in ('claude', 'codex')}
+        self.write('codex', b'broken = [')
+        with self.assertRaisesRegex(StoreError, 'TOML 损坏'): self.store.save(v, snap['fingerprints'])
+        self.assertEqual(self.store.raw('claude'), before['claude'])
+        self.write('codex', before['codex']); snap = self.snapshot()
+        self.write('claude', {'model': 'external'})
+        with self.assertRaisesRegex(StoreError, '其他程序'): self.store.save(v, snap['fingerprints'])
+        self.assertEqual(json.loads(self.store.raw('claude'))['model'], 'external')
+        snap = self.snapshot(); before = {k: self.store.raw(k) if self.store.paths[k].exists() else None for k in self.store.paths}
+        original = atomic
+        def fail_codex(path, raw, *args):
+            if path == self.store.paths['codex']: raise OSError('synthetic write failure')
+            return original(path, raw, *args)
+        with patch('config_store.atomic', fail_codex):
+            with self.assertRaisesRegex(StoreError, '已回滚'): self.store.save(v, snap['fingerprints'])
+        self.assertEqual({k: self.store.raw(k) if self.store.paths[k].exists() else None for k in self.store.paths}, before)
+
+    def test_executor_endpoints_dispatch_restore_and_legacy_preservation(self):
+        self.write('ai', {'plugins': {'qwen': {'base_url': 'https://old.invalid/anthropic', 'responses_base_url': 'https://old.invalid/v1', 'custom': 7}}, 'codex_relay': {'qwen_executor': 'codex'}})
+        before = self.store.raw('ai')
+        snap = self.snapshot(); v = snap['values']
+        v.update(host='codex', channel='qwen', qwen_model='qwen-fixture', responses_base_url='https://new.invalid/v1')
+        reply = dispatch(self.store, dict(action='save', values=v, fingerprints=snap['fingerprints']))
+        self.assertEqual(reply['values']['base_url'], 'https://old.invalid/anthropic')
+        self.assertEqual(reply['values']['responses_base_url'], 'https://new.invalid/v1')
+        self.assertNotEqual(reply['signature'], snap['signature'])
+        v = reply['values']; v.pop('responses_base_url'); v.pop('qwen_executor')
+        outputs = json.loads(self.store.outputs(v, '')['ai'])
+        self.assertEqual(outputs['plugins']['qwen']['responses_base_url'], 'https://new.invalid/v1')
+        self.assertEqual(outputs['codex_relay']['qwen_executor'], 'codex')
+        self.assertEqual(outputs['plugins']['qwen']['custom'], 7)
+        self.store.restore(reply['fingerprints']); self.assertEqual(self.store.raw('ai'), before)
+
+    def test_codex_only_endpoint_and_effective_host(self):
+        v = self.values(host='codex', channel='qwen', qwen_model='qwen-fixture', qwen_executor='codex', responses_base_url='https://example.invalid/v1')
+        self.store.outputs(v, '')
+        v['host'] = 'claude'
+        with self.assertRaisesRegex(StoreError, '不能为空'): self.store.outputs(v, '')
+        v['base_url'] = 'https://example.invalid/anthropic'
+        self.store.outputs(v, '')
+
+    def test_endpoint_and_executor_validation(self):
+        for key, value in [('qwen_executor', 'other'), ('qwen_executor', 9), ('responses_base_url', 7), ('responses_base_url', 'https://secret:password@example.invalid'), ('base_url', 'https://example.invalid?secret'), ('responses_base_url', 'https://[broken')]:
+            with self.subTest(key=key, value=value):
+                v = self.values(); v[key] = value
+                with self.assertRaises(StoreError) as error: self.store.outputs(v, '')
+                self.assertNotIn('password', str(error.exception))
+        self.write('ai', {'codex_relay': {'qwen_executor': 'other'}})
+        with self.assertRaises(StoreError): self.snapshot()
+
+    def test_restore_rejects_invalid_new_fields_before_write(self):
+        for invalid in ({'codex_relay': {'qwen_executor': 'bad'}}, {'plugins': {'qwen': {'responses_base_url': 'https://secret:password@example.invalid'}}}):
+            self.save()
+            backup = self.store.desktop / 'last-save.json'
+            record = json.loads(backup.read_bytes())
+            record['before']['ai'] = json.dumps(invalid).encode().hex()
+            atomic(backup, json.dumps(record).encode())
+            before = self.store.raw('ai'); snap = self.snapshot()
+            with self.assertRaises(StoreError): self.store.restore(snap['fingerprints'])
+            self.assertEqual(self.store.raw('ai'), before)
+
     def test_first_load_is_read_only(self):
         reply = dispatch(self.store, {'action':'load'})
         self.assertEqual(reply['values']['mode'], 'rules')
