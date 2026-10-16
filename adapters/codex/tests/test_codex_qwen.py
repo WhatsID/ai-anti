@@ -139,13 +139,16 @@ class CodexQwenTests(qwen.QwenReviewTests):
             self.assert_success(r, out, 'prepared')
             self.assertEqual(self.manifest(out)['limits']['idle_timeout'], 900)
             self.assertEqual(self.manifest(out)['limits']['timeout'], int(timeout))
+        r, out = self.run_review(extra=['--prepare-only', '--idle-timeout', '45'])
+        self.assert_success(r, out, 'prepared')
+        self.assertEqual(self.manifest(out)['limits']['idle_timeout'], 45)
         for extra in (['--idle-timeout', '901'], ['--timeout', '3601']):
             r, _ = self.run_review(extra=['--prepare-only'] + extra)
             self.assertNotEqual(r.returncode, 0)
             self.assertIn('invalid bounded resource limits', r.stderr)
         r, out = self.run_review(extra=['--prepare-only'])
         self.assert_success(r, out, 'prepared')
-        self.assertEqual(self.manifest(out)['limits']['idle_timeout'], 300)
+        self.assertEqual(self.manifest(out)['limits']['idle_timeout'], 900)
 
 for name in dir(qwen.QwenReviewTests):
     if name.startswith('test_') and name not in CodexQwenTests.__dict__:

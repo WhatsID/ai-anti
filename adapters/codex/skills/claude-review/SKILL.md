@@ -58,7 +58,7 @@ For the Claude executor, the init capability gate admits no plugins except the C
 The project governance document supplies `--scale`. A plan review performs two
 serial calls per round: an inventory call without the plan, then a fresh review
 call with the frozen plan and original inventory. Each call has its own timeout
-and bounded output (default 600 seconds total for Claude or 1800 for Qwen, 300 seconds without output,
+and bounded output (default 600 seconds total for Claude or 1800 for Qwen, 900 seconds without output,
 2 MiB log per Claude call or 8 MiB per Qwen call; configure with `--timeout`, `--idle-timeout`,
 `--max-output-bytes`). The entry does not retry a failed call or silently fall back
 to another model. New material or a material change requires a new review round;
@@ -143,8 +143,8 @@ remain unchanged; there are no aliases, automatic CLI restarts or extra model ca
 Manifest/status record selected channel and configured/requested/CLI model; manifest
 records actual init model and effective limits. These fields do not prove endpoint-internal
 routing. Explicit resource overrides win; upper bounds remain 3600 seconds total,
-900 seconds idle, and 8 MiB output per call. The idle default stays 300 seconds;
-use explicit `--idle-timeout 900 --timeout 1800` for the authorized longer wait.
+900 seconds idle, and 8 MiB output per call. The idle default is 900 seconds;
+explicit `--idle-timeout` values still take precedence within that cap. Qwen total defaults to 1800 seconds.
 
 
 ## Qwen Responses executor (explicit opt-in)
@@ -188,8 +188,8 @@ This is an explicit acceptance exception to actual-model evidence in this Skill 
 codex-relay; never describe it as equivalent to Claude init or proven cross-model
 identity. A final report must follow complete exact frozen-material reads and a
 single successful turn termination. Ordinary reasoning/progress is not final evidence.
-Raw JSONL hashes and stage durations are recorded; idle timeout still defaults to
-300 seconds, so long Responses silence may fail. Do not invent maximum-silence data.
+Raw JSONL hashes and stage durations are recorded; idle timeout defaults to
+900 seconds, so longer Responses silence may still fail. Do not invent maximum-silence data.
 
 The Codex executor explicitly sets `model_reasoning_effort=medium`, matching the
 existing Claude review effort. It preserves the official catalog's default xhigh

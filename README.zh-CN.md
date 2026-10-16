@@ -183,7 +183,7 @@ Claude 默认 Opus，可用 `--model fable` 或配置家族。Qwen 直接复用 
 无需安装插件；默认保留 Claude CLI，用 sonnet 别名映射配置模型，拒绝显式 `--model`。
 相对凭证路径按 `--repo` 解析，推荐绝对路径或 `~`；Claude 插件按调用 cwd 解析。
 `--prepare-only` 不读凭证、不调用 CLI。Qwen 默认每阶段 1800 秒，Claude 600 秒，
-idle 均 300 秒；显式覆盖优先，上限为总时间 3600 秒、idle 900 秒。
+idle 均 900 秒；显式覆盖优先，上限为总时间 3600 秒、idle 900 秒。
 manifest/status 留证通道与模型，init 模型精确校验不证明端点内部路由。
 
 ```bash

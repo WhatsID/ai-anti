@@ -132,7 +132,7 @@ def parser(families=None):
     result.add_argument("--responses-base-url")
     result.add_argument("--model", choices=sorted(families or MODEL_FAMILIES), default=None)
     result.add_argument("--timeout", type=int, default=None)
-    result.add_argument("--idle-timeout", type=int, default=300)
+    result.add_argument("--idle-timeout", type=int, default=900)
     result.add_argument("--max-output-bytes", type=int, default=None)
     result.add_argument("--prepare-only", action="store_true")
     return result

@@ -38,7 +38,7 @@ class QwenReviewTests(thin.ThinReviewTests):
                 self.assertNotEqual(m['material_registries']['inventory'], m['material_registries']['review'])
                 inventory_blocks = m['sources']['review']['inventory.md']['blocks']
                 self.assertTrue(set(b['path'] for b in inventory_blocks) <= set(v['path'] for v in m['material_registries']['review']['materials'].values()))
-            self.assertEqual(m['limits']['idle_timeout'], 300)
+            self.assertEqual(m['limits']['idle_timeout'], 900)
             self.assertEqual(len(m['stages']['review']['transport_warnings']), 2)
             self.assertEqual(m['stages']['review']['read_recoveries'], [])
             self.assertEqual(status['read_recovery_counts']['review'], 0)
@@ -59,6 +59,7 @@ class QwenReviewTests(thin.ThinReviewTests):
         r, out = self.run_review(extra=['--channel', 'claude'])
         self.assert_success(r, out)
         self.assertEqual(self.manifest(out)['limits']['timeout'], 600)
+        self.assertEqual(self.manifest(out)['limits']['idle_timeout'], 900)
         self.assertEqual(self.manifest(out)['limits']['max_output_bytes'], 2 * 1024 * 1024)
         r, out = self.run_review(extra=['--max-output-bytes', str(2 * 1024 * 1024)])
         self.assert_success(r, out)

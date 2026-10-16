@@ -238,7 +238,7 @@ plugin installation, defaulting to Claude CLI with a sonnet alias mapped to the 
 model. Explicit `--model` is rejected for Qwen. Relative credential paths resolve
 against `--repo`; the Claude plugin resolves them against invocation cwd. Prefer
 absolute paths or `~`. `--prepare-only` reads no credentials and calls no CLI.
-Qwen defaults to 1800 seconds per stage, Claude to 600, both to 300 seconds idle.
+Qwen defaults to 1800 seconds per stage, Claude to 600, both to 900 seconds idle.
 Explicit overrides win; caps are 3600 seconds total and 900 idle. Model evidence
 and exact init matching do not prove endpoint-internal routing.
 
