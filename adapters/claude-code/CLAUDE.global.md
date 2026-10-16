@@ -42,7 +42,8 @@
 （真实源为 `repo/adapters/claude-code/CLAUDE.global.md`），
 按任务读取该根下 `core/DEBUGGING.md` 或 `core/TESTING.md`；不得从业务 cwd 猜根。
 负责规划的主模型在澄清或编制方案时实际读取该根下 `core/PLANNING.md`；
-独立实施者执行定稿方案，不派发 PLANNING 让其重新规划。
+涉及模块职责、接口、依赖边界或跨调用方业务规则重复时，该主模型按需读取 `core/DESIGN.md`。
+独立实施者执行定稿方案和契约，不派发 PLANNING / DESIGN 让其重新规划或设计。
 方案阶段使用适用方法确定调查与验证；若方案依赖其正文、需要 reviewer 核对，
 把相关文件作为明确的只读材料传入，不假设评审继承正文或自动注入。
 派实施者及容灾接手时给出适用方法的绝对路径，要求实施者先实际读取；

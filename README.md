@@ -127,6 +127,12 @@ The entry loads in a new session. Status checks installation, not model complian
 external CLI version commands may create their own caches. Full multi-project relay
 validation is outside this entry change.
 
+For module responsibilities, interfaces, dependency boundaries or repeated business rules
+across callers, the design/planning primary reads `core/DESIGN.md` as needed. It checks
+project goals, caller contracts and meaningful tradeoffs; implementers follow the settled
+contract. Small copy/style edits do not trigger a full design process. No per-project setup
+or new installation object is required; existing source links carry the shared method.
+
 The planning primary loads `core/PLANNING.md` for clarification, specifications and
 verifiable behavior slices when needed. Clear small tasks do not require a full plan.
 It preserves mode and permission boundaries and does not create tickets, agents or

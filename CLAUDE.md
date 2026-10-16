@@ -11,7 +11,7 @@
 - **全部机制文件都是高风险触发器**——不论改动几个文件、改动多小，一律走接力流程
   （出方案 → 需求原文 → 跨模型交叉评审 → 分诊裁决 → 需求核对 → implementer 实施 →
   终审 → 汇报）。具体清单：
-  - `core/PLANNING.md`、`core/DEBUGGING.md`、`core/TESTING.md`
+  - `core/PLANNING.md`、`core/DESIGN.md`、`core/DEBUGGING.md`、`core/TESTING.md`
   - `core/WORKFLOW_ENTRY.md`、`adapters/codex/AGENTS.global.md`
   - `adapters/claude-code/CLAUDE.global.md`
   - `adapters/claude-code/commands/`、`adapters/claude-code/agents/`、

@@ -589,7 +589,7 @@ check_sources() {
   "$PY" - "$REPO" "$1" <<'PY'
 import os, pathlib, stat, sys
 root = pathlib.Path(sys.argv[1])
-names = ["core/" + n + ".md" for n in ("WORKFLOW_ENTRY", "PLANNING", "DEBUGGING", "TESTING", "REVIEW_PRINCIPLES", "CLI_DISCIPLINE")]
+names = ["core/" + n + ".md" for n in ("WORKFLOW_ENTRY", "PLANNING", "DESIGN", "DEBUGGING", "TESTING", "REVIEW_PRINCIPLES", "CLI_DISCIPLINE")]
 names += ["adapters/claude-code/CLAUDE.global.md", "adapters/claude-code/agents/implementer.md", "adapters/claude-code/commands/codex-implement.md"]
 if sys.argv[2] == "1":
     names += ["adapters/codex/AGENTS.global.md"] + ["adapters/codex/skills/" + n + "/SKILL.md" for n in ("claude-review", "codex-relay")]
