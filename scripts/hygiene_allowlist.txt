@@ -29,3 +29,9 @@ apps/macos/Sources/AIReviewBar/ModelCatalog.swift:qwen3.7-max
 apps/macos/Sources/AIReviewBar/ModelCatalog.swift:qwen3.7-plus
 apps/macos/Sources/AIReviewBar/ModelCatalog.swift:（官方 API / 阿里云 Token Plan）
 apps/macos/Sources/AIReviewBar/ModelCatalog.swift:（阿里云 Token Plan）
+
+# 已公开模型的评审适配说明与文本模型目录，限定文件和完整模型 ID
+adapters/codex/skills/claude-review/SKILL.md:qwen3.8-max
+adapters/codex/skills/claude-review/scripts/review_codex.py:qwen3.8-max
+# URL 凭证拒绝测试中的虚构地址，仅放行完整测试字符串
+apps/macos/backend/tests/test_control.py:https://secret:password@example.invalid
