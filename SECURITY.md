@@ -120,7 +120,9 @@ an app backup. See [the app README](apps/macos/README.md) for component behavior
 ## Reporting a vulnerability
 
 If enabled for this repository, use GitHub's Security tab → **Report a vulnerability** to
-submit a private report. The repository's live reporting settings have not been verified here.
+submit a private report. GitHub provides this feature for public repositories; maintainers must
+verify enablement and the reporting entry after making a repository public. See
+[GitHub’s configuration instructions](https://docs.github.com/en/code-security/how-tos/report-and-fix-vulnerabilities/configure-vulnerability-reporting/configure-for-a-repository).
 If the button is unavailable, open only a request for a private contact channel, without
 publishing vulnerability details, keys or logs. Do not put exploit details in a public issue.
 A private report should include the affected file/command, reproduction steps and expected

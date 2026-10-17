@@ -214,10 +214,14 @@
   复核时机：新增路径或自动化消费 tested 时；关闭判据：评估 schema_version 演进与
   install status / review 输出，具备路径级正反样例，不以版本归属代替全矩阵。本轮保留 schema 1。
   ｜来源：本轮评审中1、中3裁决
-- [ ] 中｜发布前核对线上私密漏洞报告入口 — 按钮未启用时用户无法私密提交。
-  复核时机：公开发布前；关闭判据：核对仓库 Security 私密报告入口的实际设置与可见性，
-  SECURITY.md 的条件说明或可用私密渠道与之相符，不公开密钥或漏洞细节。
-  ｜来源：支持与安全说明定稿
+- [ ] 中｜公开仓库后启用并复核私密漏洞报告入口 — 2026-10-17 管理员只读 API 核对：
+  仓库 visibility=private；private-vulnerability-reporting 返回404，不能记为已启用或已验收。
+  GitHub 此功能面向公开仓库。复核时机：用户明确授权公开仓库后、对外宣布发布前；
+  在 Settings → Advanced Security 启用 Private vulnerability reporting（如尚未启用）。
+  关闭判据：在仓库目录运行 `gh api 'repos/{owner}/{repo}/private-vulnerability-reporting'` 返回 enabled=true，
+  并用普通登录用户确认 Security → Advisories 的 Report a vulnerability 可进入私密表单，
+  不提交测试漏洞；SECURITY.md 与实际入口一致。本轮未更改仓库可见性或线上设置。
+  ｜来源：支持与安全说明定稿及发布前只读核对
 
 ### 新用户隔离验收后续（2026-10-17）
 
