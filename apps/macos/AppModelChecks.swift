@@ -17,7 +17,7 @@ import Combine
         let front = FakeClient(), back = FakeClient()
         let model = AppModel(foreground: front, background: back, automatic: false)
         let snapshot: [String: Any] = ["signature": "a", "fingerprints": ["fixture": "a"], "can_restore": true,
-            "values": ["host": "codex", "channel": "qwen", "mode": "rules", "primary_model": "fixture", "qwen_executor": "codex", "credential_present": true]]
+            "values": ["host": "codex", "channel": "qwen", "mode": "rules", "primary_model": "fixture", "qwen_executor": "codex", "credential_present": true, "base_url": "https://fixture.invalid/anthropic", "responses_base_url": "https://fixture.invalid/v1"]]
         let checked: [String: Any] = ["signature": "a", "message": "本地检查通过", "checked_at": "fixture", "actual_model": "fake"]
         model.refresh(); assert(model.busy)
         front.complete(.success(snapshot)); assert(model.loaded && !model.busy)
@@ -230,6 +230,91 @@ import Combine
         legacy.switchHost("claude")
         assert(legacy.draft.qwenExecutor == "codex" && legacy.draft.effectiveExecutor == "claude")
         legacy.discard(); assert(!legacy.dirty && legacy.draft.qwenExecutor == "claude")
+        // Missing Qwen endpoints are suggestions in the active protocol draft only.
+        let urlFront = FakeClient(), urlBack = FakeClient()
+        let urls = AppModel(foreground: urlFront, background: urlBack, automatic: false)
+        let responsesDefault = "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1"
+        let anthropicDefault = "https://token-plan.maas.qianwenaiapi.com/apps/anthropic"
+        func loadURLs(host: String, family: String = "qwen", base: String = "", responses: String = "") {
+            var fixture = snapshot
+            var fields = snapshot["values"] as! [String: Any]
+            fields["host"] = host; fields["channel"] = family == "codex" ? "codex" : "qwen"
+            fields["qwen_model"] = family == "deepseek" ? "deepseek-v4-pro" : "qwen-fixture"
+            fields["claude_channel"] = "qwen"; fields["codex_channel"] = "qwen"
+            fields["base_url"] = base; fields["responses_base_url"] = responses
+            fixture["values"] = fields
+            urls.refresh(); urlFront.complete(.success(fixture))
+        }
+        loadURLs(host: "codex", responses: " \n\t")
+        assert(urls.draft.responsesBaseURL == responsesDefault, "Codex Qwen must suggest the Responses URL")
+        assert(urls.draft.baseURL.isEmpty && urls.saved.responsesBaseURL == " \n\t" && urls.dirty)
+        let urlCount = urlFront.requests.count
+        urls.menuMode("force"); urls.check()
+        assert(urlFront.requests.count == urlCount, "Suggested defaults require explicit save before menu/check")
+        let suggested = urls.draft
+        var urlPublications = 0
+        let urlSubscription = urls.objectWillChange.sink { urlPublications += 1 }
+        urls.inspect(); urlBack.complete(.success(["signature": "a"]))
+        assert(urlPublications == 0 && urls.draft == suggested)
+        urls.save()
+        let defaultPost = urlFront.requests.last?["values"] as! [String: Any]
+        assert(defaultPost["responses_base_url"] as? String == responsesDefault && defaultPost["base_url"] as? String == "")
+        var defaultSaved = snapshot
+        var defaultSavedValues = snapshot["values"] as! [String: Any]
+        defaultSavedValues["base_url"] = ""; defaultSavedValues["responses_base_url"] = responsesDefault
+        defaultSaved["values"] = defaultSavedValues
+        urlFront.complete(.success(defaultSaved))
+        assert(urls.saved == urls.draft && !urls.dirty && urls.saved.responsesBaseURL == responsesDefault)
+        urls.menuMode("force")
+        assert(urlFront.requests.last?["action"] as? String == "save", "Saved suggestions must restore menu access")
+        urlFront.complete(.failure(BridgeFailure(message: "saved menu fixture")))
+        loadURLs(host: "codex", responses: " \n\t")
+        urls.discard(); assert(!urls.dirty && urls.draft.responsesBaseURL == " \n\t")
+        let discardedURLDraft = urls.draft
+        urlPublications = 0
+        urls.inspect(); urlBack.complete(.success(["signature": "a"]))
+        assert(urlPublications == 0 && urls.draft == discardedURLDraft, "Inspect must not refill discarded suggestions")
+        urls.save()
+        assert((urlFront.requests.last?["values"] as! [String: Any])["responses_base_url"] as? String == " \n\t", "Save must not refill a cleared endpoint")
+        urlFront.complete(.failure(BridgeFailure(message: "fixture validation")))
+        loadURLs(host: "claude", base: " \t")
+        assert(urls.draft.baseURL == anthropicDefault && urls.draft.responsesBaseURL.isEmpty && urls.saved.baseURL == " \t" && urls.dirty)
+        urls.discard(); assert(!urls.dirty && urls.draft.baseURL == " \t")
+        urls.switchHost("codex")
+        assert(urls.draft.responsesBaseURL == responsesDefault && urls.draft.baseURL == " \t")
+        urls.switchHost("claude"); assert(urls.draft.baseURL == anthropicDefault)
+        urls.draft.baseURL = "https://manual.invalid/anthropic"; urls.draft.responsesBaseURL = "https://manual.invalid/v1"
+        urls.switchHost("codex"); urls.switchHost("claude")
+        urls.switchReviewFamily("deepseek"); urls.switchReviewFamily("qwen")
+        assert(urls.draft.baseURL == "https://manual.invalid/anthropic" && urls.draft.responsesBaseURL == "https://manual.invalid/v1")
+        for host in ["claude", "codex"] {
+            loadURLs(host: host, base: "https://custom.invalid/anthropic", responses: "https://custom.invalid/v1")
+            assert(!urls.dirty && urls.draft == urls.saved)
+            loadURLs(host: host, family: "deepseek")
+            assert(!urls.dirty && urls.draft.baseURL.isEmpty && urls.draft.responsesBaseURL.isEmpty)
+            urls.switchReviewFamily("qwen")
+            assert(urls.draft.activeBaseURL == (host == "codex" ? responsesDefault : anthropicDefault))
+            loadURLs(host: host, family: "deepseek")
+            urls.menuChannel("qwen")
+            let menuPost = urlFront.requests.last?["values"] as! [String: Any]
+            assert(menuPost[host == "codex" ? "responses_base_url" : "base_url"] as? String == (host == "codex" ? responsesDefault : anthropicDefault))
+            urlFront.complete(.failure(BridgeFailure(message: "menu fixture")))
+        }
+        loadURLs(host: "claude", base: anthropicDefault)
+        assert(!urls.dirty)
+        urls.menuHost("codex")
+        let menuHostPost = urlFront.requests.last?["values"] as! [String: Any]
+        assert(menuHostPost["host"] as? String == "codex" && menuHostPost["responses_base_url"] as? String == responsesDefault)
+        assert(menuHostPost["base_url"] as? String == anthropicDefault)
+        urlFront.complete(.failure(BridgeFailure(message: "menu host fixture")))
+        loadURLs(host: "claude", family: "codex")
+        assert(!urls.dirty && urls.draft.baseURL.isEmpty && urls.draft.responsesBaseURL.isEmpty)
+        urls.switchReviewFamily("deepseek"); assert(urls.draft.baseURL.isEmpty)
+        urls.switchReviewFamily("qwen"); assert(urls.draft.baseURL == anthropicDefault)
+        urls.draft.baseURL = ""; urls.save()
+        assert((urlFront.requests.last?["values"] as! [String: Any])["base_url"] as? String == "")
+        urlFront.complete(.failure(BridgeFailure(message: "cleared fixture")))
+        withExtendedLifetime(urlSubscription) {}
         withExtendedLifetime(subscription) {}
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
     }

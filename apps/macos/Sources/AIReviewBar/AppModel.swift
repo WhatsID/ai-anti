@@ -84,6 +84,12 @@ struct Draft: Equatable {
     private func normalizeExecutorDraft() {
         if draft.host == "codex" && draft.channel == "qwen" { draft.qwenExecutor = "codex" }
     }
+    private func fillDefaultReviewURL() {
+        guard reviewFamily == "qwen", draft.activeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        draft.activeBaseURL = draft.host == "codex"
+            ? "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1"
+            : "https://token-plan.maas.qianwenaiapi.com/apps/anthropic"
+    }
     private func resetDrafts() { draft = saved; hostDrafts = savedHosts; normalizeExecutorDraft() }
     var claudeFallbacks: [String] {
         ([channels["claude"] ?? "codex"] + fallbacks).filter { $0 != draft.channel }
@@ -108,6 +114,7 @@ struct Draft: Equatable {
         normalizeExecutorDraft()
         if family == "deepseek" { draft.qwenModel = ModelCatalog.deepseek[0] }
         if family == "qwen" { draft.qwenModel = ModelCatalog.qwen[0] }
+        fillDefaultReviewURL()
     }
     let modes = [("solo", "独立完成"), ("auto", "自动判断"), ("rules", "按规模评审"), ("force", "始终评审")]
     init(foreground: AppRequesting? = nil, background: AppRequesting? = nil, automatic: Bool = true) {
@@ -190,6 +197,7 @@ struct Draft: Equatable {
         d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url"); d.qwenExecutor = v["qwen_executor"] as? String ?? "claude"
         saved = d; draft = d; loaded = true
         normalizeExecutorDraft()
+        fillDefaultReviewURL()
         channels = ["claude": text("claude_channel"), "codex": text("codex_channel")]
         defaults = ["claude": text("claude_model"), "codex": text("codex_model")]
         savedHosts = [:]
@@ -242,6 +250,7 @@ struct Draft: Equatable {
         guard let target = hostDrafts[host] else { return }
         draft.host = host; draft.primaryModel = target.primaryModel; draft.channel = target.channel
         normalizeExecutorDraft()
+        fillDefaultReviewURL()
     }
     func menuHost(_ host: String) {
         guard !busy, loaded, !dirty else { message = "设置草稿尚未保存或配置尚未读取、忙碌"; return }

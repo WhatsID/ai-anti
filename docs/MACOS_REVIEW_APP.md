@@ -51,7 +51,7 @@ Qwen 复用正式 `review.py diff --channel qwen`，临时仓库有 HEAD 和小�
 检查 completed、通道/执行器/协议/请求模型；Claude 分支精确匹配实际模型，Codex 分支保留 requested_only，并保留原完整读取和权限门禁。耗时可能最多30分钟，无快速探针或自动降级。
 Codex 使用隔离临时合成仓库、提示词文件、DEVNULL、文件日志和输出上限，要求最终turn完成、
 无error且返回文件里的随机值。实际模型只有结构化字段才显示，否则未知；请求ID或exit=0不是实际模型证明。
-AIAnti 设置窗口的评审执行器固定且不可选：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex→Claude CLI 配置加载或切入时会生成待保存草稿；保存前不能检测，取消草稿后若仍处于该旧 Codex 配置也保留迁移提示，未保存不改磁盘。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，不推导或替换域名；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。API 合成检测预算为运行1800秒、空闲900秒、输出8MiB，外围1860秒、界面1900秒留清理余量，可取消。
+AIAnti 设置窗口的评审执行器固定且不可选：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex→Claude CLI 配置加载或切入时会生成待保存草稿；保存前不能检测，取消草稿后若仍处于该旧 Codex 配置也保留迁移提示，未保存不改磁盘。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，仅在 Qwen 当前协议地址为空白时建议默认地址，不覆盖自定义地址；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。API 合成检测预算为运行1800秒、空闲900秒、输出8MiB，外围1860秒、界面1900秒留清理余量，可取消。
 
 检测结果仅内存，记录时间/配置签名与凭证文件stat，变化后作废，重启归未检测。
 
@@ -73,3 +73,5 @@ AIAnti 设置窗口的评审执行器固定且不可选：Codex→API 使用 Cod
 离线fake CLI与prepare-only用例覆盖边界，不冒充真实模型实测；GUI与实际账号合成检测由独立验收记录。
 
 设置统一字段顺序，协作模式位于实施模型 ID 下；评审 ID 仅一组，固定 CLI 执行器同样显示。无 API 时地址、密钥保留行并禁用。`values.host_updates` 可选对象仅接受 claude/codex 的 primary_model/channel，和当前字段冲突拒绝；各目标先验证再单次事务写入，未改通道与模型文件保留。未主动修改的旧通道不阻止仅改模型 ID。
+
+Qwen 在加载配置、切换主模型或切换至 Qwen 时，仅为空白的当前协议地址填入草稿：Codex 为 `https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`，Claude Code 为 `https://token-plan.maas.qianwenaiapi.com/apps/anthropic`。另一协议地址与自定义地址保留，DeepSeek 不填默认值。加载建议不会写盘，须在设置保存后才能检测或使用菜单快捷操作；取消可撤回地址建议，保存不自动补回手动清空的地址。默认地址不证明密钥匹配或模型可用。检测结果在菜单中显示纯文字，绿色对号/红色叉号仅在设置窗口显示；菜单当前选项的对号保留。

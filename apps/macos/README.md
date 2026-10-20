@@ -44,7 +44,7 @@ Qwen 使用现有正式 `review.py diff --channel qwen` 全部门禁；Codex 需
 验证 JSON 最终 turn 与随机合成文件读取得到的值，不能只凭退出码为零。实际模型没有结构化证据则标“未知”。
 检测结果只保存在内存；重启归未检测，配置/端点/凭证文件 stat 改变后失效。
 
-AIAnti 设置窗口的评审执行器固定且不可选：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex→Claude CLI 配置加载或切入时会生成待保存草稿；保存前不能检测，取消草稿后若仍处于该旧 Codex 配置也保留迁移提示，未保存不改磁盘。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，不推导或替换域名；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。API 合成检测预算为运行1800秒、空闲900秒、输出8MiB，外围1860秒、界面1900秒留清理余量，可取消。
+AIAnti 设置窗口的评审执行器固定且不可选：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex→Claude CLI 配置加载或切入时会生成待保存草稿；保存前不能检测，取消草稿后若仍处于该旧 Codex 配置也保留迁移提示，未保存不改磁盘。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，仅在 Qwen 当前协议地址为空白时建议默认地址，不覆盖自定义地址；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。API 合成检测预算为运行1800秒、空闲900秒、输出8MiB，外围1860秒、界面1900秒留清理余量，可取消。
 
 保存只改用户默认值，当前会话不会切换；项目模式、命令行、会话覆盖仍可能优先。
 主模型选项决定编辑哪组默认配置，不切换当前会话。可在未保存时来回切换，两组主模型 ID 和评审通道各自保留草稿；API 模型、地址、密钥及协作模式等仍共享。一次保存统一写入两组实际改过的字段，失败保留全部草稿；菜单快捷切换仍要求先保存或放弃草稿。项目模式优先于全局默认；solo 同时关闭交叉评审及独立实施。
@@ -55,7 +55,7 @@ Codex 用户级共享入口读取全局模式并负责分流，需要接力时�
 主模型 ID、实施模型 ID、评审模型 ID 使用固定目录下拉；主模型可保留当前默认值，Codex 评审可选 CLI 默认，实施模型可选未指定；API 模型必须选择 ID。
 已有目录外 ID 作为“已有配置”只读选项保留，切换家族再回来仍可选回加载原值。
 目录包含 Claude、Codex、Qwen 与 DeepSeek，选项不代表可调用性验证。DeepSeek 复用现有兼容 API 执行器，
-持久化仍为 `channel=qwen` 与 `plugins.qwen.model`，没有新增配置字段。服务地址与密钥不会自动改变，
+持久化仍为 `channel=qwen` 与 `plugins.qwen.model`，没有新增配置字段。已有服务地址与密钥不会因切换家族被覆盖，
 须使用所选模型所属入口的当前协议兼容地址；菜单切换后提示确认支持情况。DeepSeek 尚未进行实际外部调用测试。
 字段固定按主模型、主模型 ID、实施模型 ID、协作模式、评审模型及 ID、执行器、服务地址和密钥排列；固定执行器也显示，无 API 时地址和密钥禁用并标明不适用。
 
@@ -97,3 +97,5 @@ PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m unittest discover -s t
 
 测试只使用临时 fixture 和 fake CLI，并包含正式入口 prepare-only 契约，不代表线上模型实测。
 产品范围、历史证据及后续边界见 [产品说明](../../docs/MACOS_REVIEW_APP.md)。
+
+Qwen 在加载配置、切换主模型或切换至 Qwen 时，仅为空白的当前协议地址填入草稿：Codex 为 `https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`，Claude Code 为 `https://token-plan.maas.qianwenaiapi.com/apps/anthropic`。另一协议地址与自定义地址保留，DeepSeek 不填默认值。加载建议不会写盘，须在设置保存后才能检测或使用菜单快捷操作；取消可撤回地址建议，保存不自动补回手动清空的地址。默认地址不证明密钥匹配或模型可用。检测结果在菜单中显示纯文字，绿色对号/红色叉号仅在设置窗口显示；菜单当前选项的对号保留。
