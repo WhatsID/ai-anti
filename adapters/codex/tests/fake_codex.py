@@ -6,7 +6,7 @@ from pathlib import Path
 import sys
 args = sys.argv[1:]
 if '--version' in args:
-    print('codex-cli 0.160.0'); raise SystemExit()
+    print(os.environ.get('FAKE_CODEX_VERSION', 'codex-cli 0.160.0')); raise SystemExit()
 if '--help' in args:
     print('--no-daemon --config --model --ignore-user-config --ignore-rules --ephemeral --skip-git-repo-check --sandbox --json'); raise SystemExit()
 options = {}

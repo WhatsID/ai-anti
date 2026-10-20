@@ -43,6 +43,18 @@ class CodexQwenTests(qwen.QwenReviewTests):
             self.assertTrue(config['suppress_unstable_features_warning'])
             self.assertNotIn('OFFLINE_FAKE_TOKEN', json.dumps(config))
 
+    def test_exact_codex_versions(self):
+        for version in ('0.160.0', '0.163.0'):
+            with self.subTest(version=version):
+                r, out = self.run_review(env_extra={'FAKE_CODEX_VERSION': 'codex-cli ' + version})
+                self.assert_success(r, out)
+        for version in ('0.159.0', '0.161.0', '0.163.1', '0.164.0'):
+            with self.subTest(version=version):
+                r, out = self.run_review(env_extra={'FAKE_CODEX_VERSION': 'codex-cli ' + version})
+                self.assertNotEqual(r.returncode, 0)
+                self.assertIn('only verified', (out / 'status.json').read_text())
+                self.assertFalse((out / 'report.md').exists())
+
     def test_codex_fail_closed(self):
         for mode in ('missing', 'extra_tool', 'wrong_text', 'duplicate', 'progress_only',
                      'no_terminal', 'duplicate_terminal', 'broken', 'nonzero'):

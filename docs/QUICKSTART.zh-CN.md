@@ -14,7 +14,7 @@
 
 小任务不一定触发评审。先安装入口、确认能读取，再接通所选评审通道。
 只有 Codex 且不使用 Claude 登录时，可选 Qwen Responses：需要 API 凭证和匹配的 CLI，
-当前执行器精确要求 Codex CLI 0.160.0。配置步骤见 [Codex 主导路径](../README.zh-CN.md#codex-主导的路径)。
+当前执行器精确支持 Codex CLI 0.160.0 或 0.163.0。配置步骤见 [Codex 主导路径](../README.zh-CN.md#codex-主导的路径)。
 该路径无需安装 Qwen 插件；Claude 主导使用 Qwen 时才按 [插件接入示例](../README.zh-CN.md#接入示例qwen-插件) 安装。
 
 ## 2. 安装一次

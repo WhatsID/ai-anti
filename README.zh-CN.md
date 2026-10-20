@@ -219,9 +219,9 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
 
 持久选择使用 `codex_relay.qwen_executor=codex` 和独立的
 `plugins.qwen.responses_base_url`；不改写原 Anthropic `base_url`，复用模型及凭证路径。
-新执行器固定验证 Codex CLI 0.160.0，显式使用 medium；其他 CLI 版本预检停止。
+新执行器精确支持 Codex CLI 0.160.0 和 0.163.0，显式使用 medium；其他 CLI 版本预检停止。
 该路径记录 `actual_model=null`、`model_evidence=requested_only`，不证明服务端实际模型身份。
-正式 plan 与真实 diff 已通过；大增量仍可能长时间无输出，900/1800秒仅为本次通过的预算。
+0.160.0 历史正式 plan 与真实 diff 已通过；0.163.0 于2026-10-20通过合成 plan 两阶段验收，未验证新版业务 diff 或用户级入口全流程；大增量仍可能长时间无输出，900/1800秒仅为本次通过的预算。
 macOS 设置窗口固定显示各组合的执行器，不可选择；CLI 仍支持显式选择执行器。详见[验证记录与边界](docs/COMPATIBILITY.md)。
 
 AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex API 执行器配置会生成待保存草稿，保存后才能检测。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，不推导或替换域名；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。API 合成检测预算为运行1800秒、空闲900秒、输出8MiB，外围1860秒、界面1900秒留清理余量，可取消。
@@ -251,14 +251,14 @@ AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API
 | 组件 | 已登记版本 / 要求 |
 |------|------------------|
 | Claude Code | 2.1.258、2.1.280（评审路径） |
-| Codex CLI | 0.156.0、0.160.0（已验路径不同） |
+| Codex CLI | 0.156.0、0.160.0、0.163.0（已验路径不同） |
 | 基础脚本 | Python 3.9+；macOS 已测，其他系统未验 |
 | 可选 macOS 菜单栏 | macOS 13+、Swift 6.1、Python 3.11+；ad-hoc 构建，非公证分发 |
 
 [compat.json](compat.json) 为机器可读版本集合，详细路径与证据边界以
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) 为准。安装 status 只报告清单归属，
 不证明全路径兼容或健康；未列版本可能警告，也可能被独立能力/协议门禁拒绝。
-Qwen Responses 仍精确限定 0.160.0，该版本现已登记通用集合。
+Qwen Responses 精确限定 0.160.0 或 0.163.0，两版本均登记通用集合。
 安装健康、模型遵循与完整接力分别取证；Claude 普通登录及 DeepSeek 完整流程仍待补验。
 
 ## 成本

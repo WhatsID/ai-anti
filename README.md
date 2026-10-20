@@ -278,10 +278,10 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
 
 Persist the selection with `codex_relay.qwen_executor=codex` and the separate
 `plugins.qwen.responses_base_url`. The Anthropic `base_url` stays separate; model and
-credential paths are reused. This executor requires verified Codex CLI 0.160.0 and
+credential paths are reused. This executor supports exactly Codex CLI 0.160.0 and 0.163.0 and
 explicitly requests medium effort; other CLI versions stop at preflight. It records
 `actual_model=null` and `model_evidence=requested_only`, not proven serving-model identity.
-Formal plan and actual diff calls passed. Large diffs can still remain silent for minutes;
+Historical 0.160.0 formal plan and actual diff calls passed; 0.163.0 passed a synthetic two-stage plan check on 2026-10-20. The newer version has no verified business diff or full user-entry workflow. Large diffs can still remain silent for minutes;
 900/1800 seconds is the tested budget, not a latency guarantee. The macOS settings display a fixed executor for each supported combination; the CLI still supports explicit executor selection. See [verification and limits](docs/COMPATIBILITY.md).
 
 AIAnti settings use Codex CLI for Codex-led API reviews, Claude Code CLI for Claude-led API reviews, and Codex CLI for Claude-to-Codex reviews. The executor field is disabled. Legacy Codex API executor changes are staged and require an explicit save before checks can run. Anthropic and Responses URLs are stored independently, with only the active protocol shown. Codex checks confirm the requested model only; the server's actual model remains unknown. Synthetic API checks allow 1800 seconds, 900 seconds idle and 8 MiB output, with 1860/1900-second outer cleanup budgets and cancellation. DeepSeek's full workflow remains unverified.
@@ -314,7 +314,7 @@ Versions with path-scoped evidence:
 | Component | Registered versions / requirements |
 |-----------|------------------------------------|
 | Claude Code | 2.1.258, 2.1.280 (review paths) |
-| Codex CLI | 0.156.0, 0.160.0 (different verified paths) |
+| Codex CLI | 0.156.0, 0.160.0, 0.163.0 (different verified paths) |
 | Base scripts | Python 3.9+; macOS tested, other systems unverified |
 | Optional macOS menu bar app | macOS 13+, Swift 6.1, Python 3.11+; ad-hoc build, not notarized distribution |
 
@@ -322,7 +322,7 @@ Versions with path-scoped evidence:
 limits in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) are authoritative for detailed support.
 Installer status reports membership, not all-path compatibility or health. Unlisted versions
 may warn and still fail independent capability/protocol gates. Qwen Responses remains exactly
-pinned to 0.160.0, now registered in the general set. Installation health, model adherence and
+pinned to 0.160.0 or 0.163.0, registered in the general set. Installation health, model adherence and
 full relay verification are separate; ordinary Claude login and DeepSeek full flows remain pending.
 
 The optional [macOS app](apps/macos/README.md) edits defaults and runs checks; business reviews

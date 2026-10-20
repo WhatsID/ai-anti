@@ -9,6 +9,8 @@ from review_runner import RunError, execute
 from review_materials import load_registry
 from review_codex_protocol import validate
 
+SUPPORTED_VERSIONS = ('codex-cli 0.160.0', 'codex-cli 0.163.0')
+
 FEATURES = ('apps', 'hooks', 'goals', 'view_image', 'browser_use', 'computer_use',
             'shell_tool', 'shell_snapshot', 'multi_agent', 'js_repl', 'skill_search', 'tool_suggest')
 FLAGS = ['--no-daemon', 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
@@ -90,8 +92,8 @@ def capability(cli, out, env=None, material_config=None):
         result[label] = {'exit': code, 'sha256': hashlib.sha256(data).hexdigest()}
         if label == 'version': result['cli_version'] = text.strip()
     # Config key semantics are version-bound, not proven merely by --help.
-    if result['cli_version'] != 'codex-cli 0.160.0':
-        raise RunError('Codex config semantics only verified for codex-cli 0.160.0')
+    if result['cli_version'] not in SUPPORTED_VERSIONS:
+        raise RunError('Codex config semantics only verified for ' + ', '.join(SUPPORTED_VERSIONS))
     result['isolation_limits'] = ['global AGENTS and system skill catalog may remain',
                                   'request_user_input and generic MCP resource tools may be visible; all non-material calls rejected']
     return result

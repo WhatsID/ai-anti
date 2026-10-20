@@ -1,4 +1,4 @@
-"""Strict Codex 0.160.0 exec JSONL evidence; model routing is unproven."""
+"""Strict supported Codex exec JSONL evidence; model routing is unproven."""
 import json
 from pathlib import Path
 from review_runner import RunError

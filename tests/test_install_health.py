@@ -49,6 +49,30 @@ class HealthTests(unittest.TestCase):
         return subprocess.run(['git', '-C', str(self.project), *args], env=env, check=True,
                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
 
+    def test_status_dots_and_summary(self):
+        installed = self.run_install('--with-codex', '--with-hook')
+        self.assertFalse(any(dot in installed for dot in ('🟢', '🟡', '🔴')))
+        before = self.snapshot()
+        healthy = self.status()
+        self.assertIn('🟢 状态：全部正常', healthy)
+        self.assertIn('🟢 Codex entry: OK', healthy)
+        self.assertIn('🟢 CLAUDE.md 标记块', healthy)
+        self.assertIn('🟢 协作模式：rules', healthy)
+        self.assertIn('🟡 Git：非 Git', healthy)
+        self.assertNotIn('Codex 检查标志', healthy)
+        self.assertNotIn('\x1b', healthy)
+        self.assertEqual(before, self.snapshot())
+        (self.base / 'fakebin/codex').write_text('#!/bin/sh\necho 0.999.0\n')
+        warning = self.status()
+        self.assertIn('🟡   警告 codex', warning)
+        self.assertIn('🟡 状态：有 1 项需要留意', warning)
+        self.target.write_text('missing marker')
+        failure = self.status()
+        self.assertIn('🔴 ai-anti: Codex entry:', failure)
+        self.assertIn('🔴 状态：有 2 项需要留意', failure)
+        self.manifest.unlink()
+        self.assertIn('🔴 manifest：不存在', self.status())
+
     def test_missing_source_false_health(self):
         self.run_install('--with-codex')
         (self.repo / 'core/TESTING.md').unlink()

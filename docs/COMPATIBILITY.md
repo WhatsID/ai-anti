@@ -5,7 +5,7 @@
 机器可读版本集合为根 `compat.json`（schema 1），路径级证据以本文为准。
 `install.sh --status` 打印实际版本与清单归属；“在实测清单内”不证明全部路径或安装健康。
 正式评审把 CLI 版本记入 manifest；清单外警告本身不阻断，但执行器另有能力与协议门禁，
-未列版本并不保证可运行。Qwen Responses / Codex 另有精确 0.160.0 版本预检，未放宽。
+未列版本并不保证可运行。Qwen Responses / Codex 另有精确 0.160.0 / 0.163.0 版本预检，未知版本仍拒绝。
 
 | 组件 / 路径 | 版本或前提 | 已验程度与边界 |
 |-------------|------------|----------------|
@@ -15,6 +15,7 @@
 | Codex 主导 → Claude reviewer | Claude 2.1.258 / 2.1.280 | 2.1.258 plan 两阶段与 diff；2.1.280 diff，既有内置插件白名单门禁 |
 | Qwen 经 Claude CLI | Claude 2.1.280 | 正式 plan / scoped diff，含编号 MCP 正式增量；只支持记录中的模型与材料范围 |
 | Qwen Responses 经 Codex | Codex 0.160.0 | 正式 plan 与历史 scoped diff；`actual_model=null`、`model_evidence=requested_only` |
+| Qwen Responses 经 Codex | Codex 0.163.0 | 2026-10-20 合成 plan 两阶段；未验证新版业务 diff 或用户级入口全流程，模型证据仍为 requested_only |
 | Codex 用户级入口 / 共享方法 | Codex 0.160.0 | 有限跨项目发现、隔离接力与方法样本；不是任意任务遵循保证 |
 | Claude 普通登录主导完整链路 | 待补验 | 历史 Login expired；Qwen bare 鉴权不能代替普通登录验收 |
 | DeepSeek | 历史端点 / 离线能力 | 不代表当前配置、桌面外部调用或完整接力通过 |
@@ -245,3 +246,16 @@ CLI 版本与登录失败使用离线替身：未安装 CLI 时有提示；替�
 正式入口在启动 CLI 前明确报告 credential unavailable，未调用模型。
 源码副本指纹保持不变。本轮不访问真实账号、密钥或网络，不证明真实登录失败格式、
 模型可调用性或完整接力；安装“全部正常”仍不等于登录、凭证和通道可用。
+
+
+## 2026-10-20 Codex 0.163.0 兼容登记
+
+精确准入集合新增 0.163.0，保留 0.160.0；不按范围或仅凭参数存在放行未知版本。
+现有历史 plan / scoped diff、用户级入口与共享方法的 0.160.0 证据保持原版本归属。
+0.163.0 已有参数检查、本地请求形状检查和真实单份合成材料读取探针；离线测试覆盖
+两版本准入及未知版本拒绝。这些有限证据不证明任意任务或用户级入口完整链路通过。
+独立主模型使用候选执行器完成正式合成 plan 两阶段验收：status completed，CLI 0.163.0，
+inventory/review 分别34.70秒/89.63秒，完整读取4/6份必读材料，零恢复。验收启动时
+清单尚未登记新版，因此留有不在实测清单的非阻塞警告；精确准入与协议门禁已通过，
+随后完成版本登记。未验证新版真实业务 scoped diff 或用户级入口全流程。
+`actual_model=null` / `model_evidence=requested_only` 边界保持，不能证明端点内部实际模型。

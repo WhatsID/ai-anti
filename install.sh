@@ -547,7 +547,7 @@ try:
     if mode == "status":
         if not meta or start < 0 or original[start:finish] != block:
             raise ValueError("Codex entry missing or differs from current source routing")
-        print("Codex entry: OK (%s)" % target)
+        print("🟢 Codex entry: OK (%s)" % target)
     elif mode == "prepare":
         if start < 0:
             separator = b"\n\n" if original else b""
@@ -579,14 +579,14 @@ try:
         else:
             target.write_bytes(updated)
 except (OSError, ValueError, KeyError, TypeError) as exc:
-    print("ai-anti: Codex entry: %s" % exc, file=sys.stderr)
+    print(("🔴 " if mode == "status" else "") + "ai-anti: Codex entry: %s" % exc, file=sys.stderr)
     sys.exit(1)
 PY
 }
 
 # Shared source contract: bounded explicit list, never follow FIFO/non-regular input.
 check_sources() {
-  "$PY" - "$REPO" "$1" <<'PY'
+  "$PY" - "$REPO" "$1" "$MODE" <<'PY'
 import os, pathlib, stat, sys
 root = pathlib.Path(sys.argv[1])
 names = ["core/" + n + ".md" for n in ("WORKFLOW_ENTRY", "PLANNING", "DESIGN", "RETRO", "DEBUGGING", "TESTING", "REVIEW_PRINCIPLES", "CLI_DISCIPLINE")]
@@ -602,7 +602,7 @@ for name in names:
         if not os.access(path, os.R_OK) or not path.read_text(encoding="utf-8").strip():
             raise ValueError("unreadable or empty")
     except (OSError, UnicodeError, ValueError) as exc:
-        print("错误 共享源缺口：%s (%s)" % (path, exc))
+        print(("🔴 " if sys.argv[3] == "status" else "") + "错误 共享源缺口：%s (%s)" % (path, exc))
         errors += 1
 sys.exit(bool(errors))
 PY
@@ -925,30 +925,30 @@ try:
     tested = compat["tested"]
     minimum = tuple(int(x) for x in compat["python_min"].split("."))
 except (OSError, ValueError, KeyError, TypeError, AttributeError):
-    print("  警告 版本清单 %s 无法读取" % sys.argv[1])
+    print("🟡   警告 版本清单 %s 无法读取" % sys.argv[1])
     sys.exit(1)
 problems = 0
 for label, env in (("claude", "CLAUDE_V"), ("codex", "CODEX_V")):
     text = os.environ[env].strip()
     match = re.search(r"[0-9]+\.[0-9]+\.[0-9]+", text)
     if not text:
-        print("  警告 %-7s 未安装" % label)
+        print("🟡   警告 %-7s 未安装" % label)
         problems += 1
     elif not match:
-        print("  警告 %-7s 版本无法识别：%s" % (label, text))
+        print("🟡   警告 %-7s 版本无法识别：%s" % (label, text))
         problems += 1
     elif match.group(0) in tested.get(label, []):
-        print("  OK   %-7s %s（在实测清单内）" % (label, match.group(0)))
+        print("🟢 OK   %-7s %s（在实测清单内）" % (label, match.group(0)))
     else:
-        print("  警告 %-7s %s（不在实测清单 %s 内；可用但未经验证）"
+        print("🟡   警告 %-7s %s（不在实测清单 %s 内；可用但未经验证）"
               % (label, match.group(0), ", ".join(tested.get(label, []))))
         problems += 1
 current = sys.version_info[:3]
 text = ".".join(str(x) for x in current)
 if current[:len(minimum)] >= minimum:
-    print("  OK   python  %s（≥ %s）" % (text, compat["python_min"]))
+    print("🟢 OK   python  %s（≥ %s）" % (text, compat["python_min"]))
 else:
-    print("  警告 python  %s（低于 %s）" % (text, compat["python_min"]))
+    print("🟡   警告 python  %s（低于 %s）" % (text, compat["python_min"]))
     problems += 1
 sys.exit(1 if problems else 0)
 PY
@@ -963,7 +963,7 @@ errors = 0
 def error(text):
     global errors
     errors += 1
-    print("错误 " + text)
+    print("🔴 错误 " + text)
 def regular(path):
     return stat.S_ISREG(pathlib.Path(path).lstat().st_mode)
 data = {}
@@ -972,7 +972,7 @@ print("仓库：" + repo)
 print("用户级目录：" + claude)
 try:
     if not os.path.lexists(manifest):
-        print("manifest：不存在（未安装）")
+        print("🔴 manifest：不存在（未安装）")
         errors += 1
     else:
         if not regular(manifest): raise ValueError("not a regular file")
@@ -999,7 +999,7 @@ try:
                 raise ValueError("link entry type")
         print("manifest：" + manifest)
         if data.get("schema_version") != 3 or any(k not in data for k in ("codex_skills", "plugins", "links")):
-            print("提示 legacy manifest：重跑安装升级")
+            print("🔴 提示 legacy manifest：重跑安装升级")
             errors += 1
 except (OSError, UnicodeError, ValueError, TypeError) as exc:
     error("manifest 损坏：" + str(exc))
@@ -1019,7 +1019,7 @@ if valid and data:
         actual = os.path.realpath(dest)
         if not os.path.islink(dest) or actual != os.path.realpath(want) or not actual.startswith(repo + os.sep) or not os.path.exists(actual):
             error("托管链接目标错误/缺失：" + dest)
-        else: print("  OK   %s -> %s" % (dest, actual))
+        else: print("🟢 OK   %s -> %s" % (dest, actual))
 path = pathlib.Path(claude) / "CLAUDE.md"
 try:
     if not regular(path): raise ValueError("not a regular file")
@@ -1030,7 +1030,7 @@ try:
     imported = "~/" + global_md[len(home) + 1:] if global_md.startswith(home + "/") else global_md
     if "@" + imported not in text[text.index(begin):text.index(end)].splitlines():
         raise ValueError("wrong import target")
-    print("CLAUDE.md 标记块：已存在（目标正确）")
+    print("🟢 CLAUDE.md 标记块：已存在（目标正确）")
 except (OSError, UnicodeError, ValueError) as exc:
     error("CLAUDE.md 标记块：" + str(exc))
 if valid and data.get("hook", {}).get("injected"):
@@ -1044,16 +1044,16 @@ if valid and data.get("hook", {}).get("injected"):
         found = any(obj.get("command") == current for entry in settings.get("hooks", {}).get("SessionStart", [])
                     if isinstance(entry, dict) for obj in entry.get("hooks", []) if isinstance(obj, dict))
         if not found: raise ValueError("settings command missing")
-        print("SessionStart hook：已注入")
+        print("🟢 SessionStart hook：已注入")
     except json.JSONDecodeError:
         error("SessionStart hook：settings.json 不是合法 JSON，修复后重跑")
     except (OSError, UnicodeError, ValueError, TypeError, AttributeError) as exc: error("SessionStart hook：" + str(exc))
-else: print("SessionStart hook：未注入或未验证")
+else: print("🟡 SessionStart hook：未注入或未验证")
 print("评审插件：" + (" ".join(data.get("plugins", [])) or "无"))
 print("提示 插件仅检查托管链接，不检查 plugin.json、配置、凭证或通道可用性")
 if valid and data.get("codex_skills", {}).get("installed"):
-    print("Codex skill：已安装（%s）" % data["codex_skills"].get("dir", ""))
-else: print("Codex skill：未安装或未验证（需要时加 --with-codex）")
+    print("🟢 Codex skill：已安装（%s）" % data["codex_skills"].get("dir", ""))
+else: print("🟡 Codex skill：未安装或未验证（需要时加 --with-codex）")
 print("Codex 检查标志：%s" % ("1" if valid and data.get("codex_skills", {}).get("installed") else "0"))
 sys.exit(1 if errors else 0)
 PY
@@ -1066,7 +1066,7 @@ errors = 0
 def error(text):
     global errors
     errors += 1
-    print("错误 " + text)
+    print("🔴 错误 " + text)
 root = pathlib.Path(sys.argv[1])
 env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
 env["GIT_OPTIONAL_LOCKS"] = "0"
@@ -1083,23 +1083,23 @@ try:
             if check.returncode == 1 and not check.stderr.strip(): return False
             return None
         head, main = revision("HEAD"), revision("refs/heads/main")
-        print("Git：%s；local main：%s" % ("已有 HEAD" if head else "无 HEAD" if head is False else "HEAD 未验证",
+        print(("🟢 " if head and main else "🟡 ") + "Git：%s；local main：%s" % ("已有 HEAD" if head else "无 HEAD" if head is False else "HEAD 未验证",
                                                    "存在" if main else "缺失" if main is False else "未验证"))
-        if head is False or main is False: print("提示 完整接力缺少基线，不自动初始化或提交")
-        if head is None or main is None: print("提示 Git 引用检测失败，未验证")
+        if head is False or main is False: print("🟡 提示 完整接力缺少基线，不自动初始化或提交")
+        if head is None or main is None: print("🟡 提示 Git 引用检测失败，未验证")
     elif "not a git repository" in result.stderr:
-        print("Git：非 Git 目录；提示 完整接力缺少基线")
-    else: print("提示 Git 检测失败，未验证")
-except (OSError, subprocess.TimeoutExpired, UnicodeError): print("提示 Git 不可用/超时，未验证")
+        print("🟡 Git：非 Git 目录；提示 完整接力缺少基线")
+    else: print("🟡 提示 Git 检测失败，未验证")
+except (OSError, subprocess.TimeoutExpired, UnicodeError): print("🟡 提示 Git 不可用/超时，未验证")
 print("项目根：" + str(root))
 for name in ("AGENTS.md", "CLAUDE.md"):
     path = root / name
-    if not os.path.lexists(path): print("提示 项目入口 %s 缺失：小任务可用已有平台默认" % name)
+    if not os.path.lexists(path): print("🟡 提示 项目入口 %s 缺失：小任务可用已有平台默认" % name)
     else:
         try:
             if not stat.S_ISREG(path.stat().st_mode) or not os.access(path, os.R_OK): raise ValueError()
             path.read_text()
-            print("项目入口 %s：可读；正文覆写需 AI 读取" % name)
+            print("🟢 项目入口 %s：可读；正文覆写需 AI 读取" % name)
         except (OSError, UnicodeError, ValueError): error("项目入口 %s 不可读/不安全" % name)
 config = pathlib.Path(sys.argv[2]) / ".config/ai-anti/config.json"
 data, config_error = {}, None
@@ -1123,7 +1123,7 @@ try:
         mode = relay.get("default_mode", "rules")
         source = "全局默认" if "default_mode" in relay else "内置默认"
     if mode not in ("solo", "auto", "rules", "force"): raise ValueError("invalid mode")
-    print("协作模式：%s（来源：%s）" % (mode, source))
+    print("🟢 协作模式：%s（来源：%s）" % (mode, source))
 except (OSError, UnicodeError, ValueError, TypeError): error("协作模式无效或不可读；合法值 solo/auto/rules/force，未回落默认")
 try:
     if config_error: raise ValueError("global config unavailable")
@@ -1141,16 +1141,19 @@ PY
 
 do_status() {
   problems=0
-  installation_report=$(status_installation) || problems=$((problems + 1))
-  printf '%s\n' "$installation_report" | sed '/^Codex 检查标志:/d'
+  failures=0
+  installation_report=$(status_installation) || { problems=$((problems + 1)); failures=1; }
+  printf '%s\n' "$installation_report" | sed '/^Codex 检查标志：/d'
   codex=0
   if printf '%s\n' "$installation_report" | grep -Fxq "Codex 检查标志：1"; then codex=1; fi
-  check_sources "$codex" || problems=$((problems + 1))
-  if [ "$codex" = 1 ]; then codex_entry status || problems=$((problems + 1)); fi
+  check_sources "$codex" || { problems=$((problems + 1)); failures=1; }
+  if [ "$codex" = 1 ]; then codex_entry status || { problems=$((problems + 1)); failures=1; }; fi
   echo "CLI 版本（实测清单 compat.json）："
   report_versions || problems=$((problems + 1))
-  if [ -n "$PROJECT" ]; then report_project || problems=$((problems + 1)); else echo "提示 plain --status 不解析 relay/defaults；需要时加 --project DIR"; fi
-  if [ "$problems" = 0 ]; then echo "状态：全部正常"; else echo "状态：有 ${problems} 项需要留意"; fi
+  if [ -n "$PROJECT" ]; then report_project || { problems=$((problems + 1)); failures=1; }; else echo "提示 plain --status 不解析 relay/defaults；需要时加 --project DIR"; fi
+  if [ "$problems" = 0 ]; then echo "🟢 状态：全部正常";
+  elif [ "$failures" = 1 ]; then echo "🔴 状态：有 ${problems} 项需要留意";
+  else echo "🟡 状态：有 ${problems} 项需要留意"; fi
 }
 
 case "$MODE" in
