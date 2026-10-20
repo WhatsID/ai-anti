@@ -23,6 +23,19 @@ import Combine
         front.complete(.success(snapshot)); assert(model.loaded && !model.busy)
         model.check(); assert(model.checking && front.requests.last?["action"] as? String == "local")
         front.complete(.success(checked))
+        assert(model.status == "本地检查通过\nfixture", "Local checks must show only message and time even with actual_model")
+        var localRequested = checked
+        localRequested["model_evidence"] = "requested_only"; localRequested["requested_model"] = "qwen-fixture"
+        model.check(); front.complete(.success(localRequested))
+        assert(model.status == "本地检查通过\nfixture", "Local checks must ignore requested-only model evidence")
+        model.check(real: true)
+        assert(front.requests.last?["action"] as? String == "real")
+        front.complete(.success(checked))
+        assert(model.status == "本地检查通过\nfixture · 实际模型：fake", "Real checks must retain the actual model")
+        var unknownModel = checked
+        unknownModel["actual_model"] = NSNull()
+        model.check(real: true); front.complete(.success(unknownModel))
+        assert(model.status == "本地检查通过\nfixture · 实际模型：未知", "Real checks must retain unknown model evidence")
         var publications = 0
         let subscription = model.objectWillChange.sink { publications += 1 }
         for _ in 0..<3 {

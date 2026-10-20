@@ -175,9 +175,13 @@ struct Draft: Equatable {
                 case .success(let data):
                     if checked {
                         self.checkSignature = data["signature"] as? String
-                        self.status = (data["message"] as? String ?? "检测完成") + "\n" + (data["checked_at"] as? String ?? "") + " · 实际模型：" + (data["actual_model"] as? String ?? "未知")
-                        if data["model_evidence"] as? String == "requested_only" {
-                            self.status = (data["message"] as? String ?? "检测完成") + "\n" + (data["checked_at"] as? String ?? "") + " · 仅确认请求模型：" + (data["requested_model"] as? String ?? "未知") + "；服务端实际模型未知"
+                        self.status = (data["message"] as? String ?? "检测完成") + "\n" + (data["checked_at"] as? String ?? "")
+                        if payload["action"] as? String == "real" {
+                            if data["model_evidence"] as? String == "requested_only" {
+                                self.status += " · 仅确认请求模型：" + (data["requested_model"] as? String ?? "未知") + "；服务端实际模型未知"
+                            } else {
+                                self.status += " · 实际模型：" + (data["actual_model"] as? String ?? "未知")
+                            }
                         }
                         self.message = "检测完成，用时 \(self.elapsed) 秒"
                     } else {
