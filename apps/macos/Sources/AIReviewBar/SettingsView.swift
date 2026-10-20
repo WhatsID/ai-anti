@@ -1,5 +1,18 @@
 import SwiftUI
 
+struct CheckStatusText: View {
+    let status: String
+    var body: some View {
+        if status.hasPrefix("本地检查通过；") || status.hasPrefix("合成评审检测通过；") {
+            (Text(Image(systemName: "checkmark")).foregroundColor(.green) + Text(" " + status))
+        } else if status.hasPrefix("本地检查失败：") || status.hasPrefix("真实合成检测失败：") {
+            (Text(Image(systemName: "xmark")).foregroundColor(.red) + Text(" " + status))
+        } else {
+            Text(status)
+        }
+    }
+}
+
 struct SettingsView: View {
     @ObservedObject var model: AppModel
     @State private var confirmReal = false
@@ -65,7 +78,7 @@ struct SettingsView: View {
               }
             }
             Divider()
-            Text(model.dirty ? "未检测（设置草稿尚未保存）" : model.status).font(.callout).textSelection(.enabled)
+            CheckStatusText(status: model.dirty ? "未检测（设置草稿尚未保存）" : model.status).font(.callout).textSelection(.enabled)
             if model.checking { HStack { ProgressView().controlSize(.small); Text("已用时 \(model.elapsed) 秒"); Button("取消检测", action: model.cancel) } }
             Text(model.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             HStack(alignment: .center, spacing: 8) {

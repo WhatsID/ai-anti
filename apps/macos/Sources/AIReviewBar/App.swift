@@ -47,7 +47,7 @@ import AppKit
             Menu("协作模式：" + model.saved.mode) {
                 ForEach(model.modes, id: \.0) { item in Button(item.0 + (model.saved.mode == item.0 ? " ✓" : "")) { model.menuMode(item.0) } }
             }.disabled(model.busy || model.dirty || !model.loaded)
-            Text(model.status)
+            CheckStatusText(status: model.dirty ? "未检测（设置草稿尚未保存）" : model.status)
             if model.checking { Text("检测中 · \(model.elapsed) 秒"); Button("取消检测", action: model.cancel) }
             Text(model.message)
             Button("检查配置") { delegate.model = model; delegate.showSettings(); model.check() }.disabled(model.busy || model.dirty || !model.loaded)
