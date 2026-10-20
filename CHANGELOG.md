@@ -1,8 +1,10 @@
 # Changelog
 
-## 0.1.0 — Unreleased
+## 0.2.0 — 2026-10-20
 
-First public release.
+- 新增 AIAnti 菜单栏配置应用，支持主模型、实施模型、评审模型与执行器状态管理及合成检测。
+- 应用图标去除外围灰底，使用透明背景；应用版本更新为 0.2.0。
+- 不兼容变更：协作模式 `required` 更名为 `rules`，旧值不再接受；可选模式为 `solo / auto / rules / force`。
 
 - 发布前核对确认仓库仍为私有，私密漏洞报告入口留待公开后启用与复核；安全说明补充 GitHub 功能适用范围，不将 API 404 记为已启用。
 
@@ -26,6 +28,51 @@ First public release.
 - 显式 idle 上限支持900秒，当时默认仍300秒；900/1800秒预算下正式两阶段方案评审及33块真实增量评审通过，81项适配测试通过。
 - README 中英文同步执行器选择与兼容边界，关闭对应文档同步待办；设置窗口固定显示对应执行器、双协议地址独立保存、有效执行器检测与 requested_only 展示。
 
+- Codex 评审入口增加显式 Claude/Qwen 通道及用户默认配置，保留 Claude CLI 与旧 Claude 行为。
+- Qwen 使用子进程环境隔离、精确模型/提示校验；默认每阶段 1800 秒，prepare-only 不读凭证。
+- 增加离线通道回归测试；正式新入口在独立临时 Git 小仓库的真实 Qwen plan 两阶段与 scoped diff 验证通过。
+
+### 用户级入口
+
+- 两端共享 `core/WORKFLOW_ENTRY.md`；Codex opt-in 增加用户级显式读取入口。
+- manifest v3 支持入口生命周期、字节保全与 fail-closed 预检，保留旧 manifest 升级。
+
+### 共享调查与验证方法
+
+- 新增按需共享 DEBUGGING / TESTING，直接做与 solo 同样可用。
+- 两端方案、实施派发、容灾及主模型验收引用同源方法，不新增安装对象。
+- 明确行为失败信号、候选来源、反证与未覆盖边界，不改变权限或评审裁决。
+
+### 安装体检与项目诊断
+
+- 共享源与托管路由完整性检查，安装前缺源停止，status 汇总缺口。
+- 可选 `--status --project DIR` 只读诊断项目根、基线、模式与参数 fallback。
+- 保持报告式 exit0，不自动初始化新项目或调用评审通道。
+
+### 共享规划方法
+
+- 新增按需 PLANNING：有限需求澄清、可验收方案与行为切片，供负责规划的主模型读取。
+- 两工具接入同源方法，保留 DEBUGGING/TESTING 实施派发，不要求实施者重新规划。
+- 安装与 status 共同检查 PLANNING 必要源；缺源安装在写入前失败，status 保持报告式退出。
+- 不新增技能安装对象、每仓初始化、工单或代理调度；运行遵循仍需新会话证据。
+
+### 共享模块设计方法
+
+- 新增按需 DESIGN，供设计/规划主模型核对目标、职责、调用契约与依赖退出方向。
+- 两工具与共享入口路由，独立实施者执行定稿契约，不重新设计。
+- 安装及只读 status 检查 DESIGN 必要源，缺源仍可卸载；不新增安装对象或权限。
+- 真实长期设计效果与 Claude 普通登录验收继续待取证，不将用户顺利反馈记为正式通过。
+
+### 2026-10-16｜共享复盘与规则维护方法
+
+- 新增按需 RETRO：证据分类、最小改进、规则归属与维护，不自动扩大授权或每任务复盘。
+- 共用入口接入两工具；安装预检与只读 status 检查必要源，缺源仍可卸载。
+- 新会话遵循与长期效果分开验证，Claude 普通登录及真实跨项目效果继续待验。
+
+## 0.1.0 — 2026-09-24
+
+初始版本标签；以下为该版本已有能力，不表示当时仓库已公开。
+
 - **Claude → Codex**: `/codex-review` (plan or diff, Codex read-only sandbox) and `/codex-implement`
   (Codex takes over implementation when the implementer subagent is blocked by API failures).
 - **Codex → Claude**: `$claude-review` (bounded, repeatable Claude review of a plan or a scoped diff)
@@ -44,44 +91,3 @@ First public release.
   with `--with-codex`), ownership manifest, fail-closed on conflicts, coexists with the user's own
   SessionStart hooks.
 - **Release hygiene**: `scripts/export_public.sh`, `scripts/check_hygiene.sh` and CI.
-
-- Codex 评审入口增加显式 Claude/Qwen 通道及用户默认配置，保留 Claude CLI 与旧 Claude 行为。
-- Qwen 使用子进程环境隔离、精确模型/提示校验；默认每阶段 1800 秒，prepare-only 不读凭证。
-- 增加离线通道回归测试；正式新入口在独立临时 Git 小仓库的真实 Qwen plan 两阶段与 scoped diff 验证通过。
-
-## 用户级入口
-
-- 两端共享 `core/WORKFLOW_ENTRY.md`；Codex opt-in 增加用户级显式读取入口。
-- manifest v3 支持入口生命周期、字节保全与 fail-closed 预检，保留旧 manifest 升级。
-
-## 共享调查与验证方法
-
-- 新增按需共享 DEBUGGING / TESTING，直接做与 solo 同样可用。
-- 两端方案、实施派发、容灾及主模型验收引用同源方法，不新增安装对象。
-- 明确行为失败信号、候选来源、反证与未覆盖边界，不改变权限或评审裁决。
-
-## 安装体检与项目诊断
-
-- 共享源与托管路由完整性检查，安装前缺源停止，status 汇总缺口。
-- 可选 `--status --project DIR` 只读诊断项目根、基线、模式与参数 fallback。
-- 保持报告式 exit0，不自动初始化新项目或调用评审通道。
-
-## 共享规划方法
-
-- 新增按需 PLANNING：有限需求澄清、可验收方案与行为切片，供负责规划的主模型读取。
-- 两工具接入同源方法，保留 DEBUGGING/TESTING 实施派发，不要求实施者重新规划。
-- 安装与 status 共同检查 PLANNING 必要源；缺源安装在写入前失败，status 保持报告式退出。
-- 不新增技能安装对象、每仓初始化、工单或代理调度；运行遵循仍需新会话证据。
-
-## 共享模块设计方法
-
-- 新增按需 DESIGN，供设计/规划主模型核对目标、职责、调用契约与依赖退出方向。
-- 两工具与共享入口路由，独立实施者执行定稿契约，不重新设计。
-- 安装及只读 status 检查 DESIGN 必要源，缺源仍可卸载；不新增安装对象或权限。
-- 真实长期设计效果与 Claude 普通登录验收继续待取证，不将用户顺利反馈记为正式通过。
-
-## 2026-10-16｜共享复盘与规则维护方法
-
-- 新增按需 RETRO：证据分类、最小改进、规则归属与维护，不自动扩大授权或每任务复盘。
-- 共用入口接入两工具；安装预检与只读 status 检查必要源，缺源仍可卸载。
-- 新会话遵循与长期效果分开验证，Claude 普通登录及真实跨项目效果继续待验。
