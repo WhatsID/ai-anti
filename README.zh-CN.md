@@ -116,8 +116,8 @@ Claude Code 的用户级 `@import` 与 Codex 的用户级指令共同读取
 不要求每个项目复制文件，也不把所有任务变成 TDD。方法保持授权和评审裁决边界；
 行为验证仅支持记录中的案例，不代表跨项目全场景已经验收。
 
-`./install.sh --status --project DIR` 可选诊断显式给定的项目：Git 根、HEAD/local main
-基线、项目入口可读性、协作模式及全局部署规模 fallback，不写项目。入口或参数缺失
+`./install.sh --status --project DIR` 可选诊断显式给定的项目：Git 根、当前有效 HEAD 提交基线（任意分支或 detached HEAD 均可）、
+项目入口可读性、协作模式及全局部署规模 fallback，不写项目。入口或参数缺失
 是提示，不是安装损坏；项目正文覆写仍需 AI 读取。不加 `--project` 不扫描业务目录。
 普通 `--status` 检查约定共享源与已安装路由，不解析 relay/defaults 或完整用户配置；
 插件仅检查托管链接，不检查 metadata、凭证及通道联网。退出 0 表示报告完成，

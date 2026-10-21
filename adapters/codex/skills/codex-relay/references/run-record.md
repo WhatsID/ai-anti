@@ -10,7 +10,8 @@
 | --- | --- |
 | Task / date | [task] / [date] |
 | Business repository and root | [path] |
-| Local `main` base / current HEAD | [SHA] / [SHA] |
+| Frozen base / current `HEAD^{commit}` | [SHA] / [SHA] |
+| Base / current full attached ref or detached state | [refs/heads/name or detached] / [value] |
 | Explicit scope | [relative paths] |
 | Dirty baseline | [status and fingerprints] |
 | Authorization boundary | [investigate / plan / implement] |
@@ -41,6 +42,7 @@
 | Observable runtime model | [runtime metadata or `unknown`] |
 | Worktree / exact base / dispatched fingerprints | [evidence] |
 | Delivered files and fingerprints | [evidence] |
+| Repository/root, branch state, and HEAD comparison before landing | [identity changes stop; detached SHA changes stop; same-branch advance recorded and confirmed unrelated with unchanged scoped fingerprints] |
 | Scope fingerprint comparison before landing | [result, including new/deleted/absent] |
 
 ## Primary acceptance and closure

@@ -160,7 +160,7 @@ and review adjudication; they do not make every task a TDD task. Behavioral vali
 is limited to recorded examples, not a claim of full multi-project coverage.
 
 `./install.sh --status --project DIR` optionally diagnoses an explicit project without
-writing it: Git root/HEAD/local-main baseline, readable project entries, effective mode,
+writing it: Git root/current valid HEAD commit (any branch or detached HEAD), readable project entries, effective mode,
 and global deployment-scale fallback. Missing project entries or parameters are hints,
 not damaged installation; project prose overrides still require the AI to read them.
 No project is scanned unless `--project` is supplied. Plain `--status` checks explicit

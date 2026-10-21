@@ -38,7 +38,12 @@ Use them while preparing the plan; missing required sources are a loading gap,
 never evidence that the method was followed. Do not guess from the business cwd.
 
 Read the business repository's `AGENTS.md` and module authority. Record its
-local `main` HEAD, dirty baseline, explicit file scope, request, and plan.
+real repository root, exact current `HEAD^{commit}` SHA, full attached branch
+reference from `git symbolic-ref --quiet HEAD` (exit 1 means detached; any other
+error stops), dirty baseline and scoped fingerprints, explicit file scope,
+request, and plan. Any branch or detached HEAD with a valid commit is supported;
+no commit or non-Git directory blocks a complete relay. Do not initialize,
+commit, create a branch, or switch the business checkout to manufacture a baseline.
 Preserve other sessions' work. The request is verbatim and follows R2; the plan
 states scale, files and estimated sizes, rollback, and validation. Keep each
 run record outside the business repository by default; use
@@ -53,9 +58,14 @@ does not constrain a separately chosen worktree location.
 implementation authority; automatic matching is not implementation authority.
 Investigation or planning stops at its authorized boundary. A later
 implementation authorization resumes its request/plan lineage only after
-comparing HEAD, scope, and request/plan fingerprints. Record an unrelated HEAD
-advance; material request or source changes follow R6 and may require a new
-review round. “Continue” never overrides an explicit no-implement limit.
+comparing repository/root, HEAD SHA, attached reference or detached state, scope,
+and request/plan fingerprints. Stop on repository/root or branch identity/state
+changes, even at the same SHA; a detached HEAD SHA change also stops for target
+and authorization/lineage revalidation. On the same attached branch, record a
+HEAD advance and continue only after confirming it is unrelated and scoped
+identities/byte fingerprints are unchanged. Material request or source changes
+follow R6 and may require a new review round. Never reset or switch the business
+checkout to erase changes. “Continue” never overrides an explicit no-implement limit.
 Explicit `solo`/skip-review instructions are honored and recorded as a partial
 process, never a complete relay.
 
@@ -107,8 +117,10 @@ conditions; unresolved mandatory items after it block implementation.
 
 ## Isolated implementation
 
-Create an isolated worktree manually from the recorded exact local `main` HEAD,
-using the business project's sparse-checkout pattern. Send one native subagent
+Create an isolated worktree manually from the frozen exact HEAD commit SHA:
+`git worktree add --detach <path> <frozen-sha>`, using the business project's
+sparse-checkout pattern. Never substitute a moving branch, `main`, `master`, or
+remote default branch for that SHA. Send one native subagent
 the settled plan, request, adjudication, worktree/base, scope/baseline, allowed
 commands, and boundaries. Supply absolute paths from the resolved `root` for
 applicable DEBUGGING/TESTING sources and require the implementer to read them first;
@@ -137,7 +149,13 @@ loop, or implement it in the primary. Explicit request plus evidence that an
 independent agent performed the work and runtime model metadata are required for
 the specified-secondary-model full-chain claim.
 
-Before landing, compare each scoped target's current fingerprint and identity
+Before landing, recheck the business repository/root, HEAD SHA, and full attached
+branch reference or detached state against the dispatched baseline using the
+same identity and HEAD-advance rules as authorization resumption above. Stop and
+revalidate authorization and review lineage for identity changes or a detached
+SHA change; never automatically reset or checkout. Any original task branch or
+detached checkout may receive authorized checked increments without automatic
+merge or commit. Compare each scoped target's current fingerprint and identity
 (including absent, new, and deleted files) with the dispatched baseline. Any
 change means stop and resolve the overlap; never copy a directory over it. Land
 only checked increments while retaining concurrent changes. Keep a blocked or

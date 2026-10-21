@@ -271,11 +271,23 @@ class HealthTests(unittest.TestCase):
     def test_project_git_roots_and_readonly(self):
         self.run_install()
         self.assertIn('非 Git 目录', self.status())
+        self.assertIn('完整接力缺少基线', self.status())
         self.git('init', '-b', 'other')
         self.assertIn('无 HEAD', self.status())
+        self.assertIn('完整接力缺少基线', self.status())
         self.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture.invalid', 'commit', '--allow-empty', '-m', 'fixture')
-        self.assertIn('local main：缺失', self.status())
-        self.git('branch', 'main')
+        for branch in ('feature/task', 'master'):
+            self.git('branch', '-m', branch)
+            with self.subTest(branch=branch):
+                out = self.status()
+                self.assertIn('🟢 Git：已有 HEAD', out)
+                self.assertNotIn('local main', out)
+                self.assertNotIn('完整接力缺少基线', out)
+        self.git('checkout', '--detach', 'HEAD')
+        out = self.status()
+        self.assertIn('🟢 Git：已有 HEAD', out)
+        self.assertNotIn('local main', out)
+        self.assertNotIn('完整接力缺少基线', out)
         sentinel = self.project / 'sentinel'
         script = self.base / 'fsmonitor'
         script.write_text('#!/bin/sh\ntouch "' + str(sentinel) + '"\n')
@@ -287,7 +299,7 @@ class HealthTests(unittest.TestCase):
         self.env['GIT_WORK_TREE'] = '/nonexistent'
         out = self.run_install('--status', '--project', str(sub))
         self.assertIn('项目根：' + str(self.project), out)
-        self.assertIn('local main：存在', out)
+        self.assertIn('🟢 Git：已有 HEAD', out)
         self.assertFalse(sentinel.exists())
         before = self.snapshot()
         source = self.tree_snapshot(self.repo)

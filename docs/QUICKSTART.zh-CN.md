@@ -57,7 +57,8 @@ cd ~/ai-anti
 ./install.sh --status --project /absolute/path/to/your-project
 ```
 
-空目录缺少 Git 基线或项目入口是提示，不代表安装损坏；完整接力需要 Git 和 local main 基线。
+空目录缺少 Git 基线或项目入口是提示，不代表安装损坏；完整接力需要 Git 当前 `HEAD^{commit}` 的有效提交；任意分支或 detached HEAD 均可，不要求 main。
+候选 worktree 从冻结的精确 SHA 以 `--detach` 创建，不自动初始化、提交或切换业务分支。
 接着在自己的项目中打开一个**新的** Claude Code 或 Codex 会话，发送：
 
 > 只检查，不修改文件或调用外部评审。请实际读取 ai-anti 用户级入口和共享工作流，

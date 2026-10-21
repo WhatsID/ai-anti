@@ -1082,11 +1082,10 @@ try:
             if check.returncode == 0: return True
             if check.returncode == 1 and not check.stderr.strip(): return False
             return None
-        head, main = revision("HEAD"), revision("refs/heads/main")
-        print(("🟢 " if head and main else "🟡 ") + "Git：%s；local main：%s" % ("已有 HEAD" if head else "无 HEAD" if head is False else "HEAD 未验证",
-                                                   "存在" if main else "缺失" if main is False else "未验证"))
-        if head is False or main is False: print("🟡 提示 完整接力缺少基线，不自动初始化或提交")
-        if head is None or main is None: print("🟡 提示 Git 引用检测失败，未验证")
+        head = revision("HEAD^{commit}")
+        print(("🟢 " if head else "🟡 ") + "Git：%s" % ("已有 HEAD" if head else "无 HEAD" if head is False else "HEAD 未验证"))
+        if head is False: print("🟡 提示 完整接力缺少基线，不自动初始化或提交")
+        if head is None: print("🟡 提示 Git 引用检测失败，未验证")
     elif "not a git repository" in result.stderr:
         print("🟡 Git：非 Git 目录；提示 完整接力缺少基线")
     else: print("🟡 提示 Git 检测失败，未验证")
