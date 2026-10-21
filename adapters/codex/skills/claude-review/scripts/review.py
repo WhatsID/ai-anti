@@ -127,10 +127,11 @@ def parser(families=None):
     result.add_argument("--plan")
     result.add_argument("--scale", required=True)
     result.add_argument("--out", required=True)
-    result.add_argument("--channel", choices=("claude", "qwen"))
+    result.add_argument("--channel", choices=("claude", "qwen", "qoder"))
     result.add_argument("--qwen-executor", choices=("claude", "codex"))
     result.add_argument("--responses-base-url")
-    result.add_argument("--model", choices=sorted(families or MODEL_FAMILIES), default=None)
+    result.add_argument("--model", default=None, help="Claude aliases: " +
+                        ','.join(sorted(families or MODEL_FAMILIES)) + "; Qoder: kimi-k3,kmodel_latest")
     result.add_argument("--timeout", type=int, default=None)
     result.add_argument("--idle-timeout", type=int, default=900)
     result.add_argument("--max-output-bytes", type=int, default=None)
@@ -243,8 +244,8 @@ def main():
         initial_stage = inventory if args.mode == 'plan' else review
         initial_registry_path = None
         initial_registry = None
-        manifest['material_transport'] = 'material_ids' if channel['channel'] == 'qwen' else 'filesystem_read'
-        if channel['channel'] == 'qwen':
+        manifest['material_transport'] = 'material_ids' if channel['channel'] in ('qwen', 'qoder') else 'filesystem_read'
+        if channel['channel'] in ('qwen', 'qoder'):
             initial_registry_path = logs / (initial_stage.name + '.registry.json')
             initial_registry = build_registry(initial_stage, initial_sources, initial_registry_path)
             manifest['material_registries'] = {initial_stage.name: initial_registry}
@@ -266,9 +267,12 @@ def main():
             return 0
         env = child_environment(channel)
         stage_families = {channel["cli_model"]: channel["pattern"]}
-        expected = channel["configured_model"] if channel["channel"] == "qwen" else None
+        expected = channel["configured_model"] if channel["channel"] in ("qwen", "qoder") else None
         executor = "codex" if codex_executor else "claude"
         stage_run, preflight = run_stage, capability
+        if channel['channel'] == 'qoder':
+            from review_qoder import run_stage as stage_run, capability as preflight
+            executor = 'qodercli'
         if codex_executor:
             from functools import partial
             from review_codex import run_stage as codex_run, capability as preflight
@@ -282,7 +286,7 @@ def main():
             warnings.extend(manifest["capabilities"].get("warnings", []))
         manifest["warnings"] = warnings
         manifest["cli_version"] = manifest["capabilities"]["cli_version"]
-        warning = compat_warning(manifest["cli_version"], executor)
+        warning = compat_warning(manifest["cli_version"], 'qoder' if executor == 'qodercli' else executor)
         if warning:
             warnings.append(warning)
             manifest["warnings"] = warnings
@@ -305,7 +309,7 @@ def main():
             review_required = required_files(review_sources)
             review_registry_path = None
             review_registry = None
-            if channel['channel'] == 'qwen':
+            if channel['channel'] in ('qwen', 'qoder'):
                 review_registry_path = logs / 'review.registry.json'
                 review_registry = build_registry(review, review_sources, review_registry_path)
                 manifest['material_registries']['review'] = review_registry

@@ -38,15 +38,28 @@ FLAGS = [
 
 def stop_group(process):
     """Kill descendants even when the CLI parent already exited."""
+    process.poll()
     for sig in (signal.SIGTERM, signal.SIGKILL):
         try:
             os.killpg(process.pid, sig)
         except ProcessLookupError:
             break
         except PermissionError as exc:
-            raise RunError('process group cleanup denied by host permissions') from exc
+            # The leader may exit between poll and killpg. Retry only when this
+            # poll actually reaps it; a genuine host denial must remain fatal.
+            if process.returncode is not None or process.poll() is None:
+                raise RunError('process group cleanup denied by host permissions') from exc
+            try:
+                os.killpg(process.pid, sig)
+            except ProcessLookupError:
+                break
+            except PermissionError as retry:
+                raise RunError('process group cleanup denied by host permissions') from retry
         if sig == signal.SIGTERM:
             time.sleep(.15)
+            # Reap an exited leader before KILL (macOS otherwise returns EPERM).
+            # Still KILL its process group: descendants may have ignored TERM.
+            process.poll()
     try:
         process.wait(timeout=3)
     except subprocess.TimeoutExpired as exc:

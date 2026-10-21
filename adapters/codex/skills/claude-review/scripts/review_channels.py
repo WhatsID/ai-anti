@@ -20,14 +20,23 @@ def single_line(value, key):
 def resolve(config, channel, model, repo, families, executor=None, responses_url=None):
     channel = channel if channel is not None else lookup(config, 'codex_relay.review_channel')
     channel = 'claude' if channel is None else channel
-    if not isinstance(channel, str) or channel not in ('claude', 'qwen'):
-        raise ConfigError('codex_relay.review_channel must be claude or qwen')
+    if not isinstance(channel, str) or channel not in ('claude', 'qwen', 'qoder'):
+        raise ConfigError('codex_relay.review_channel must be claude, qwen or qoder')
     if channel != 'qwen' and (executor is not None or responses_url is not None):
         raise ConfigError('executor/Responses overrides require Qwen Codex')
     if channel == 'claude':
-        model = model or 'opus'
+        model = 'opus' if model is None else model
+        if model not in families:
+            raise ConfigError('invalid choice for Claude model alias: ' + str(model))
         return {'channel': channel, 'requested_model': model, 'configured_model': model,
                 'cli_model': model, 'pattern': families[model]}
+    if channel == 'qoder':
+        model = 'kmodel_latest' if model is None else model
+        if model not in ('kimi-k3', 'kmodel_latest'):
+            raise ConfigError('Qoder supports only kimi-k3 or kmodel_latest (Kimi-K3)')
+        return {'channel': channel, 'requested_model': model, 'configured_model': 'Kimi-K3',
+                'cli_model': 'kmodel_latest', 'executor': 'qoder', 'wire_api': 'qoder-cli',
+                'pattern': re.compile(re.escape('Kimi-K3'))}
     if model is not None:
         raise ConfigError('Qwen rejects --model; configure plugins.qwen.model instead')
     model = single_line(lookup(config, 'plugins.qwen.model'), 'plugins.qwen.model')
@@ -72,6 +81,12 @@ def evidence(channel):
 def child_environment(channel):
     if channel['channel'] == 'claude':
         return None
+    if channel['channel'] == 'qoder':
+        env = dict(os.environ)
+        for key in list(env):
+            if key.startswith(('ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_')) or key == 'AI_ANTI_QWEN_TOKEN':
+                env.pop(key)
+        return env
     token = None
     for path in channel['credential_paths']:
         try:

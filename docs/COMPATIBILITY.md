@@ -271,3 +271,33 @@ inventory/review 分别34.70秒/89.63秒，完整读取4/6份必读材料，零�
 
 主模型在同一受限环境独立复验候选 capability 已通过：识别为 0.163.0，保留一条
 告警，原始版本日志与误拒基线字节完全相同且 SHA-256 一致；未调用模型。
+
+## 2026-10-21 Qoder Kimi-K3 通道硬化
+
+新增显式 `review.py --channel qoder --model kimi-k3`，仅准入本机验证的
+qodercli 1.1.74；CLI 标识 `kmodel_latest`，init 与 assistant 必须报告
+`Kimi-K3`。这是 CLI 报告证据，不证明服务端内部路由；不支持其他模型/档位、
+桌面模型选择或自动回退，不修改用户默认配置。独立于 Claude/Codex 的兼容键为
+`tested.qoder`，本次候选正式真实验收通过后登记 1.1.74。
+
+此前临时 inventory/plan/diff 调用证明字符串 message 与顶层文本块可逐字
+校验，但带有 skills/hook 的旧日志不满足候选初始化门禁。后续隔离探针已确认
+`skills=[]`、`plugins=[]` 且无 hook；正式候选仍逐阶段验证唯一 connected
+materials 工具、dontAsk 与模型身份。原生 slash_commands/agents 名称仍可见，
+写入阶段元数据；不声称完全空上下文或操作系统隔离。空材料只接受实测固定
+completed-with-no-output message 包装，顶层仍必须是空字符串文本块。
+
+macOS 上独立对照确认 TERM 后尚未回收的退出 leader 会令 group KILL 返回
+EPERM；首次 TERM 前及 grace 后 poll 回收可消除此误报。若 leader 恰在
+poll 与信号之间退出，仅在新 poll 确实回收它后重试同一信号。修复仍对原进程组发送 KILL，避免
+忽略 TERM 的子孙进程泄漏；真实 EPERM 仍失败。离线测试覆盖父进程退出而
+grandchild 忽略 TERM，以及总超时、idle、输出上限的原失败原因保留。
+
+主模型独立使用候选正式入口完成合成 plan 两阶段与 scoped diff，均为
+completed：inventory / plan review / diff 分别完整读取 5 / 7 / 10 块，
+55.09 / 88.05 / 101.07 秒，日志 22203 / 38551 / 57059 字节，
+credits 2.715255756 / 4.346137296 / 5.057092842，合计 12.118485894。
+三个阶段 skills/plugins 均为空、无 hook、仅材料工具，零恢复；原始日志、
+哈希、命令/agent 可见项及报告保留在本次外部验收记录。运行时版本尚未登记，
+因此保留一条预期的兼容清单不可用警告，登记后纯兼容检查已通过，无需再次付费调用。
+该有限合成样本不证明所有真实业务、未来版本或完整用户级接力可用。

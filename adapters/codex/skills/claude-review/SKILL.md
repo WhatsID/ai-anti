@@ -226,3 +226,35 @@ that reasoning effort caused observed live silence, or that live latency is fixe
 至多一条精确 `WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)`。
 告警进入 capabilities 与既有 warnings 输出，原始日志及哈希保留；其他噪声、重复或
 非零退出仍拒绝。此例外不用于正式 JSONL，也不证明受限环境的 exec 可运行。
+
+## Qoder subscription reviewer (explicit opt-in)
+
+Use `--channel qoder --model kimi-k3` with the formal `review.py plan|diff`
+entry. Existing `codex_relay.review_channel=qoder` also selects it; no new user
+configuration keys are needed. Omitted `--model` defaults to `kmodel_latest`;
+only `kimi-k3` and `kmodel_latest` are accepted, both requesting CLI model
+`kmodel_latest`. Init and every assistant message must report exactly `Kimi-K3`.
+These are CLI identity claims, not proof of internal backend routing. Qoder uses
+the existing subscription login; it neither reads Qwen credentials nor changes
+the user's Qoder default model or login configuration. No automatic fallback or retry.
+
+Only `qodercli` 1.1.74 is admitted. This version has verified hidden isolation flags;
+the runtime init must still show empty skills/plugins, `dontAsk`, and exactly one
+connected materials server and `mcp__materials__read_material` tool. Hook events,
+unknown execution tools, permission denials and mismatched models fail closed.
+Native slash-command and agent names can remain visible; stage evidence records
+them. This is neither empty context nor operating-system filesystem isolation.
+Settings disable hooks, skills, skill shell execution and automatic memory; builtin
+skills and setting sources are disabled, with an explicit read-only system prompt.
+
+Both plan phases and frozen diff use ID-only materials. Qoder's original string
+tool response and top-level text blocks must independently match frozen bytes
+before normalization into the shared material audit. Every required block must
+be fully read before a unique successful final result; post-final events fail.
+Raw logs/hashes, timing, byte counts and credits are retained. Defaults are 600
+seconds total, 900 seconds idle and 2 MiB output per stage; total timeout wins.
+Cleanup targets only the new process group: poll before TERM and after its grace,
+then KILL remaining descendants even if the leader exited. An EPERM race is
+retried only if polling newly reaps the leader; real permission failures remain
+failures. Independent formal plan/diff acceptance passed on 1.1.74 with Kimi-K3;
+see `docs/COMPATIBILITY.md` for the measured evidence and its boundaries.

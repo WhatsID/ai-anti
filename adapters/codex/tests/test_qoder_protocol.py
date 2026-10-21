@@ -1,0 +1,119 @@
+"""Raw Qoder wire mutations, including independently forged text copies."""
+import copy
+import json
+from pathlib import Path
+import sys
+import unittest
+import test_material_ids as materials
+
+SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/claude-review/scripts'
+sys.path.insert(0, str(SCRIPTS))
+from review_qoder_protocol import validate
+from review_runner import RunError, validate as claude_validate
+from review_materials import TOOL, read_material
+
+
+class QoderProtocolTests(materials.MaterialIds):
+    def events(self):
+        events = super().events()
+        events[0].update(model='Kimi-K3', qodercli_version='1.1.74', plugins=[],
+                         slash_commands=['help'], agents=['Explore'])
+        events[0]['mcp_servers'] = [{'name': 'materials', 'status': 'connected'}]
+        for event in events:
+            if event['type'] == 'assistant':
+                event['message']['model'] = 'Kimi-K3'
+            if event['type'] == 'user':
+                raw = event['tool_use_result'][0]['text']
+                event['message']['content'][0]['content'] = raw or '(' + TOOL + ' completed with no output)'
+        events[-1].update(stop_reason='end_turn', total_credits=.1)
+        return events
+
+    def check(self, events, code=0):
+        self.log.write_text(''.join(json.dumps(e) + '\n' for e in events))
+        return validate(self.log, code, 'kmodel_latest', self.stage,
+                        expected_model='Kimi-K3', required=[v['path'] for v in
+                        self.registry['materials'].values()], registry=self.registry)
+
+    def test_raw_strings_empty_unicode_and_repeated_material(self):
+        events = self.events()
+        self.assertEqual(len(self.check(events)['complete_reads']), 2)
+        pair = copy.deepcopy(events[1:3])
+        pair[0]['message']['content'][0]['id'] = 'again'
+        pair[1]['message']['content'][0]['tool_use_id'] = 'again'
+        events[-1:-1] = pair
+        self.assertEqual(len(self.check(events)['complete_reads']), 2)
+
+    def test_raw_text_copies_are_checked_before_normalizing(self):
+        events = self.events()
+        result_index = next(i for i, e in enumerate(events) if e.get('type') == 'user'
+                            and e['tool_use_result'][0]['text'])
+        for target in ('message', 'top', 'both'):
+            changed = copy.deepcopy(events)
+            result = changed[result_index]
+            if target in ('message', 'both'):
+                result['message']['content'][0]['content'] = 'forged'
+            if target in ('top', 'both'):
+                result['tool_use_result'] = [{'type': 'text', 'text': 'forged'}]
+            with self.subTest(target=target), self.assertRaises(RunError):
+                self.check(changed)
+        # A correct top-level body cannot excuse a list where Qoder sent a string.
+        changed = copy.deepcopy(events)
+        changed[result_index]['message']['content'][0]['content'] = changed[result_index]['tool_use_result']
+        with self.assertRaises(RunError): self.check(changed)
+        self.check(events)
+        with self.assertRaises(RunError):
+            claude_validate(self.log, 0, 'opus', self.stage, required=[v['path'] for v in
+                            self.registry['materials'].values()], registry=self.registry)
+
+    def test_init_model_tools_skills_plugins_hooks_and_order(self):
+        cases = []
+        for key, value in [('model', 'Kimi-K3-extra'), ('tools', [TOOL, 'Read']),
+                           ('skills', ['debug']), ('plugins', [{'name': 'builtin'}]),
+                           ('mcp_servers', []), ('permissionMode', 'default'),
+                           ('qodercli_version', '1.1.75'), ('agents', None)]:
+            events = self.events(); events[0][key] = value; cases.append(events)
+        for subtype in ('hook_started', 'hook_response'):
+            events = self.events(); events.insert(1, {'type': 'system', 'subtype': subtype}); cases.append(events)
+        events = self.events(); events.insert(1, copy.deepcopy(events[0])); cases.append(events)
+        events = self.events(); events[0], events[1] = events[1], events[0]; cases.append(events)
+        events = self.events(); events[1]['message']['model'] = 'Other'; cases.append(events)
+        events = self.events(); del events[1]['message']['model']; cases.append(events)
+        events = self.events(); events[1]['message']['role'] = 'user'; cases.append(events)
+        events = self.events(); events[1]['message']['content'][0]['type'] = 'unknown'; cases.append(events)
+        for events in cases:
+            with self.subTest(event=events[:2]), self.assertRaises(RunError): self.check(events)
+
+    def test_incomplete_duplicate_denied_extra_tool_and_terminal(self):
+        cases = []
+        for key, value in [('is_error', True), ('permission_denials', ['Read']),
+                           ('subtype', 'error'), ('stop_reason', 'max_tokens'), ('result', '')]:
+            events = self.events(); events[-1][key] = value; cases.append(events)
+        for key, value in [('id', ''), ('name', 'Bash'), ('input', {'id': '999'}),
+                           ('input', {'id': self.first, 'path': '/etc/passwd'})]:
+            events = self.events(); events[1]['message']['content'][0][key] = value; cases.append(events)
+        events = self.events(); events[2]['message']['content'][0]['is_error'] = True; cases.append(events)
+        events = self.events(); events[2]['message']['content'][0]['is_error'] = 'false'; cases.append(events)
+        events = self.events(); events.insert(3, copy.deepcopy(events[1])); cases.append(events)
+        events = self.events(); events.insert(3, copy.deepcopy(events[2])); cases.append(events)
+        events = self.events(); del events[1:3]; cases.append(events)
+        events = self.events(); del events[2]; cases.append(events)
+        events = self.events(); events.insert(2, events.pop()); cases.append(events)
+        events = self.events(); events.append(copy.deepcopy(events[-1])); cases.append(events)
+        events = self.events(); events.append(copy.deepcopy(events[1])); cases.append(events)
+        events = self.events(); events.insert(1, {'type': 'system', 'subtype': 'artifacts_update',
+                                               'artifacts': ['unexpected']}); cases.append(events)
+        for events in cases:
+            with self.subTest(events=events[-2:]), self.assertRaises(RunError): self.check(events)
+        with self.assertRaises(RunError): self.check(self.events(), code=1)
+        self.log.write_text('{')
+        with self.assertRaises(RunError):
+            validate(self.log, 0, 'kmodel_latest', self.stage, required=list(
+                v['path'] for v in self.registry['materials'].values()), registry=self.registry)
+
+
+for name in dir(materials.MaterialIds):
+    if name.startswith('test_') and name not in QoderProtocolTests.__dict__:
+        setattr(QoderProtocolTests, name, None)
+
+if __name__ == '__main__':
+    unittest.main()
