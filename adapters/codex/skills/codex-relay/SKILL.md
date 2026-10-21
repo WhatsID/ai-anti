@@ -40,7 +40,7 @@ never evidence that the method was followed. Do not guess from the business cwd.
 Read the business repository's `AGENTS.md` and module authority. Record its
 real repository root, exact current `HEAD^{commit}` SHA, full attached branch
 reference from `git symbolic-ref --quiet HEAD` (exit 1 means detached; any other
-error stops), dirty baseline and scoped fingerprints, explicit file scope,
+error stops), dirty baseline and scoped fingerprints, complete implementation scope,
 request, and plan. Any branch or detached HEAD with a valid commit is supported;
 no commit or non-Git directory blocks a complete relay. Do not initialize,
 commit, create a branch, or switch the business checkout to manufacture a baseline.
@@ -48,6 +48,12 @@ Preserve other sessions' work. The request is verbatim and follows R2; the plan
 states scale, files and estimated sizes, rollback, and validation. Keep each
 run record outside the business repository by default; use
 [the template](references/run-record.md).
+
+Distinguish that complete scope from the existing materials selected for plan review;
+follow the sibling [claude-review parameter rules](../claude-review/SKILL.md) for
+`--files` and `--context`. Record planned new paths as `absent` in the dispatched
+baseline. If a same-named file appears concurrently before landing, stop under the
+existing fingerprint gate rather than overwrite it.
 
 Resolve every source-scope path before use: it must stay inside the business
 repository and cannot escape through `..` or a symlink. Use argument arrays or
@@ -91,7 +97,8 @@ input carrying needed method text must report that gap; do not pretend arbitrary
 external context is supported.
 
 Before implementation, invoke the resolved `claude-review` `plan` entry with
-the explicit scope and project scale. Resolve the channel from explicit user instructions,
+the selected existing review materials and project scale, preserving the complete
+implementation scope in the plan. Resolve the channel from explicit user instructions,
 otherwise `codex_relay.review_channel` (default `claude`); invalid configuration stops.
 Pass `--channel qwen` for Qwen and omit `--model`, using `plugins.qwen.model`.
 Claude defaults to Opus; Fable requires explicit `--model fable`. This is the real

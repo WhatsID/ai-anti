@@ -26,9 +26,31 @@ python3 "$REVIEW_SOURCE" plan \
   --scale 'project deployment scale' --out /private/tmp/review-output
 ```
 
-For a working-tree review, substitute `diff` and omit `--plan`. `--files` is the
-task's explicit relative scope; the Git repository must already have a HEAD
-commit. `--repo` is the actual Git root, not a subdirectory; `--context` adds read-only context. `--out` must
+For a working-tree review, substitute `diff` and omit `--plan`. The Git repository
+must already have a HEAD commit. `--repo` is the actual Git root, not a subdirectory.
+
+For `plan`, `--files` selects current review materials, not the complete implementation
+scope: it requires at least one existing, relevant UTF-8 regular file. Record the
+complete scope (existing, planned new, and planned deleted paths) in the plan. For
+new files, specify their paths, purposes, interfaces, expected behavior and acceptance.
+Keep `task.request.md` verbatim; do not add inferred requirements to it. Exclude
+not-yet-created files only from material selection, never from the plan's scope or
+authorization. A missing file that should exist is a gap, not silently a planned addition.
+Select real relevant README, configuration or code files. If none are suitable, report
+this CLI limitation; do not create placeholder/empty files, omit required `--files`,
+or copy the plan into the business repository to bypass validation.
+
+For example, in a repository containing only `README.md`, a plan to add `average.py`
+and `test_average.py` keeps both additions in the plan and uses `plan --files README.md`,
+not `--files average.py test_average.py`. `--plan` and its request sibling are loaded
+separately; do not select them again through `--files` or `--context`. `--context`
+adds existing read-only relative files inside the repository, never external absolute
+paths or `..`; it must not overlap `--files`. These existence restrictions on planned
+additions apply to `plan`: `diff` still accepts actual new untracked files and actual
+deletions, and must retain the complete diff scope. Report failures under the user's
+stop-on-failure instruction; this guidance grants no automatic retry or external call.
+
+`--out` must
 be a new directory outside the reviewed repository, with an existing parent.
 Use real paths (no symlink components or `..`). Inputs are UTF-8 text only, at
 most 2 MiB per file and per stage, and 2000 characters per LF-delimited line.

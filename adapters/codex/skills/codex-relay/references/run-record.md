@@ -12,7 +12,7 @@
 | Business repository and root | [path] |
 | Frozen base / current `HEAD^{commit}` | [SHA] / [SHA] |
 | Base / current full attached ref or detached state | [refs/heads/name or detached] / [value] |
-| Explicit scope | [relative paths] |
+| Complete implementation scope | [existing / planned new / planned deleted relative paths; new paths recorded as `absent`] |
 | Dirty baseline | [status and fingerprints] |
 | Authorization boundary | [investigate / plan / implement] |
 
@@ -22,6 +22,7 @@
 | --- | --- |
 | Verbatim request path and fingerprint | [path, SHA-256] |
 | Pre-review plan path and fingerprint | [path, SHA-256] |
+| Plan review materials | [`--files` / `--context`: existing relative paths; no overlap between these two lists; implementation scope may overlap either] |
 | Final plan and revision relation | [path; changes after review] |
 | Review output / manifest / status | [paths] |
 | Two-stage inventory and review | [success/failure with evidence] |
