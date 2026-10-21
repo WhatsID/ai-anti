@@ -278,6 +278,8 @@ def main():
         if not claude:
             raise RunError(executor + " not found on PATH")
         manifest["capabilities"] = preflight(claude, logs, env=env, material_config=mcp_config(initial_registry_path) if initial_registry_path else None)
+        if codex_executor:
+            warnings.extend(manifest["capabilities"].get("warnings", []))
         manifest["warnings"] = warnings
         manifest["cli_version"] = manifest["capabilities"]["cli_version"]
         warning = compat_warning(manifest["cli_version"], executor)

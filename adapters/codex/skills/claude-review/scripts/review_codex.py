@@ -2,6 +2,7 @@
 import hashlib
 import json
 import os
+import re
 from pathlib import Path
 import sys
 import time
@@ -10,6 +11,25 @@ from review_materials import load_registry
 from review_codex_protocol import validate
 
 SUPPORTED_VERSIONS = ('codex-cli 0.160.0', 'codex-cli 0.163.0')
+
+PATH_ALIAS_WARNING = 'WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)'
+
+
+def parse_version_output(text):
+    versions, warnings = [], []
+    for line in text.split('\n'):
+        if not line:
+            continue
+        if line == PATH_ALIAS_WARNING:
+            warnings.append(line)
+        elif re.fullmatch(r'codex-cli [0-9]+\.[0-9]+\.[0-9]+', line):
+            versions.append(line)
+        else:
+            raise RunError('Codex invalid version output')
+    if len(versions) != 1 or len(warnings) > 1:
+        raise RunError('Codex invalid version output')
+    return versions[0], warnings
+
 
 FEATURES = ('apps', 'hooks', 'goals', 'view_image', 'browser_use', 'computer_use',
             'shell_tool', 'shell_snapshot', 'multi_agent', 'js_repl', 'skill_search', 'tool_suggest')
@@ -90,7 +110,8 @@ def capability(cli, out, env=None, material_config=None):
         if code or any(flag not in text for flag in needed):
             raise RunError('Codex capability mismatch: ' + label)
         result[label] = {'exit': code, 'sha256': hashlib.sha256(data).hexdigest()}
-        if label == 'version': result['cli_version'] = text.strip()
+        if label == 'version':
+            result['cli_version'], result['warnings'] = parse_version_output(text)
     # Config key semantics are version-bound, not proven merely by --help.
     if result['cli_version'] not in SUPPORTED_VERSIONS:
         raise RunError('Codex config semantics only verified for ' + ', '.join(SUPPORTED_VERSIONS))

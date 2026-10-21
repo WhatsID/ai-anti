@@ -219,3 +219,10 @@ metadata. Initially omitting the explicit setting caused observed requests to us
 xhigh, an unintended budget increase; local wire capture confirms the explicit
 medium override and complete 12KiB material transport. This does not establish
 that reasoning effort caused observed live silence, or that live latency is fixed.
+
+### Codex 版本预检告警边界（2026-10-21）
+
+`--version` 只接受唯一完整版本行；支持集合仍为 0.160.0 / 0.163.0。允许前后
+至多一条精确 `WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)`。
+告警进入 capabilities 与既有 warnings 输出，原始日志及哈希保留；其他噪声、重复或
+非零退出仍拒绝。此例外不用于正式 JSONL，也不证明受限环境的 exec 可运行。

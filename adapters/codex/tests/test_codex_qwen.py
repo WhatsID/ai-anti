@@ -1,4 +1,5 @@
 """Offline Responses executor contracts; no external service."""
+import hashlib
 import json
 import shutil
 from pathlib import Path
@@ -54,6 +55,47 @@ class CodexQwenTests(qwen.QwenReviewTests):
                 self.assertNotEqual(r.returncode, 0)
                 self.assertIn('only verified', (out / 'status.json').read_text())
                 self.assertFalse((out / 'report.md').exists())
+
+    def test_version_path_warning_evidence(self):
+        warning = 'WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)'
+        for version in ('0.160.0', '0.163.0'):
+            for lines in ((warning, 'codex-cli ' + version), ('codex-cli ' + version, warning)):
+                with self.subTest(lines=lines):
+                    raw = '\n'.join(lines) + '\n'
+                    r, out = self.run_review(env_extra={'FAKE_CODEX_VERSION': raw})
+                    self.assert_success(r, out)
+                    manifest = self.manifest(out)
+                    self.assertEqual(manifest['cli_version'], 'codex-cli ' + version)
+                    self.assertEqual(manifest['capabilities']['warnings'], [warning])
+                    data = (out / 'logs/codex-version.txt').read_bytes()
+                    self.assertEqual(data, (raw + '\n').encode())
+                    self.assertEqual(manifest['capabilities']['version']['sha256'], hashlib.sha256(data).hexdigest())
+                    for record in (manifest, json.loads((out / 'status.json').read_text())):
+                        self.assertIn(warning, record['warnings'])
+                    self.assertIn(warning, (out / 'report.md').read_text())
+
+    def test_version_output_rejections_before_model(self):
+        warning = 'WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)'
+        version = 'codex-cli 0.163.0'
+        cases = [('', 0), (warning, 0), (version + '\n' + version, 0),
+                 (warning + '\n' + warning + '\n' + version, 0),
+                 ('WARNING: unknown\n' + version, 0), (version + '\nERROR: denied', 0),
+                 ('prefix ' + version, 0), (version + ' extra', 0),
+                 (warning.replace('error 1', 'error 13') + '\n' + version, 0),
+                 (' ' + warning + '\n' + version, 0),
+                 (warning + '\ncodex-cli 0.164.0', 0),
+                 (warning + '\n' + version, 1)]
+        for index, (raw, code) in enumerate(cases):
+            with self.subTest(raw=raw, code=code):
+                audit = self.base / ('rejected-version-' + str(index) + '.json')
+                r, out = self.run_review(env_extra={'FAKE_CODEX_VERSION': raw,
+                    'FAKE_CODEX_VERSION_EXIT': str(code), 'FAKE_CODEX_AUDIT': str(audit)})
+                self.assertNotEqual(r.returncode, 0)
+                self.assertFalse(audit.exists())
+                self.assertFalse((out / 'report.md').exists())
+                error = (out / 'status.json').read_text()
+                self.assertIn('only verified' if '0.164.0' in raw else
+                              'capability mismatch: version' if code else 'invalid version output', error)
 
     def test_codex_fail_closed(self):
         for mode in ('missing', 'extra_tool', 'wrong_text', 'duplicate', 'progress_only',
