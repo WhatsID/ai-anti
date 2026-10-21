@@ -78,6 +78,42 @@ class CheckTests(unittest.TestCase):
         self.assertEqual(checks.qwen_evidence(claude, claude, values), 'qwen-fixture')
         with self.assertRaises(ValueError): checks.qwen_evidence(dict(claude, actual_model='other'), claude, values)
 
+    def test_solo_rejects_model_detection_before_cli(self):
+        store = self.api_store()
+        s = store.read(); v = s['values']; v['mode'] = 'solo'; store.save(v,s['fingerprints'])
+        with patch('checks.run') as run:
+            with self.assertRaisesRegex(checks.CheckError,'solo'): checks.real(store,str(ROOT))
+        run.assert_not_called()
+
+    def test_qoder_formal_route_and_strict_evidence(self):
+        store = Store(self.root/'qoder-home')
+        snap = store.read(); v = snap['values']; v.update(host='codex', channel='qoder')
+        store.save(v, snap['fingerprints'])
+        with patch('checks.discover', return_value='/usr/bin/true') as discover:
+            checks.local(store, str(ROOT))
+        self.assertEqual({c.args[0] for c in discover.call_args_list}, {'codex','qodercli'})
+        good = dict(status='completed',completed=True,mode='diff',channel='qoder',executor='qoder',wire_api='qoder-cli',requested_model='kimi-k3',actual_model='Kimi-K3')
+        def fake_run(argv, cwd, log, **kwargs):
+            if '--channel' in argv:
+                self.assertEqual(argv[argv.index('--channel')+1], 'qoder')
+                self.assertEqual(argv[argv.index('--model')+1], 'kimi-k3')
+                self.assertEqual(argv[argv.index('--timeout')+1], '600')
+                self.assertEqual(kwargs['timeout'], 660); self.assertEqual(kwargs['limit'], 2*1024*1024)
+                self.assertEqual(kwargs['env']['HOME'], str(store.root))
+                out = Path(argv[argv.index('--out')+1]); out.mkdir()
+                for name in ('status','manifest'): (out/(name+'.json')).write_text(json.dumps(good))
+            return 0
+        with patch('checks.discover', return_value='/usr/bin/true'), patch('checks.run', side_effect=fake_run):
+            self.assertEqual(checks.real(store, str(ROOT))['actual_model'], 'Kimi-K3')
+        for key, bad in [('completed',False),('mode','plan'),('status','failed'),('channel','qwen'),('executor','codex'),('wire_api','responses'),('requested_model','other'),('actual_model','other')]:
+            for side in (0,1):
+                if (key == 'mode' and side == 0) or (key == 'completed' and side == 1): continue
+                pair = [dict(good),dict(good)]; pair[side][key] = bad
+                with self.subTest(key=key, side=side), self.assertRaises(ValueError): checks.qoder_evidence(*pair)
+        def no_evidence(argv, cwd, log, **kwargs): return 0
+        with patch('checks.discover',return_value='/usr/bin/true'), patch('checks.run',side_effect=no_evidence):
+            with self.assertRaisesRegex(checks.CheckError,'证据'): checks.real(store,str(ROOT),timeout=1)
+
     def test_version_nonzero_and_timeout(self):
         for text, timeout, expected in [('import sys; sys.exit(4)',2,4), ('import time; time.sleep(30)',.2,None)]:
             p=self.script(text)

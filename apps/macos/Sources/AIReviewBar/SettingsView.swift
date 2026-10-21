@@ -43,23 +43,40 @@ struct SettingsView: View {
                         ForEach(model.modes, id: \.0) { item in Text(item.0).tag(item.0) }
                     }
                     Text("solo 同时停用交叉评审和独立实施。用户当次明确指令 > 项目 .claude/relay-mode.local > 全局默认 > rules。Codex 模式仅对已加载 codex-relay 的工作流生效。").font(.caption).foregroundStyle(.secondary)
-                    Picker("评审模型", selection: Binding(get: { model.reviewFamily }, set: { model.switchReviewFamily($0) })) {
+                    Picker("评审服务", selection: Binding(get: { model.reviewFamily }, set: { model.switchReviewFamily($0) })) {
                         if model.draft.host == "claude" { Text("Codex").tag("codex") }
-                        Text("Qwen").tag("qwen"); Text("DeepSeek").tag("deepseek")
-                        if !["codex", "qwen"].contains(model.draft.channel) { Text("已有通道：\(model.draft.channel)（首期需改选）").tag(model.draft.channel) }
+                        Text("千问 Token Plan").tag("token_plan"); Text("自定义 API").tag("custom_api")
+                        if model.draft.host == "codex" { Text("Qoder").tag("qoder") }
+                        if model.draft.channel == "qoder" && model.draft.host == "claude" { Text("已有 Qoder 配置（Claude 主模型暂不支持）").tag("qoder") }
+                        if model.draft.channel == "codex" && model.draft.host == "codex" { Text("已有 Codex 配置（此主模型暂不支持）").tag("codex") }
+                        if !["codex", "qwen", "qoder"].contains(model.draft.channel) { Text("已有配置：\(model.draft.channel)").tag(model.draft.channel) }
                     }.disabled(isSolo)
-                    modelPicker("评审模型 ID", selection: model.draft.channel == "codex" ? $model.draft.reviewerModel : $model.draft.qwenModel, options: model.reviewerOptions)
-                        .disabled(isSolo)
-                    Picker("评审执行器", selection: .constant(model.draft.channel == "codex" ? "codex" : model.draft.effectiveExecutor)) {
-                        Text("Claude Code CLI").tag("claude"); Text("Codex CLI").tag("codex")
-                    }.disabled(true)
-                    if model.executorMigrationPending {
-                        Text("旧配置使用 Claude Code CLI；保存后，Codex 主模型的 API 评审将改用 Codex CLI。请确认 Responses 服务地址。").font(.caption).foregroundStyle(.secondary)
+                    if model.draft.channel == "qwen" && model.draft.activeAPI == "custom_api" {
+                        TextField("评审模型 ID", text: $model.draft.qwenModel).disabled(isSolo)
+                    } else {
+                        modelPicker("评审模型", selection: model.draft.channel == "qoder" ? .constant("kmodel_latest") : model.draft.channel == "codex" ? $model.draft.reviewerModel : $model.draft.qwenModel, options: model.reviewerOptions).disabled(isSolo || model.draft.channel == "qoder")
                     }
-                    TextField("服务地址", text: model.draft.channel == "qwen" ? $model.draft.activeBaseURL : .constant("不适用（CLI 登录配置）"))
-                        .disabled(isSolo || model.draft.channel != "qwen")
-                    SecureField("评审模型秘钥", text: model.draft.channel == "qwen" ? $model.draft.secret : .constant(""), prompt: Text(model.draft.channel != "qwen" ? "不适用" : model.credentialPresent ? String(repeating: "•", count: 60) : "输入密钥"))
-                        .disabled(isSolo || model.draft.channel != "qwen")
+                    if model.draft.channel == "qwen" {
+                        TextField("服务地址", text: $model.draft.activeBaseURL).disabled(isSolo)
+                        Picker("认证 / API 密钥", selection: $model.draft.secretAction) {
+                            Text("保留").tag("retain"); Text("更换").tag("replace"); Text("清除").tag("clear")
+                        }.disabled(isSolo)
+                        if model.draft.secretAction == "replace" { SecureField("新 API 密钥（留空保留）", text: $model.draft.secret).disabled(isSolo) }
+                        if model.draft.secretAction == "clear" { Text("保存时清除该服务的应用管理密钥，并停用该服务凭证查找；外部文件保留。").font(.caption) }
+                        Text("Claude 与 Codex 共享当前 API 服务、模型及凭证；两个协议地址独立保存。切换服务保留各自草稿，未保存不写入磁盘。").font(.caption).foregroundStyle(.secondary)
+                    } else {
+                        Text(model.draft.channel == "qoder" ? "使用现有 Qoder CLI 登录；登录状态未检测。当前固定 Kimi-K3；仅支持 Codex 主模型。" : "使用现有 Codex CLI 登录；登录状态未检测。").font(.caption).foregroundStyle(.secondary)
+                    }
+                    if model.draft.host == "claude" { Text("Qoder 暂不支持 Claude 主模型。").font(.caption).foregroundStyle(.secondary) }
+                    DisclosureGroup("高级设置") {
+                        Text("评审执行器：" + (model.draft.channel == "qoder" ? "Qoder CLI" : model.draft.channel == "codex" ? "Codex CLI" : model.draft.effectiveExecutor == "codex" ? "Codex CLI · Responses" : "Claude Code CLI · Anthropic"))
+                        Text("协议由主模型固定；不提供 Chat Completions 支持承诺。").font(.caption)
+                        Text("模型 ID：" + (model.draft.channel == "qoder" ? "kmodel_latest" : model.draft.channel == "codex" ? (model.draft.reviewerModel.isEmpty ? "CLI 默认" : model.draft.reviewerModel) : model.draft.qwenModel)).font(.caption)
+                        if model.draft.channel == "qwen" {
+                            Text(model.draft.effectiveExecutor == "codex" ? "Codex CLI 使用 Responses 兼容地址；仅确认请求模型，服务端实际模型未知。" : "Claude Code CLI 使用 Anthropic 兼容地址；Claude 主模型固定使用此执行器。").font(.caption).foregroundStyle(.secondary)
+                        }
+                        if model.executorMigrationPending { Text("保存后 Codex 主模型的 API 评审改用 Responses 地址，请确认服务支持。").font(.caption) }
+                    }
                     Text("空主模型表示保留已有默认值；一次保存包含 Claude 与 Codex 两组已编辑字段。").font(.caption).foregroundStyle(.secondary)
                     if model.draft.host == "claude" {
                         Text("已配置回退列表：" + (model.claudeFallbacks.isEmpty ? "无" : model.claudeFallbacks.joined(separator: " → "))).font(.caption)
@@ -67,12 +84,10 @@ struct SettingsView: View {
                         Text("Codex 评审失败即停止，不自动回退。").font(.caption)
                     }
                     if model.draft.channel == "qwen" {
-                        Text(model.draft.effectiveExecutor == "codex" ? "Codex CLI 使用 Responses 兼容地址；仅确认请求模型，服务端实际模型未知。" : "Claude Code CLI 使用 Anthropic 兼容地址；Claude 主模型固定使用此执行器。")
-                            .font(.caption).foregroundStyle(.secondary)
-                        Text("使用所选模型所属入口的地址和密钥；两个协议地址独立保存，不会自动更换。目录选项不代表已验证可调用，DeepSeek 尚未验证完整流程。").font(.caption).foregroundStyle(.secondary)
-                        Text(model.credentialPresent ? "发现凭证文件；是否可解析需手动检查" : "未发现凭证文件").font(.caption)
-                        if model.relativeCredentials { Text("项目相对凭证未检查；业务项目可能优先使用。桌面仅检查 ~/ 或绝对路径凭证。").font(.caption).foregroundStyle(.secondary) }
-                        Text("密钥存入 ~/.config/ai-anti/secrets.json 的受限明文文件（0600），不是钥匙串；保留已有凭证路径。").font(.caption).foregroundStyle(.secondary)
+                        Text("千问 Token Plan 提供 Qwen3.8-Max 和 DeepSeek-V4-Pro；自定义 API 请填写模型 ID。目录选项不代表已验证可调用，DeepSeek 尚未验证完整流程。").font(.caption).foregroundStyle(.secondary)
+                        Text(model.selectedCredentialMessage).font(.caption)
+                        if model.relativeCredentials && model.draft.activeAPI == model.saved.activeAPI { Text("项目相对凭证未检查；业务项目可能优先使用。桌面仅检查 ~/ 或绝对路径凭证。").font(.caption).foregroundStyle(.secondary) }
+                        Text("密钥按服务独立存入 ~/.config/ai-anti/secrets.json 的受限明文文件（0600）。").font(.caption).foregroundStyle(.secondary)
                     }
                 }.frame(width: geometry.size.width - 8, alignment: .leading).padding(4)
               }
@@ -97,7 +112,7 @@ struct SettingsView: View {
         .disabled(model.busy && !model.checking)
         .alert("测试会消耗模型额度", isPresented: $confirmReal) {
             Button("开始合成检测") { model.check(real: true) }; Button("取消", role: .cancel) {}
-        } message: { Text("仅使用临时合成仓库；不读取业务材料。兼容 API 最多可能需要 30 分钟，无自动重试或降级。") }
+        } message: { Text("仅使用临时合成仓库；不读取业务材料。API 最多 30 分钟，Qoder 最多 10 分钟，无自动重试或降级。") }
         .alert("恢复上次保存？", isPresented: $confirmRestore) {
             Button("恢复") { model.restore() }; Button("取消", role: .cancel) {}
         } message: { Text("只在保存后没有外部修改时恢复，备份可能包含敏感配置。") }

@@ -9,6 +9,7 @@ import re
 import tempfile
 import tomllib
 from urllib.parse import urlsplit
+import review_services as services
 
 MODES = ('solo', 'auto', 'rules', 'force')
 class StoreError(Exception):
@@ -163,7 +164,7 @@ class Store:
         for key in ('primary_model', 'claude_model', 'codex_model', 'reviewer_model', 'qwen_model', 'secondary_model', 'base_url'):
             if not isinstance(values[key], str):
                 raise StoreError('配置字段类型无效：' + key)
-        if values['channel'] not in ('claude', 'codex', 'qwen', 'same-family'):
+        if values['channel'] not in ('claude', 'codex', 'qwen', 'qoder', 'same-family'):
             raise StoreError('评审通道配置无效')
         paths = values['credential_paths']
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
@@ -176,14 +177,17 @@ class Store:
             raise StoreError('API 评审执行器无效')
         for key in ('base_url', 'responses_base_url'):
             endpoint(values[key])
+        profiles = services.load(ai, qwen, endpoint, model, self.credential_path, StoreError)
+        values['review_services'] = profiles
+        values['credential_key'] = profiles['profiles'][profiles['active_api']]['credential_key']
         resolved = [self.credential_path(p) for p in paths]
         values['relative_credentials'] = any(p is None for p in resolved)
         values['credential_present'] = any(p.is_file() for p in resolved if p is not None)
         return {'values': values, 'fingerprints': {k: fingerprint(p) for k,p in self.paths.items()},
-                'signature': self.signature(values['credential_paths']), 'sources': {k: str(p) for k,p in self.paths.items() if k != 'secrets'},
+                'signature': self.signature([p for profile in profiles['profiles'].values() for p in profile['credential_paths']]), 'sources': {k: str(p) for k,p in self.paths.items() if k != 'secrets'},
                 'can_restore': (self.desktop / 'last-save.json').is_file()}
     def credential_path(self, raw):
-        if not isinstance(raw, str) or not raw:
+        if not isinstance(raw, str) or not raw or any(c in raw for c in '\r\n\x00'):
             raise StoreError('凭证路径无效')
         if '..' in Path(raw).parts:
             raise StoreError('凭证路径不能包含父目录跳转')
@@ -198,7 +202,8 @@ class Store:
             raise StoreError('fixture 模式禁止读取隔离根之外的凭证')
         safe_path(path)
         return path
-    def credential_status(self, paths):
+    def credential_status(self, paths, credential_key='tokenplan.value'):
+        if credential_key not in services.KEYS: raise StoreError('凭证键无效')
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             raise StoreError('凭证查找路径必须为字符串列表')
         for raw in paths:
@@ -209,7 +214,7 @@ class Store:
             if not path.is_file():
                 continue
             try:
-                token = object_json(path.read_bytes()).get('tokenplan', {}).get('value')
+                token = services.lookup(object_json(path.read_bytes()), credential_key)
                 if isinstance(token, str) and token.strip():
                     return True, path
             except (StoreError, AttributeError):
@@ -231,7 +236,9 @@ class Store:
                 stamps[str(path)] = None
         config_hashes = {k: fingerprint(p) for k,p in self.paths.items() if k != 'secrets'}
         return hashlib.sha256(encode([config_hashes, stamps])).hexdigest()
-    def outputs(self, values, secret):
+    def outputs(self, values, secret, secret_actions=None):
+        if secret_actions is not None and not isinstance(secret_actions, dict):
+            raise StoreError('凭证动作必须为对象')
         host = values.get('host')
         if host not in ('claude', 'codex'):
             raise StoreError('主模型无效')
@@ -244,8 +251,8 @@ class Store:
                 raise StoreError('host_updates 字段无效')
             if 'primary_model' in fields:
                 model(fields['primary_model'], optional=True)
-            if 'channel' in fields and fields['channel'] not in (('codex', 'qwen') if h == 'claude' else ('qwen',)):
-                raise StoreError('首期支持 Claude→Codex、Claude→Qwen、Codex→Qwen')
+            if 'channel' in fields and fields['channel'] not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder')):
+                raise StoreError('支持 Claude→Codex、Claude→API、Codex→API/Qoder')
         current = updates.setdefault(host, {})
         for key in ('primary_model', 'channel'):
             if key in current and current[key] != values.get(key):
@@ -256,6 +263,19 @@ class Store:
             model(values.get(key), optional=True)
         ai = object_json(self.raw('ai')) if self.paths['ai'].exists() else {}
         review, relay, qwen = section(ai, 'review'), section(ai, 'codex_relay'), section(section(ai, 'plugins'), 'qwen')
+        profiles = None
+        if 'review_services' in values or 'review_services' in ai:
+            # Validate stored source/projection before accepting a new draft.
+            stored_profiles = services.load(ai, qwen, endpoint, model, self.credential_path, StoreError)
+            profiles = services.validate(values.get('review_services', stored_profiles), endpoint, model, self.credential_path, StoreError)
+            active_profile = profiles['profiles'][profiles['active_api']]
+            if secret_actions is None and ('review_services' not in values or profiles == stored_profiles):
+                # Old clients edit the historical public fields.
+                for public, old in (('model','qwen_model'), ('base_url','base_url'), ('responses_base_url','responses_base_url')):
+                    if old in values: active_profile[public] = values[old]
+                profiles = services.validate(profiles, endpoint, model, self.credential_path, StoreError)
+                active_profile = profiles['profiles'][profiles['active_api']]
+            values = dict(values, qwen_model=active_profile['model'], base_url=active_profile['base_url'], responses_base_url=active_profile['responses_base_url'])
         executor = values.get('qwen_executor', relay.get('qwen_executor', 'claude'))
         if executor not in ('claude', 'codex'):
             raise StoreError('API 评审执行器无效')
@@ -269,8 +289,8 @@ class Store:
         current['primary_model'] = values['primary_model']
         for h, fields in updates.items():
             route = fields.get('channel', original_channels[h])
-            if 'channel' in fields and route not in (('codex', 'qwen') if h == 'claude' else ('qwen',)):
-                raise StoreError('首期支持 Claude→Codex、Claude→Qwen、Codex→Qwen')
+            if 'channel' in fields and route not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder')):
+                raise StoreError('支持 Claude→Codex、Claude→API、Codex→API/Qoder')
             if route == 'qwen' and (h == host or 'channel' in fields):
                 model(values['qwen_model'])
                 active = 'responses_base_url' if h == 'codex' and executor == 'codex' else 'base_url'
@@ -299,7 +319,8 @@ class Store:
             if path is not None:
                 safe_path(path)
         output = {}
-        if secret:
+        legacy_secret = bool(secret) and 'review_services' not in ai
+        if legacy_secret:
             if not isinstance(secret, str) or secret != secret.strip() or any(c.isspace() for c in secret):
                 raise StoreError('新密钥格式无效')
             secrets = object_json(self.raw('secrets')) if self.paths['secrets'].exists() else {}
@@ -307,6 +328,22 @@ class Store:
             output['secrets'] = encode(secrets)
             own = '~/.config/ai-anti/secrets.json'
             qwen['credential_paths'] = [own] + [p for p in paths if self.credential_path(p) != self.paths['secrets']]
+        if profiles is not None:
+            if secret and secret_actions is not None:
+                raise StoreError('服务配置请使用独立凭证动作')
+            if legacy_secret:
+                active_profile['credential_paths'] = qwen['credential_paths']
+                active_profile['credential_key'] = 'tokenplan.value'
+            requests = secret_actions if secret_actions is not None else {}
+            if secret and not legacy_secret: requests = {profiles['active_api']: {'action':'replace','value':secret}}
+            if requests:
+                secrets = object_json(self.raw('secrets')) if self.paths['secrets'].exists() else {}
+                if services.actions(profiles, requests, secrets, StoreError): output['secrets'] = encode(secrets)
+            profiles = services.validate(profiles, endpoint, model, self.credential_path, StoreError)
+            ai['review_services'] = profiles
+            qwen.update(copy.deepcopy(profiles['profiles'][profiles['active_api']]))
+        elif secret_actions:
+            raise StoreError('凭证动作需要服务配置')
         output['ai'] = encode(ai)
         for h, fields in updates.items():
             primary = fields.get('primary_model', '')
@@ -387,8 +424,8 @@ class Store:
             if restoring:
                 backup.unlink(missing_ok=True)
         return self.read()
-    def save(self, values, expected, secret=''):
-        return self.transaction(self.outputs(values, secret), expected)
+    def save(self, values, expected, secret='', secret_actions=None):
+        return self.transaction(self.outputs(values, secret, secret_actions), expected)
     def restore(self, expected):
         backup = self.desktop / 'last-save.json'
         safe_path(backup)
@@ -411,6 +448,7 @@ class Store:
             if restored_executor not in ('claude', 'codex'):
                 raise StoreError('恢复记录 API 评审执行器无效；请先完成一次新保存以刷新恢复点')
             restored_qwen = section(section(restored_ai, 'plugins'), 'qwen')
+            services.load(restored_ai, restored_qwen, endpoint, model, self.credential_path, StoreError)
             for key in ('base_url', 'responses_base_url'):
                 endpoint(restored_qwen.get(key, ''))
             restored_mode = section(restored_ai, 'relay').get('default_mode', 'rules')

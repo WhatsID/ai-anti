@@ -60,6 +60,9 @@ def resolve(config, channel, model, repo, families, executor=None, responses_url
     paths = lookup(config, 'plugins.qwen.credential_paths')
     if not isinstance(paths, list) or not paths:
         raise ConfigError('plugins.qwen.credential_paths must be a non-empty path array')
+    credential_key = lookup(config, 'plugins.qwen').get('credential_key', 'tokenplan.value')
+    if credential_key not in ('tokenplan.value', 'review_services.token_plan.value', 'review_services.custom_api.value'):
+        raise ConfigError('plugins.qwen.credential_key invalid')
     resolved = []
     for value in paths:
         path = Path(single_line(value, 'plugins.qwen.credential_paths entry')).expanduser()
@@ -67,7 +70,7 @@ def resolve(config, channel, model, repo, families, executor=None, responses_url
     return {'channel': channel, 'requested_model': model, 'configured_model': model,
             'executor': executor, 'wire_api': 'responses' if executor == 'codex' else 'anthropic',
             'cli_model': model if executor == 'codex' else 'sonnet', 'pattern': re.compile(re.escape(model)),
-            'base_url': url, 'credential_paths': resolved}
+            'base_url': url, 'credential_paths': resolved, 'credential_key': credential_key}
 
 
 def evidence(channel):
@@ -91,14 +94,14 @@ def child_environment(channel):
     for path in channel['credential_paths']:
         try:
             data = json.loads(path.read_text(encoding='utf-8'))
-            value = lookup(data, 'tokenplan.value')
+            value = lookup(data, channel.get('credential_key', 'tokenplan.value'))
         except (OSError, UnicodeError, ValueError, TypeError):
             continue
         if isinstance(value, str) and value.strip() and not any(c in value for c in '\r\n\x00'):
             token = value
             break
     if token is None:
-        raise ConfigError('Qwen credential unavailable: tokenplan.value must be a non-empty string')
+        raise ConfigError('Qwen credential unavailable: selected credential key must be a non-empty string')
     env = dict(os.environ)
     if channel.get('executor') == 'codex':
         for key in list(env):

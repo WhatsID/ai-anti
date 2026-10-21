@@ -16,7 +16,7 @@ def dispatch(store, request, source=None):
     if action == 'load':
         return store.read()
     if action == 'save':
-        return store.save(request['values'], request['fingerprints'], request.get('secret', ''))
+        return store.save(request['values'], request['fingerprints'], request.get('secret', ''), request.get('secret_actions'))
     if action == 'restore':
         return store.restore(request['fingerprints'])
     if action == 'local':

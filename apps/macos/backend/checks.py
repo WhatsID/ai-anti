@@ -101,16 +101,17 @@ def result(kind, state, message, snapshot, actual='未知'):
 def local(store, source=None):
     snapshot = store.read()
     v = snapshot['values']
+    if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
     # Validation builds bytes but never writes them.
     store.outputs(v, '')
     source_root(store, source)
-    names = {v['host'], effective_executor(v) if v['channel'] == 'qwen' else 'codex'}
+    names = {v['host'], effective_executor(v) if v['channel'] == 'qwen' else 'qodercli' if v['channel'] == 'qoder' else 'codex'}
     with tempfile.TemporaryDirectory(prefix='ai-anti-local-') as temp:
         for name in names:
             cli = discover(name)
             if run([cli, '--version'], temp, Path(temp) / (name + '.log')) != 0:
                 raise CheckError(name + ' --version 失败；原始输出已隐藏')
-    if v['channel'] == 'qwen' and not store.credential_status(v['credential_paths'])[0]:
+    if v['channel'] == 'qwen' and not store.credential_status(v['credential_paths'], v.get('credential_key', 'tokenplan.value'))[0]:
         raise CheckError('没有找到可解析的 Qwen 凭证')
     if store.read()['signature'] != snapshot['signature']:
         raise CheckError('检测中配置或凭证发生变化，结果作废')
@@ -159,12 +160,20 @@ def qwen_evidence(status, manifest, values):
             raise ValueError()
     return status['actual_model']
 
+def qoder_evidence(status, manifest):
+    if status.get('completed') is not True or manifest.get('mode') != 'diff': raise ValueError()
+    for item in (status, manifest):
+        if any(item.get(k) != v for k,v in dict(status='completed',channel='qoder',executor='qoder',wire_api='qoder-cli',requested_model='kimi-k3',actual_model='Kimi-K3').items()): raise ValueError()
+    return 'Kimi-K3'
+
 def real(store, source=None, timeout=None):
     snapshot = store.read()
     v = snapshot['values']
+    if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
+    if v['mode'] == 'solo': raise CheckError('solo 模式停用交叉评审')
     store.outputs(v, '')
     root = source_root(store, source)
-    timeout = timeout if timeout is not None else (1800 if v['channel'] == 'qwen' else 1200)
+    timeout = timeout if timeout is not None else (1800 if v['channel'] == 'qwen' else 600 if v['channel'] == 'qoder' else 1200)
     with tempfile.TemporaryDirectory(prefix='ai-anti-probe-') as temp:
         temp = Path(temp).resolve()
         os.chmod(temp, 0o700)
@@ -184,7 +193,7 @@ def real(store, source=None, timeout=None):
                 raise CheckError('无法创建隔离合成仓库')
         (repo / 'sample.txt').write_text('synthetic change\nREAD_TOKEN=' + marker + '\n')
         if v['channel'] == 'qwen':
-            if not store.credential_status(v['credential_paths'])[0]:
+            if not store.credential_status(v['credential_paths'], v.get('credential_key', 'tokenplan.value'))[0]:
                 raise CheckError('Qwen 凭证不存在或不可解析')
             # Formal runner retains full reads, tool/permission and actual model gates.
             import sys
@@ -202,6 +211,20 @@ def real(store, source=None, timeout=None):
                 actual = qwen_evidence(status, manifest, v)
             except (OSError, ValueError, KeyError):
                 raise CheckError('Qwen 正式入口证据不完整或实际模型不匹配') from None
+        elif v['channel'] == 'qoder':
+            import sys
+            argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
+                    '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
+                    '--out', str(out), '--channel', 'qoder', '--model', 'kimi-k3', '--timeout', str(timeout),
+                    '--max-output-bytes', str(2*1024*1024)]
+            if run(argv, repo, temp / 'runner.log', timeout=timeout+60, limit=2*1024*1024, env=env) != 0:
+                raise CheckError('Qoder 正式入口检测失败；未自动重试或降级')
+            try:
+                status = json.loads((out / 'status.json').read_text())
+                manifest = json.loads((out / 'manifest.json').read_text())
+                actual = qoder_evidence(status, manifest)
+            except (OSError, ValueError, KeyError):
+                raise CheckError('Qoder 正式入口证据不完整或实际模型不匹配') from None
         else:
             cli = discover('codex')
             help_log = temp / 'help.log'

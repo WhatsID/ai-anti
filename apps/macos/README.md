@@ -1,7 +1,7 @@
 # AIAnti 菜单栏应用
 
 首期为本机菜单栏与小设置窗口，管理配置和检测。业务评审继续从 Claude Code / Codex 发起。
-配置范围为 Claude→Codex、Claude→Qwen/DeepSeek、Codex→Qwen/DeepSeek；既有 Codex→Claude 配置可读取，不加入首期新选列表。
+配置范围为 Claude→Codex、Claude→API、Codex→API/Qoder；既有 Codex→Claude 配置可读取，不加入首期新选列表。
 配置范围不等于全链验证：DeepSeek 完整流程和 Claude 普通登录完整链路仍待补验。
 路径级版本与证据见 [兼容性说明](../../docs/COMPATIBILITY.md)，数据外发、证据保留、凭证和恢复备份见
 [安全说明](../../SECURITY.md)。
@@ -18,7 +18,7 @@ bash apps/macos/build-app.sh /private/tmp/ai-anti-app-build
 自己本机使用不需要 iOS 式开发者账号；ad-hoc 签名不等于 Apple 公证，跨机器分发的签名/公证另行处理。
 应用不会登录自启，也不自动更新。Python 不打包在应用中；Finder 启动时按显式 `--python`、Homebrew
 常见绝对路径、PATH 候选顺序寻找并有界验证 Python 3.11+，缺失时设置窗口显示原因。
-Claude/Codex CLI 的发现同样覆盖 `/opt/homebrew/bin` 和 `/usr/local/bin`。
+Claude/Codex/Qoder（qodercli）CLI 的发现同样覆盖 `/opt/homebrew/bin` 和 `/usr/local/bin`。
 
 ```bash
 /private/tmp/ai-anti-app-build/AIAnti.app/Contents/MacOS/AIAnti \
@@ -44,28 +44,19 @@ Qwen 使用现有正式 `review.py diff --channel qwen` 全部门禁；Codex 需
 验证 JSON 最终 turn 与随机合成文件读取得到的值，不能只凭退出码为零。实际模型没有结构化证据则标“未知”。
 检测结果只保存在内存；重启归未检测，配置/端点/凭证文件 stat 改变后失效。
 
-AIAnti 设置窗口的评审执行器固定且不可选：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex→Claude CLI 配置加载或切入时会生成待保存草稿；保存前不能检测，取消草稿后若仍处于该旧 Codex 配置也保留迁移提示，未保存不改磁盘。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，仅在 Qwen 当前协议地址为空白时建议默认地址，不覆盖自定义地址；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。API 合成检测预算为运行1800秒、空闲900秒、输出8MiB，外围1860秒、界面1900秒留清理余量，可取消。
+评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3（kmodel_latest，已验证 CLI 1.1.74）；Codex 保留四个目录模型和 CLI 默认；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Codex 服务仅 Claude 主模型可新选；既有其他路由保留显示。
 
-保存只改用户默认值，当前会话不会切换；项目模式、命令行、会话覆盖仍可能优先。
-主模型选项决定编辑哪组默认配置，不切换当前会话。可在未保存时来回切换，两组主模型 ID 和评审通道各自保留草稿；API 模型、地址、密钥及协作模式等仍共享。一次保存统一写入两组实际改过的字段，失败保留全部草稿；菜单快捷切换仍要求先保存或放弃草稿。项目模式优先于全局默认；solo 同时关闭交叉评审及独立实施。
-仅接受 `solo`、`auto`、`rules`、`force`；旧值 `required` 无效，不作兼容。
+API 服务显示服务地址和“认证 / API 密钥”，CLI 服务隐藏这些字段，使用现有 CLI 登录并默认显示“登录状态未检测”。高级设置说明固定执行器及协议：Claude 使用 Anthropic，Codex 使用 Responses；不承诺 Chat Completions。API 合成检测最多 30 分钟；Qoder 正式入口使用 600 秒、外围 660 秒、2MiB 输出上限，保留正式 runner 全部门禁和实际 Kimi-K3 证据校验。
 
-Codex 用户级共享入口读取全局模式并负责分流，需要接力时才加载 codex-relay。Claude 首选通道放首位，其他回退档位保留顺序。
-空主模型表示保留已有值，保存后以回读值显示；空 Codex 评审模型恢复 CLI 默认（真实检测需明确 ID）。
-主模型 ID、实施模型 ID、评审模型 ID 使用固定目录下拉；主模型可保留当前默认值，Codex 评审可选 CLI 默认，实施模型可选未指定；API 模型必须选择 ID。
-已有目录外 ID 作为“已有配置”只读选项保留，切换家族再回来仍可选回加载原值。
-目录包含 Claude、Codex、Qwen 与 DeepSeek，选项不代表可调用性验证。DeepSeek 复用现有兼容 API 执行器，
-持久化仍为 `channel=qwen` 与 `plugins.qwen.model`，没有新增配置字段。已有服务地址与密钥不会因切换家族被覆盖，
-须使用所选模型所属入口的当前协议兼容地址；菜单切换后提示确认支持情况。DeepSeek 尚未进行实际外部调用测试。
-字段固定按主模型、主模型 ID、实施模型 ID、协作模式、评审模型及 ID、执行器、服务地址和密钥排列；固定执行器也显示，无 API 时地址和密钥禁用并标明不适用。
+两个主导工具共享当前 API 服务及其模型、凭证；两种协议地址独立。每个服务独立保留模型、地址、未保存输入及认证动作，切回恢复；同服务换模型不会改密钥。千问新草稿预填官方两种协议地址，自定义留空。取消放弃全部服务与主导工具草稿，保存失败保留草稿，保存仅影响下次调用。菜单显示服务与模型，未完成配置时引导设置，不保存空地址。
 
-“取消”放弃两组全部草稿；检测中的“取消检测”取消检测进程。
+认证动作默认为保留；更换后输入非空新密钥，空输入仍保留；清除须显式选择并保存。密钥按服务写入 secrets.json 的 review_services.token_plan.value / review_services.custom_api.value，0600受限明文。清除删除该服务应用管理槽的值、清空其凭证路径并切换为独立键，防止外部旧密钥复活；不删除外部文件，也不删除 legacy tokenplan.value。首次加载只查文件 stat，不读取密钥正文，因此“发现凭证文件”不表示已配置或已登录。动作通过独立 secret_actions 请求传递，不写入公共 values、argv 或日志。
 
-密钥输入留空保留现状。新密钥写 `~/.config/ai-anti/secrets.json` 的 `tokenplan.value`，0600受限明文，
-不是钥匙串；原其他键保留，用户级凭证路径提升到首位。桌面仅检查 `~/` 或绝对凭证路径，拒绝 `..` 及意外 symlink。
-保留已有普通项目相对项与顺序，但无项目上下文时不解析、不读取，并提示业务项目可能优先使用；
-合成检测仓库没有这些项目文件，不会复制业务凭证。URL 拒绝 userinfo、查询或片段，
-不回显含凭证的旧地址。密钥只通过后台 stdin 输入，不进入 argv、日志、响应。
+review_services（version=1、active_api、固定 token_plan/custom_api profiles）是 API 配置真源，plugins.qwen 为同次事务更新的兼容投影；入口仍为 channel=qwen。每个 profile 包含 model/base_url/responses_base_url/credential_paths/credential_key，不存明文 token。credential_key 仅允许 tokenplan.value、review_services.token_plan.value、review_services.custom_api.value；指定键缺失不回退，只有旧配置缺字段时使用 legacy。旧客户端不懂新槽，请使用配套源码；不承诺新配置兼容旧 runner，新密钥不复制到 legacy。
+
+旧配置首次加载只在内存迁移：所有非空端点必须精确等于已知千问默认地址才归千问，否则（包括空端点、混合地址、尾斜杠）归自定义 API 并保留模型/地址/路径顺序。只有迁移到的一个 profile 继承旧凭证键及路径；另一个没有 legacy 凭证。首次保存才持久化。未知版本、字段错误或 profile/投影冲突拒绝写入。冲突错误只列字段名；修复时备份配置，然后按 review_services.active_api 对应 profile 将 model、base_url、responses_base_url、credential_paths、credential_key 同步到 plugins.qwen，保留其他配置和密钥，再重新读取；不要删除配置或密钥来绕过错误。
+
+主模型选项决定编辑哪组默认配置；两组主模型 ID 和评审通道保留独立草稿，一次保存统一写入实际修改。空主模型表示保留已有默认值，空 Codex 评审模型表示 CLI 默认（真实检测需明确 ID）。协作模式仅接受 solo、auto、rules、force，旧 required 无效。用户当次指令 > 项目 .claude/relay-mode.local > 全局默认 > rules；solo 停用交叉评审及独立实施。菜单与检测要求先保存或取消草稿。
 
 保存前重读指纹，与加载快照不符则要求重新读取配置；进程间锁、同目录原子替换、私有备份、最终回读。
 多文件失败仅回滚仍等于本次输出的文件，遇外部修改报告部分状态；不宣称与外部编辑器构成强事务。
@@ -81,6 +72,7 @@ AppModel 状态验收使用可手动完成请求的 fake client，不调用 Pyth
 ```bash
 mkdir -p /private/tmp/ai-anti-app-checks
 swiftc -parse-as-library -module-cache-path /private/tmp/ai-anti-app-checks/module-cache \
+  apps/macos/Sources/AIReviewBar/ReviewService.swift \
   apps/macos/Sources/AIReviewBar/ModelCatalog.swift \
   apps/macos/Sources/AIReviewBar/AppModel.swift \
   apps/macos/Sources/AIReviewBar/Bridge.swift apps/macos/AppModelChecks.swift \
@@ -88,7 +80,7 @@ swiftc -parse-as-library -module-cache-path /private/tmp/ai-anti-app-checks/modu
 /private/tmp/ai-anti-app-checks/AppModelChecks
 ```
 
-覆盖模型目录、已保存未知 ID 保留、API 家族切换与保存回读、静默检查不发布 UI、单请求门禁、前台优先、过期成功/失败、草稿保护、保存回读、取消与退出清理。
+覆盖模型目录、已保存未知 ID 保留、API 服务独立草稿切换与保存回读、静默检查不发布 UI、单请求门禁、前台优先、过期成功/失败、草稿保护、保存回读、取消与退出清理。
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m unittest discover -s apps/macos/backend/tests -v
@@ -97,5 +89,3 @@ PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m unittest discover -s t
 
 测试只使用临时 fixture 和 fake CLI，并包含正式入口 prepare-only 契约，不代表线上模型实测。
 产品范围、历史证据及后续边界见 [产品说明](../../docs/MACOS_REVIEW_APP.md)。
-
-Qwen 在加载配置、切换主模型或切换至 Qwen 时，仅为空白的当前协议地址填入草稿：Codex 为 `https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`，Claude Code 为 `https://token-plan.maas.qianwenaiapi.com/apps/anthropic`。另一协议地址与自定义地址保留，DeepSeek 不填默认值。加载建议不会写盘，须在设置保存后才能检测或使用菜单快捷操作；取消可撤回地址建议，保存不自动补回手动清空的地址。默认地址不证明密钥匹配或模型可用。检测结果在菜单中显示纯文字，绿色对号/红色叉号仅在设置窗口显示；菜单当前选项的对号保留。

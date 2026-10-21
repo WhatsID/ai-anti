@@ -26,24 +26,38 @@ struct Draft: Equatable {
     var primaryModel = ""
     var channel = "codex"
     var reviewerModel = ""
-    var qwenModel = ""
+    var activeAPI = "custom_api"
+    var profiles = Dictionary(uniqueKeysWithValues: ReviewService.api.map { ($0, ServiceProfile.initial($0)) })
+    var profile: ServiceProfile {
+        get { profiles[activeAPI] ?? ServiceProfile.initial(activeAPI) }
+        set { profiles[activeAPI] = newValue }
+    }
+    var service: String { channel == "qwen" ? activeAPI : channel }
+    var qwenModel: String { get { profile.model } set { profile.model = newValue } }
     var secondaryModel = ""
     var mode = "rules"
-    var baseURL = ""
-    var responsesBaseURL = ""
+    var baseURL: String { get { profile.baseURL } set { profile.baseURL = newValue } }
+    var responsesBaseURL: String { get { profile.responsesBaseURL } set { profile.responsesBaseURL = newValue } }
     var qwenExecutor = "claude"
     var effectiveExecutor: String { host == "codex" ? qwenExecutor : "claude" }
     var activeBaseURL: String {
         get { effectiveExecutor == "codex" ? responsesBaseURL : baseURL }
         set { if effectiveExecutor == "codex" { responsesBaseURL = newValue } else { baseURL = newValue } }
     }
-    var secret = ""
-    var dictionary: [String: Any] { ["host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": qwenExecutor] }
+    var secret: String { get { profile.secret } set { profile.secret = newValue } }
+    var secretAction: String { get { profile.action } set { profile.action = newValue; if newValue != "replace" { profile.secret = "" } } }
+    var serviceDictionary: [String: Any] { ["version": 1, "active_api": activeAPI, "profiles": profiles.mapValues { $0.dictionary }] }
+    var secretActions: [String: Any] { profiles.mapValues { ["action": $0.action == "replace" && $0.secret.isEmpty ? "retain" : $0.action, "value": $0.secret] } }
+    var dictionary: [String: Any] { ["review_services": serviceDictionary, "host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": qwenExecutor] }
 }
 
 @MainActor final class AppModel: ObservableObject {
     static let shared = AppModel()
-    @Published var draft = Draft()
+    @Published var draft = Draft() {
+        didSet {
+            if loaded && draft != oldValue { checkSignature = nil; status = "未检测（设置已变化）" }
+        }
+    }
     @Published var saved = Draft()
     @Published var busy = false
     @Published var loaded = false
@@ -51,6 +65,12 @@ struct Draft: Equatable {
     @Published var status = "未检测"
     @Published var credentialPresent = false
     @Published var relativeCredentials = false
+    var selectedCredentialMessage: String {
+        if draft.secretAction == "clear" { return "保存后停用此服务的凭证查找" }
+        if draft.secretAction == "replace" && !draft.secret.isEmpty { return "已输入此服务的新密钥（尚未保存）" }
+        if draft.activeAPI != saved.activeAPI { return draft.profile.credentialPaths.isEmpty ? "此服务未配置凭证查找" : "此服务凭证待检测" }
+        return credentialPresent ? "发现此服务的凭证文件；是否可解析需手动检查" : "未发现此服务的凭证文件"
+    }
     @Published var canRestore = false
     @Published var fallbacks: [String] = []
     @Published var sources: [String: String] = [:]
@@ -84,37 +104,32 @@ struct Draft: Equatable {
     private func normalizeExecutorDraft() {
         if draft.host == "codex" && draft.channel == "qwen" { draft.qwenExecutor = "codex" }
     }
-    private func fillDefaultReviewURL() {
-        guard reviewFamily == "qwen", draft.activeBaseURL.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        draft.activeBaseURL = draft.host == "codex"
-            ? "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1"
-            : "https://token-plan.maas.qianwenaiapi.com/apps/anthropic"
-    }
     private func resetDrafts() { draft = saved; hostDrafts = savedHosts; normalizeExecutorDraft() }
     var claudeFallbacks: [String] {
         ([channels["claude"] ?? "codex"] + fallbacks).filter { $0 != draft.channel }
     }
-    var reviewFamily: String { ModelCatalog.family(channel: draft.channel, apiModel: draft.qwenModel) }
-    var savedReviewFamily: String { ModelCatalog.family(channel: saved.channel, apiModel: saved.qwenModel) }
-    var title: String { "\(saved.host == "claude" ? "Claude" : "Codex") → \(ModelCatalog.title(savedReviewFamily))" }
+    var reviewFamily: String { draft.service }
+    var savedReviewFamily: String { saved.service }
+    var title: String { "\(saved.host == "claude" ? "Claude" : "Codex") → \(ReviewService.title(savedReviewFamily) + " · " + (saved.channel == "codex" ? (saved.reviewerModel.isEmpty ? "CLI 默认" : saved.reviewerModel) : saved.channel == "qoder" ? "Kimi-K3" : saved.qwenModel))" }
     var primaryOptions: [ModelOption] { ModelCatalog.options(draft.host, preserving: [defaults[draft.host] ?? "", draft.host == saved.host ? saved.primaryModel : "", draft.primaryModel], emptyLabel: "保留当前默认值") }
     var secondaryOptions: [ModelOption] { ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定") }
     var reviewerOptions: [ModelOption] {
-        let codex = reviewFamily == "codex"
-        let original = codex ? saved.reviewerModel : saved.qwenModel
-        let originalFamily = codex ? "codex" : ModelCatalog.family(channel: "qwen", apiModel: saved.qwenModel)
-        let current = codex ? draft.reviewerModel : draft.qwenModel
-        return ModelCatalog.options(reviewFamily, preserving: [originalFamily == reviewFamily ? original : "", current],
-                                    emptyLabel: codex ? "CLI 默认" : current.isEmpty ? "请选择模型" : nil)
+        if draft.channel == "qoder" { return [ModelOption(id: "kmodel_latest", label: "Kimi-K3")] }
+        if draft.channel == "codex" { return ModelCatalog.options("codex", preserving: [saved.reviewerModel, draft.reviewerModel], emptyLabel: "CLI 默认") }
+        let ids = draft.activeAPI == "token_plan" ? ["qwen3.8-max", "deepseek-v4-pro"] : []
+        var result = ids.map { ModelOption(id: $0, label: $0 == "qwen3.8-max" ? "Qwen3.8-Max" : "DeepSeek-V4-Pro") }
+        for value in [saved.profiles[draft.activeAPI]?.model ?? "", draft.qwenModel] where !result.contains(where: { $0.id == value }) {
+            result.append(ModelOption(id: value, label: value.isEmpty ? "请选择模型" : "已有配置：" + value))
+        }
+        return result
     }
-    func switchReviewFamily(_ family: String) {
-        guard !busy, loaded, family != reviewFamily else { return }
-        guard ["codex", "qwen", "deepseek"].contains(family), !(draft.host == "codex" && family == "codex") else { return }
-        draft.channel = family == "deepseek" ? "qwen" : family
+    func switchReviewFamily(_ service: String) {
+        guard !busy, loaded, service != reviewFamily else { return }
+        guard ReviewService.api.contains(service) || (service == "qoder" && draft.host == "codex") || (service == "codex" && draft.host == "claude") else { return }
+        if ReviewService.api.contains(service) { draft.activeAPI = service; draft.channel = "qwen" }
+        else { draft.channel = service }
         normalizeExecutorDraft()
-        if family == "deepseek" { draft.qwenModel = ModelCatalog.deepseek[0] }
-        if family == "qwen" { draft.qwenModel = ModelCatalog.qwen[0] }
-        fillDefaultReviewURL()
+        status = "未检测（服务已变化）"; checkSignature = nil
     }
     let modes = [("solo", "独立完成"), ("auto", "自动判断"), ("rules", "按规模评审"), ("force", "始终评审")]
     init(foreground: AppRequesting? = nil, background: AppRequesting? = nil, automatic: Bool = true) {
@@ -157,7 +172,7 @@ struct Draft: Equatable {
         if checked {
             elapsed = 0
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in Task { @MainActor in self?.elapsed += 1 } }
-            message = payload["action"] as? String == "real" ? "合成检测进行中；兼容 API 最多可能需要 30 分钟，可取消。" : "正在进行本地检查…"
+            message = payload["action"] as? String == "real" ? "合成检测进行中；API 最多 30 分钟，Qoder 最多 10 分钟，可取消。" : "正在进行本地检查…"
         }
         foreground.start(payload) { [weak self] result in
                 guard let self else { return }
@@ -198,10 +213,20 @@ struct Draft: Equatable {
         guard let v = data["values"] as? [String: Any] else { message = "配置响应无效"; return }
         func text(_ key: String) -> String { v[key] as? String ?? "" }
         var d = Draft(); d.host = text("host"); d.primaryModel = text("primary_model"); d.channel = text("channel")
+        if let services = v["review_services"] as? [String: Any], let profiles = services["profiles"] as? [String: [String: Any]] {
+            d.activeAPI = services["active_api"] as? String ?? "custom_api"
+            for id in ReviewService.api {
+                if let p = profiles[id] {
+                    var profile = ServiceProfile.initial(id)
+                    profile.model = p["model"] as? String ?? ""; profile.baseURL = p["base_url"] as? String ?? ""; profile.responsesBaseURL = p["responses_base_url"] as? String ?? ""
+                    profile.credentialPaths = p["credential_paths"] as? [String] ?? []; profile.credentialKey = p["credential_key"] as? String ?? ""
+                    d.profiles[id] = profile
+                }
+            }
+        }
         d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url"); d.qwenExecutor = v["qwen_executor"] as? String ?? "claude"
         saved = d; draft = d; loaded = true
         normalizeExecutorDraft()
-        fillDefaultReviewURL()
         channels = ["claude": text("claude_channel"), "codex": text("codex_channel")]
         defaults = ["claude": text("claude_model"), "codex": text("codex_model")]
         savedHosts = [:]
@@ -232,7 +257,7 @@ struct Draft: Equatable {
             if !fields.isEmpty { updates[host] = fields }
         }
         values["host_updates"] = updates
-        operation(["action": "save", "values": values, "fingerprints": fingerprints, "secret": draft.secret])
+        operation(["action": "save", "values": values, "fingerprints": fingerprints, "secret_actions": draft.secretActions])
     }
     func restore() { operation(["action": "restore", "fingerprints": fingerprints]) }
     func check(real: Bool = false) {
@@ -254,18 +279,23 @@ struct Draft: Equatable {
         guard let target = hostDrafts[host] else { return }
         draft.host = host; draft.primaryModel = target.primaryModel; draft.channel = target.channel
         normalizeExecutorDraft()
-        fillDefaultReviewURL()
     }
     func menuHost(_ host: String) {
         guard !busy, loaded, !dirty else { message = "设置草稿尚未保存或配置尚未读取、忙碌"; return }
         switchHost(host)
         guard dirty, draft.host == host else { return }
+        if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.activeBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
+            message = "请在设置中完成所选服务的地址、模型与认证后保存"; return
+        }
         menuSaving = true; save()
     }
     func menuChannel(_ family: String) {
         guard !busy, loaded, !dirty else { message = "设置草稿尚未保存或配置忙碌"; return }
         switchReviewFamily(family)
         guard dirty else { return }
+        if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.activeBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
+            message = "请在设置中完成所选服务的地址、模型与认证后保存"; return
+        }
         menuSaving = true; save()
     }
     func menuMode(_ mode: String) { guard !busy, loaded, !dirty else { message = "设置草稿尚未保存"; return }; draft.mode = mode; menuSaving = true; save() }

@@ -22,12 +22,11 @@
   },
   "plugins": {
     "qwen": {
-      "model": "<model name served by the endpoint>",
-      "base_url": "https://<anthropic-compatible-endpoint>",
-      "credential_paths": [
-        "~/.config/ai-anti/secrets.json"
-      ],
-      "responses_base_url": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1"
+      "model": "qwen3.8-max",
+      "base_url": "https://token-plan.maas.qianwenaiapi.com/apps/anthropic",
+      "responses_base_url": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+      "credential_paths": [],
+      "credential_key": "review_services.token_plan.value"
     }
   },
   "relay": {
@@ -35,5 +34,25 @@
   },
   "desktop": {
     "primary_host": "claude"
+  },
+  "review_services": {
+    "version": 1,
+    "active_api": "token_plan",
+    "profiles": {
+      "token_plan": {
+        "model": "qwen3.8-max",
+        "base_url": "https://token-plan.maas.qianwenaiapi.com/apps/anthropic",
+        "responses_base_url": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
+        "credential_paths": [],
+        "credential_key": "review_services.token_plan.value"
+      },
+      "custom_api": {
+        "model": "",
+        "base_url": "",
+        "responses_base_url": "",
+        "credential_paths": [],
+        "credential_key": "review_services.custom_api.value"
+      }
+    }
   }
 }

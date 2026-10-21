@@ -81,7 +81,7 @@ import Combine
         assert(!model.busy && !model.checking && model.status.contains("检测已取消"))
         model.inspect(); model.stopBackground(); back.complete(.failure(BridgeFailure(message: "shutdown")))
         assert(model.status.contains("检测已取消"))
-        assert(ModelCatalog.claude.count == 4 && ModelCatalog.codex.count == 4 && ModelCatalog.qwen.count == 4 && ModelCatalog.deepseek.count == 5)
+        assert(ModelCatalog.claude.count == 4 && ModelCatalog.codex.count == 4 && ModelCatalog.qwen.count == 1 && ModelCatalog.deepseek.count == 1)
         var apiSnapshot = snapshot
         var apiValues = snapshot["values"] as! [String: Any]
         apiValues["qwen_model"] = "custom-api-id"; apiValues["secondary_model"] = "legacy-implementation"
@@ -90,41 +90,42 @@ import Combine
         apiValues["claude_channel"] = "qwen"; apiValues["codex_channel"] = "qwen"
         apiSnapshot["values"] = apiValues
         model.refresh(); front.complete(.success(apiSnapshot))
-        assert(model.reviewFamily == "qwen" && model.reviewerOptions.contains { $0.id == "custom-api-id" })
-        model.switchReviewFamily("qwen"); assert(!model.dirty, "Same derived family must preserve custom API ID")
-        model.draft.secret = "fake-secret"
-        model.switchReviewFamily("deepseek")
-        assert(model.draft.channel == "qwen" && model.draft.qwenModel == "deepseek-v4-pro")
-        assert(model.draft.baseURL == "https://fixture.invalid/anthropic" && model.draft.secret == "fake-secret")
-        model.draft.qwenModel = "deepseek-custom"; model.switchReviewFamily("deepseek")
-        assert(model.draft.qwenModel == "deepseek-custom")
-        model.switchReviewFamily("qwen")
-        assert(model.reviewerOptions.contains { $0.id == "custom-api-id" }, "Loaded fallback must remain selectable after switching away")
-        model.switchReviewFamily("codex"); assert(model.draft.channel == "qwen", "Codex cannot review Codex")
-        model.discard(); assert(model.reviewFamily == "qwen" && !model.dirty)
-        model.switchHost("claude")
-        assert(model.primaryOptions.contains { $0.id == "legacy-claude" })
-        model.discard()
-        model.menuChannel("deepseek")
-        let posted = front.requests.last?["values"] as! [String: Any]
-        assert(posted["channel"] as? String == "qwen" && posted["qwen_model"] as? String == "deepseek-v4-pro")
+        assert(model.reviewFamily == "custom_api" && model.reviewerOptions.contains { $0.id == "custom-api-id" })
+        model.switchReviewFamily("custom_api"); assert(!model.dirty)
+        model.draft.secretAction = "replace"; model.draft.secret = "fake-secret"
+        model.switchReviewFamily("token_plan")
+        assert(model.draft.channel == "qwen" && model.draft.qwenModel == "qwen3.8-max")
+        assert(model.draft.secret.isEmpty && model.draft.baseURL.contains("qianwenaiapi"))
+        model.draft.qwenModel = "deepseek-v4-pro"; model.draft.secretAction = "replace"; model.draft.secret = "other-secret"
+        model.switchReviewFamily("custom_api")
+        assert(model.draft.qwenModel == "custom-api-id" && model.draft.secret == "fake-secret")
+        assert(model.draft.baseURL == "https://fixture.invalid/anthropic")
+        model.switchReviewFamily("token_plan"); assert(model.draft.secret == "other-secret" && model.draft.qwenModel == "deepseek-v4-pro")
+        let failedDraft = model.draft
+        model.save(); assert(front.requests.last?["secret"] == nil)
+        let postedActions = front.requests.last?["secret_actions"] as! [String: [String: String]]
+        assert(postedActions["custom_api"]?["value"] == "fake-secret" && postedActions["token_plan"]?["value"] == "other-secret")
         front.complete(.failure(BridgeFailure(message: "fixture conflict")))
-        assert(model.savedReviewFamily == "qwen" && model.reviewFamily == "qwen" && !model.dirty)
-        model.menuChannel("deepseek")
-        apiValues["qwen_model"] = "deepseek-v4-pro"; apiSnapshot["values"] = apiValues
-        front.complete(.success(apiSnapshot))
-        assert(model.savedReviewFamily == "deepseek" && !model.dirty && model.title.contains("DeepSeek"))
-        assert(model.message.contains("服务地址和密钥"))
-        model.draft.qwenModel = "deepseek-custom"
-        model.discard(); assert(model.draft.qwenModel == "deepseek-v4-pro")
-        model.restore(); front.complete(.success(snapshot)); assert(model.reviewFamily == "qwen")
+        assert(model.draft == failedDraft && model.dirty)
+        model.discard(); assert(model.reviewFamily == "custom_api" && !model.dirty && model.draft.secret.isEmpty)
+        model.switchReviewFamily("codex"); assert(model.draft.channel == "qwen", "Codex cannot review Codex")
+        model.switchReviewFamily("qoder"); assert(model.draft.channel == "qoder" && model.reviewerOptions.first?.id == "kmodel_latest")
+        model.discard()
+        model.switchHost("claude"); assert(model.primaryOptions.contains { $0.id == "legacy-claude" })
+        model.switchReviewFamily("qoder"); assert(model.draft.channel != "qoder")
+        model.discard()
+        let menuCount = front.requests.count
+        model.menuChannel("token_plan")
+        assert(front.requests.count == menuCount && model.dirty && model.message.contains("设置"), "Incomplete service must guide settings without saving")
+        model.discard()
+        model.restore(); front.complete(.success(snapshot)); assert(model.reviewFamily == "custom_api")
         apiValues["host"] = "claude"; apiValues["channel"] = "codex"
         apiValues["qwen_model"] = "dormant-api-id"; apiValues["reviewer_model"] = "dormant-codex-id"
         apiSnapshot["values"] = apiValues
         model.refresh(); front.complete(.success(apiSnapshot))
         assert(model.reviewerOptions.contains { $0.id == "dormant-codex-id" })
-        model.switchReviewFamily("qwen"); model.draft.qwenModel = "qwen3.7-plus"
-        assert(model.reviewerOptions.contains { $0.id == "dormant-api-id" })
+        model.switchReviewFamily("custom_api"); model.draft.qwenModel = "qwen3.7-plus"
+        assert(model.draft.qwenModel == "qwen3.7-plus")
         assert(!model.reviewerOptions.contains { $0.id.isEmpty }, "Configured API models cannot select empty IDs")
         model.switchReviewFamily("codex"); model.draft.reviewerModel = "gpt-6-astra"
         assert(model.reviewerOptions.contains { $0.id == "dormant-codex-id" })
@@ -244,90 +245,41 @@ import Combine
         assert(legacy.draft.qwenExecutor == "codex" && legacy.draft.effectiveExecutor == "claude")
         legacy.discard(); assert(!legacy.dirty && legacy.draft.qwenExecutor == "claude")
         // Missing Qwen endpoints are suggestions in the active protocol draft only.
-        let urlFront = FakeClient(), urlBack = FakeClient()
-        let urls = AppModel(foreground: urlFront, background: urlBack, automatic: false)
-        let responsesDefault = "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1"
-        let anthropicDefault = "https://token-plan.maas.qianwenaiapi.com/apps/anthropic"
-        func loadURLs(host: String, family: String = "qwen", base: String = "", responses: String = "") {
-            var fixture = snapshot
-            var fields = snapshot["values"] as! [String: Any]
-            fields["host"] = host; fields["channel"] = family == "codex" ? "codex" : "qwen"
-            fields["qwen_model"] = family == "deepseek" ? "deepseek-v4-pro" : "qwen-fixture"
-            fields["claude_channel"] = "qwen"; fields["codex_channel"] = "qwen"
-            fields["base_url"] = base; fields["responses_base_url"] = responses
-            fixture["values"] = fields
-            urls.refresh(); urlFront.complete(.success(fixture))
-        }
-        loadURLs(host: "codex", responses: " \n\t")
-        assert(urls.draft.responsesBaseURL == responsesDefault, "Codex Qwen must suggest the Responses URL")
-        assert(urls.draft.baseURL.isEmpty && urls.saved.responsesBaseURL == " \n\t" && urls.dirty)
-        let urlCount = urlFront.requests.count
-        urls.menuMode("force"); urls.check()
-        assert(urlFront.requests.count == urlCount, "Suggested defaults require explicit save before menu/check")
-        let suggested = urls.draft
-        var urlPublications = 0
-        let urlSubscription = urls.objectWillChange.sink { urlPublications += 1 }
-        urls.inspect(); urlBack.complete(.success(["signature": "a"]))
-        assert(urlPublications == 0 && urls.draft == suggested)
-        urls.save()
-        let defaultPost = urlFront.requests.last?["values"] as! [String: Any]
-        assert(defaultPost["responses_base_url"] as? String == responsesDefault && defaultPost["base_url"] as? String == "")
-        var defaultSaved = snapshot
-        var defaultSavedValues = snapshot["values"] as! [String: Any]
-        defaultSavedValues["base_url"] = ""; defaultSavedValues["responses_base_url"] = responsesDefault
-        defaultSaved["values"] = defaultSavedValues
-        urlFront.complete(.success(defaultSaved))
-        assert(urls.saved == urls.draft && !urls.dirty && urls.saved.responsesBaseURL == responsesDefault)
-        urls.menuMode("force")
-        assert(urlFront.requests.last?["action"] as? String == "save", "Saved suggestions must restore menu access")
-        urlFront.complete(.failure(BridgeFailure(message: "saved menu fixture")))
-        loadURLs(host: "codex", responses: " \n\t")
-        urls.discard(); assert(!urls.dirty && urls.draft.responsesBaseURL == " \n\t")
-        let discardedURLDraft = urls.draft
-        urlPublications = 0
-        urls.inspect(); urlBack.complete(.success(["signature": "a"]))
-        assert(urlPublications == 0 && urls.draft == discardedURLDraft, "Inspect must not refill discarded suggestions")
-        urls.save()
-        assert((urlFront.requests.last?["values"] as! [String: Any])["responses_base_url"] as? String == " \n\t", "Save must not refill a cleared endpoint")
-        urlFront.complete(.failure(BridgeFailure(message: "fixture validation")))
-        loadURLs(host: "claude", base: " \t")
-        assert(urls.draft.baseURL == anthropicDefault && urls.draft.responsesBaseURL.isEmpty && urls.saved.baseURL == " \t" && urls.dirty)
-        urls.discard(); assert(!urls.dirty && urls.draft.baseURL == " \t")
-        urls.switchHost("codex")
-        assert(urls.draft.responsesBaseURL == responsesDefault && urls.draft.baseURL == " \t")
-        urls.switchHost("claude"); assert(urls.draft.baseURL == anthropicDefault)
-        urls.draft.baseURL = "https://manual.invalid/anthropic"; urls.draft.responsesBaseURL = "https://manual.invalid/v1"
-        urls.switchHost("codex"); urls.switchHost("claude")
-        urls.switchReviewFamily("deepseek"); urls.switchReviewFamily("qwen")
-        assert(urls.draft.baseURL == "https://manual.invalid/anthropic" && urls.draft.responsesBaseURL == "https://manual.invalid/v1")
-        for host in ["claude", "codex"] {
-            loadURLs(host: host, base: "https://custom.invalid/anthropic", responses: "https://custom.invalid/v1")
-            assert(!urls.dirty && urls.draft == urls.saved)
-            loadURLs(host: host, family: "deepseek")
-            assert(!urls.dirty && urls.draft.baseURL.isEmpty && urls.draft.responsesBaseURL.isEmpty)
-            urls.switchReviewFamily("qwen")
-            assert(urls.draft.activeBaseURL == (host == "codex" ? responsesDefault : anthropicDefault))
-            loadURLs(host: host, family: "deepseek")
-            urls.menuChannel("qwen")
-            let menuPost = urlFront.requests.last?["values"] as! [String: Any]
-            assert(menuPost[host == "codex" ? "responses_base_url" : "base_url"] as? String == (host == "codex" ? responsesDefault : anthropicDefault))
-            urlFront.complete(.failure(BridgeFailure(message: "menu fixture")))
-        }
-        loadURLs(host: "claude", base: anthropicDefault)
-        assert(!urls.dirty)
-        urls.menuHost("codex")
-        let menuHostPost = urlFront.requests.last?["values"] as! [String: Any]
-        assert(menuHostPost["host"] as? String == "codex" && menuHostPost["responses_base_url"] as? String == responsesDefault)
-        assert(menuHostPost["base_url"] as? String == anthropicDefault)
-        urlFront.complete(.failure(BridgeFailure(message: "menu host fixture")))
-        loadURLs(host: "claude", family: "codex")
-        assert(!urls.dirty && urls.draft.baseURL.isEmpty && urls.draft.responsesBaseURL.isEmpty)
-        urls.switchReviewFamily("deepseek"); assert(urls.draft.baseURL.isEmpty)
-        urls.switchReviewFamily("qwen"); assert(urls.draft.baseURL == anthropicDefault)
-        urls.draft.baseURL = ""; urls.save()
-        assert((urlFront.requests.last?["values"] as! [String: Any])["base_url"] as? String == "")
-        urlFront.complete(.failure(BridgeFailure(message: "cleared fixture")))
-        withExtendedLifetime(urlSubscription) {}
+        // Service profiles retain independent protocol addresses and all unsaved actions.
+        model.refresh(); front.complete(.success(apiSnapshot))
+        model.switchReviewFamily("token_plan")
+        model.draft.baseURL = "https://one.invalid/a"; model.draft.responsesBaseURL = "https://one.invalid/r"
+        model.draft.secretAction = "replace"; model.draft.secret = "one"
+        model.draft.qwenModel = "deepseek-v4-pro"
+        assert(model.draft.secret == "one", "Changing a model must retain service credentials")
+        model.switchReviewFamily("custom_api")
+        model.draft.baseURL = "https://two.invalid/a"; model.draft.responsesBaseURL = "https://two.invalid/r"
+        model.draft.secretAction = "clear"
+        assert(model.draft.secret.isEmpty)
+        model.switchReviewFamily("token_plan")
+        assert(model.draft.baseURL == "https://one.invalid/a" && model.draft.responsesBaseURL == "https://one.invalid/r" && model.draft.secret == "one")
+        model.switchHost("claude"); assert(model.draft.activeBaseURL == "https://one.invalid/a")
+        model.switchHost("codex"); assert(model.draft.activeBaseURL == "https://one.invalid/r")
+        model.switchReviewFamily("custom_api"); assert(model.draft.secretAction == "clear" && model.draft.baseURL == "https://two.invalid/a")
+        model.discard(); assert(!model.dirty)
+        var serviceSnapshot = snapshot
+        var serviceValues = snapshot["values"] as! [String: Any]
+        var token = ServiceProfile.initial("token_plan"); token.model = "historical-unknown"
+        serviceValues["qwen_model"] = token.model; serviceValues["base_url"] = token.baseURL; serviceValues["responses_base_url"] = token.responsesBaseURL
+        serviceValues["review_services"] = ["version": 1, "active_api": "token_plan", "profiles": ["token_plan": token.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
+        serviceSnapshot["values"] = serviceValues
+        model.refresh(); front.complete(.success(serviceSnapshot))
+        model.draft.qwenModel = "deepseek-v4-pro"
+        assert(model.reviewerOptions.contains { $0.id == "historical-unknown" }, "Loaded unknown service model remains selectable")
+        model.draft.secretAction = "replace"; model.draft.secret = ""
+        let emptyActions = model.draft.secretActions as! [String: [String: String]]
+        assert(emptyActions["token_plan"]?["action"] == "retain", "Empty replacement input means retain")
+        model.draft.secret = "new-value"; model.draft.secretAction = "clear"
+        let clearActions = model.draft.secretActions as! [String: [String: String]]
+        assert(clearActions["token_plan"]?["action"] == "clear" && clearActions["token_plan"]?["value"] == "")
+        model.switchReviewFamily("custom_api")
+        assert(!model.selectedCredentialMessage.contains("发现"), "Never reuse another service's file status")
+        model.discard(); assert(!model.dirty && model.draft.qwenModel == "historical-unknown")
         withExtendedLifetime(subscription) {}
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
     }

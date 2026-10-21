@@ -12,7 +12,7 @@ description: qwen 插件评审通道:经 anthropic 兼容端点让用户配置�
 **插件配置与凭证查找接口（用户级 `~/.config/ai-anti/config.json` 的 `plugins.qwen`，fail-closed）**：
 
 - `model`：端点上的模型名；`base_url`：anthropic 兼容端点地址；
-- `credential_paths`：凭证文件查找顺序，每个文件取 `tokenplan.value`，按序取第一个可读到的非空值；
+- `credential_paths`：凭证文件查找顺序，每个文件按 `credential_key` 逐级取值（缺字段才使用 `tokenplan.value`），按序取第一个可读到的非空值；
   相对路径按调用 cwd 解析（本插件现有 shell 行为；推荐绝对路径或 `~`），`~` 展开（如用户级
   `~/.config/ai-anti/secrets.json`，任何仓库之外，不入库）。
 
@@ -39,10 +39,13 @@ try:
     qwen = data["plugins"]["qwen"]
     if not isinstance(qwen["credential_paths"], list):
         sys.exit(3)
-    fields = [qwen["model"], qwen["base_url"]] + list(qwen["credential_paths"])
+    key = qwen.get("credential_key", "tokenplan.value")
+    if key not in ("tokenplan.value", "review_services.token_plan.value", "review_services.custom_api.value"):
+        sys.exit(3)
+    fields = [qwen["model"], qwen["base_url"], key] + list(qwen["credential_paths"])
 except (KeyError, TypeError):
     sys.exit(3)
-if len(fields) < 3 or not all(isinstance(x, str) and x and "\n" not in x for x in fields):
+if len(fields) < 4 or not all(isinstance(x, str) and x and "\n" not in x for x in fields):
     sys.exit(3)
 print("\n".join(fields))
 PY
@@ -54,18 +57,21 @@ case $? in
 esac
 QWEN_MODEL=$(printf '%s\n' "$QWEN_CONF" | sed -n 1p)
 QWEN_BASE_URL=$(printf '%s\n' "$QWEN_CONF" | sed -n 2p)
-QWEN_PATHS=$(printf '%s\n' "$QWEN_CONF" | sed -n '3,$p')
+QWEN_CREDENTIAL_KEY=$(printf '%s\n' "$QWEN_CONF" | sed -n 3p)
+QWEN_PATHS=$(printf '%s\n' "$QWEN_CONF" | sed -n '4,$p')
 
-TOKENPLAN_KEY=$(QWEN_PATHS="$QWEN_PATHS" python3 - <<'PY'
+TOKENPLAN_KEY=$(QWEN_CREDENTIAL_KEY="$QWEN_CREDENTIAL_KEY" QWEN_PATHS="$QWEN_PATHS" python3 - <<'PY'
 import json, os, pathlib, sys
 for raw in os.environ["QWEN_PATHS"].split("\n"):
     if not raw:
         continue
     try:
-        value = json.loads(pathlib.Path(raw).expanduser().read_text(encoding="utf-8"))["tokenplan"]["value"]
+        value = json.loads(pathlib.Path(raw).expanduser().read_text(encoding="utf-8"))
+        for part in os.environ["QWEN_CREDENTIAL_KEY"].split("."):
+            value = value.get(part) if isinstance(value, dict) else None
     except Exception:
         continue
-    if value:
+    if isinstance(value, str) and value.strip() and not any(c in value for c in "\r\n\x00"):
         print(value)
         sys.exit(0)
 sys.exit(3)
@@ -108,10 +114,10 @@ env -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL \
   **唯一判据是：能否解析出 JSON 对象，以及其中的 `is_error`。**
 - **端点可用模型**：以端点服务商公布的清单为准，换模型时先查清单并用一次最小调用确认
   `is_error=false`，不要猜；2026-08-18 实测这类 anthropic 兼容端点对 `claude-*` 系列一律回
-  `Model not exist`。换模型只改配置 `plugins.qwen.model` 一处。
+  `Model not exist`。换模型时若有 `review_services`，使用 App 或同时更新活动 profile 与 `plugins.qwen.model` 投影；旧配置才只改 `plugins.qwen.model`。
 - 提示词经 `<scratchpad>/qwen_prompt.txt` 传入、命令末尾 `< /dev/null`、输出直写不接管道——
   三条都来自 `core/CLI_DISCIPLINE.md` 那条纪律，缺一条就可能空转或丢结论。
-- 密钥运行时按上面的查找接口读 `tokenplan.value`，只存活在本次 shell 变量里，
+- 密钥运行时通过上面的查找接口按配置的 `credential_key` 逐级读取，只存活在本次 shell 变量里，
   **不写进任何文件或历史**，也不回显。
 - allowedTools 是只读白名单（含 `git -C` 形态——qwen 习惯带 `-C` 跑 git，漏了会 denial 空转烧额度）。
 - `--output-format json` 的 `usage` 字段留作额度消耗记录；`result` 字段是评审文本。
