@@ -281,6 +281,54 @@ import Combine
         assert(!model.selectedCredentialMessage.contains("发现"), "Never reuse another service's file status")
         model.discard(); assert(!model.dirty && model.draft.qwenModel == "historical-unknown")
         withExtendedLifetime(subscription) {}
+        let addressFront = FakeClient()
+        let addressModel = AppModel(foreground: addressFront, background: FakeClient(), automatic: false)
+        var missingAddressSnapshot = serviceSnapshot
+        var missingAddressValues = serviceValues
+        var missingToken = ServiceProfile.initial("token_plan")
+        missingToken.baseURL = ""
+        missingAddressValues["base_url"] = ""
+        missingAddressValues["review_services"] = ["version": 1, "active_api": "token_plan", "profiles": ["token_plan": missingToken.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
+        missingAddressSnapshot["values"] = missingAddressValues
+        addressModel.refresh(); addressFront.complete(.success(missingAddressSnapshot))
+        assert(addressModel.draft.baseURL == "https://token-plan.maas.qianwenaiapi.com/apps/anthropic", "Missing Token Plan Anthropic address must receive its default")
+        assert(addressModel.saved.baseURL.isEmpty && addressModel.dirty, "Default is an unsaved draft, not a claim about disk")
+        addressModel.switchHost("claude")
+        assert(addressModel.draft.activeBaseURL == "https://token-plan.maas.qianwenaiapi.com/apps/anthropic")
+        addressModel.switchHost("codex")
+        assert(addressModel.draft.activeBaseURL == "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1")
+        missingToken.baseURL = "https://existing.invalid/anthropic"; missingToken.responsesBaseURL = ""
+        missingAddressValues["base_url"] = missingToken.baseURL
+        missingAddressValues["responses_base_url"] = ""
+        missingAddressValues["review_services"] = ["version": 1, "active_api": "token_plan", "profiles": ["token_plan": missingToken.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
+        missingAddressSnapshot["values"] = missingAddressValues
+        addressModel.refresh(); addressFront.complete(.success(missingAddressSnapshot))
+        assert(addressModel.draft.baseURL == "https://existing.invalid/anthropic")
+        assert(addressModel.draft.responsesBaseURL == "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1")
+        addressModel.switchReviewFamily("custom_api")
+        assert(addressModel.draft.baseURL.isEmpty && addressModel.draft.responsesBaseURL.isEmpty, "Custom API must not receive Token Plan endpoints")
+        // Editing the single masked field maps to service-scoped retain/replace/clear.
+        var keyDraft = Draft()
+        keyDraft.profile.credentialPaths = ["fixture-credentials.json"]
+        let untouched = keyDraft
+        keyDraft.apiKeyInput = keyDraft.apiKeyInput
+        assert(keyDraft == untouched && keyDraft.secretAction == "retain")
+        keyDraft.apiKeyInput = ""
+        assert(keyDraft.secretAction == "clear" && keyDraft.secret.isEmpty)
+        keyDraft.apiKeyInput = "fixture-new-key"
+        assert(keyDraft.secretAction == "replace" && keyDraft.secret == "fixture-new-key")
+        keyDraft.activeAPI = "token_plan"
+        assert(keyDraft.apiKeyInput.isEmpty && keyDraft.secretAction == "retain")
+        keyDraft.apiKeyInput = "other-fixture-key"
+        keyDraft.activeAPI = "custom_api"
+        assert(keyDraft.apiKeyInput == "fixture-new-key")
+        keyDraft.apiKeyInput = ""
+        let editedKeys = keyDraft.secretActions as! [String: [String: String]]
+        assert(editedKeys["custom_api"]?["action"] == "clear")
+        assert(editedKeys["token_plan"]?["value"] == "other-fixture-key")
+        keyDraft = untouched
+        keyDraft.apiKeyInput += "replacement"
+        assert(keyDraft.secret == "replacement", "The display mask must never be saved as a credential")
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
     }
 }

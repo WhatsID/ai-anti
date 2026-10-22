@@ -45,6 +45,25 @@ struct Draft: Equatable {
         set { if effectiveExecutor == "codex" { responsesBaseURL = newValue } else { baseURL = newValue } }
     }
     var secret: String { get { profile.secret } set { profile.secret = newValue } }
+    // A display-only marker keeps stored credentials out of the UI process.
+    static let credentialMask = String(repeating: "•", count: 50)
+    var apiKeyInput: String {
+        get {
+            if profile.action == "replace" { return profile.secret }
+            if profile.action == "clear" { return "" }
+            return profile.credentialPaths.isEmpty ? "" : Self.credentialMask
+        }
+        set {
+            guard newValue != apiKeyInput else { return }
+            if newValue == Self.credentialMask {
+                profile.action = "retain"; profile.secret = ""
+            } else {
+                let value = newValue.replacingOccurrences(of: "•", with: "")
+                profile.secret = value
+                profile.action = value.isEmpty ? "clear" : "replace"
+            }
+        }
+    }
     var secretAction: String { get { profile.action } set { profile.action = newValue; if newValue != "replace" { profile.secret = "" } } }
     var serviceDictionary: [String: Any] { ["version": 1, "active_api": activeAPI, "profiles": profiles.mapValues { $0.dictionary }] }
     var secretActions: [String: Any] { profiles.mapValues { ["action": $0.action == "replace" && $0.secret.isEmpty ? "retain" : $0.action, "value": $0.secret] } }
@@ -226,6 +245,14 @@ struct Draft: Equatable {
         }
         d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url"); d.qwenExecutor = v["qwen_executor"] as? String ?? "claude"
         saved = d; draft = d; loaded = true
+        // Legacy configurations may only contain the endpoint for one host.
+        // Suggest missing Token Plan defaults in the draft; keep the disk snapshot intact.
+        if var token = draft.profiles["token_plan"] {
+            let defaults = ServiceProfile.initial("token_plan")
+            if token.baseURL.isEmpty { token.baseURL = defaults.baseURL }
+            if token.responsesBaseURL.isEmpty { token.responsesBaseURL = defaults.responsesBaseURL }
+            draft.profiles["token_plan"] = token
+        }
         normalizeExecutorDraft()
         channels = ["claude": text("claude_channel"), "codex": text("codex_channel")]
         defaults = ["claude": text("claude_model"), "codex": text("codex_model")]

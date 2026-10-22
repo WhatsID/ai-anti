@@ -36,6 +36,9 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>
+<!-- Keep the pre-macOS-26 control appearance used by the installed app.
+     Revisit when adopting SDK 27+, which ignores this compatibility key. -->
+<key>UIDesignRequiresCompatibility</key><true/>
 </dict></plist>
 PLIST
 codesign --force --sign - "$app"
