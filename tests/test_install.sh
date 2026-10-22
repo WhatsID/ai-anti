@@ -351,7 +351,8 @@ check test "$?" = 3
 write_json "$H/.config/ai-anti/config.json" '{"plugins": {"qwen": {"model": "m", "base_url": "https://example.invalid", "credential_paths": ["~/.config/ai-anti/secrets.json"]}}}'
 HOME="$H" python3 "$snippet" < /dev/null > "$OUT" 2>&1
 check test "$?" = 0
-check test "$(sed -n 3p "$OUT")" = "~/.config/ai-anti/secrets.json"
+check test "$(sed -n 3p "$OUT")" = "tokenplan.value"
+check test "$(sed -n 4p "$OUT")" = "~/.config/ai-anti/secrets.json"
 
 # ---------------------------------------------------------------------------
 echo

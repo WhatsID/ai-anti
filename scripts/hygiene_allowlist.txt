@@ -35,3 +35,24 @@ adapters/codex/skills/claude-review/SKILL.md:qwen3.8-max
 adapters/codex/skills/claude-review/scripts/review_codex.py:qwen3.8-max
 # URL 凭证拒绝测试中的虚构地址，仅放行完整测试字符串
 apps/macos/backend/tests/test_control.py:https://secret:password@example.invalid
+
+# 0.2.2 公开服务目录与默认地址回归样例；仅放行已核对的固定名称和虚构地址
+CHANGELOG.md:Token Plan
+config.example.json:qwen3.8-max
+apps/macos/AppModelChecks.swift:qwen3.8-max
+apps/macos/AppModelChecks.swift:Token Plan
+apps/macos/README.md:qwen3.8-max
+apps/macos/README.md:Qwen3.8-Max
+apps/macos/README.md:千问 Token Plan
+apps/macos/Sources/AIReviewBar/App.swift:千问 Token Plan
+apps/macos/Sources/AIReviewBar/AppModel.swift:qwen3.8-max
+apps/macos/Sources/AIReviewBar/AppModel.swift:Qwen3.8-Max
+apps/macos/Sources/AIReviewBar/AppModel.swift:Token Plan
+apps/macos/Sources/AIReviewBar/ReviewService.swift:qwen3.8-max
+apps/macos/Sources/AIReviewBar/ReviewService.swift:千问 Token Plan
+apps/macos/Sources/AIReviewBar/SettingsView.swift:千问 Token Plan
+apps/macos/backend/review_services.py:qwen3.8-max
+apps/macos/backend/tests/test_review_services.py:qwen3.8-max
+apps/macos/backend/tests/test_review_services.py:https://user:password@fixture.invalid
+docs/MACOS_REVIEW_APP.md:Qwen3.8-Max
+docs/MACOS_REVIEW_APP.md:千问 Token Plan
