@@ -2,12 +2,12 @@
 description: 显式复核已有问题分析；调用通用双阶段问题复核入口
 ---
 
-先解析本 command 的符号链接取得实际源码 checkout。读取同源 core/PROBLEM_REVIEW.md、
-core/CLI_DISCIPLINE.md 和 docs/PROBLEM_REVIEW.md；不从业务 cwd 猜源码路径。
+先解析本 command 的符号链接取得实际源码 checkout。读取同源 core/BUG_REVIEW.md、
+core/CLI_DISCIPLINE.md 和 docs/BUG_REVIEW.md；不从业务 cwd 猜源码路径。
 按文档准备含用户原话、独立分析文件、来源与覆盖范围的本地文本 bundle，然后调用：
 
 ```bash
-python3 /resolved/ai-anti/adapters/codex/skills/claude-review/scripts/problem_review.py \
+python3 /resolved/ai-anti/adapters/codex/skills/claude-review/scripts/bug_review.py \
   --bundle /absolute/bundle --out /absolute/new-output
 ```
 

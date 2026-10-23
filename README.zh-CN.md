@@ -307,6 +307,6 @@ Qwen Responses 精确限定 0.160.0 或 0.163.0，两版本均登记通用集合
 
 ### 显式问题复核
 
-Codex 使用 `problem-review` skill，Claude Code 使用 `/problem-review`，以独立分析→结论复核
+Codex 使用 `bug-review` skill，Claude Code 使用 `/bug-review`，以独立分析→结论复核
 两阶段审查已有问题分析，不要求 Git。两种入口都复用 `codex_relay.review_channel`。
-采集、补证、逐项裁决和人工确认修复由调用方负责。见[材料协议与接入示例](docs/PROBLEM_REVIEW.md)。
+采集、补证、逐项裁决和人工确认修复由调用方负责。见[材料协议与接入示例](docs/BUG_REVIEW.md)。

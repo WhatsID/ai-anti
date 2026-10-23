@@ -1,4 +1,4 @@
-"""Offline end-to-end tests of the explicit problem-review CLI."""
+"""Offline end-to-end tests of the explicit bug-review CLI."""
 import json
 import os
 from pathlib import Path
@@ -9,7 +9,7 @@ import tempfile
 import unittest
 
 from test_problem_material import bundle, save, result, SCRIPTS
-ENTRY = SCRIPTS / 'problem_review.py'
+ENTRY = SCRIPTS / 'bug_review.py'
 FIXTURES = Path(__file__).resolve().parent
 
 

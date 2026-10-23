@@ -1,21 +1,21 @@
 ---
-name: problem-review
+name: bug-review
 description: Explicit independent second opinion on an existing problem analysis, using a caller-prepared local text bundle. Does not collect evidence, repair, implement, or replace plan review.
 ---
 
-# Problem review
+# Bug review
 
 Resolve this installed Skill symlink to its actual source checkout first. From
-`adapters/codex/skills/problem-review/SKILL.md`, the repository is four parent
+`adapters/codex/skills/bug-review/SKILL.md`, the repository is four parent
 directories above the containing directory. Read that checkout's
-`core/PROBLEM_REVIEW.md`, `core/CLI_DISCIPLINE.md` and `docs/PROBLEM_REVIEW.md`.
+`core/BUG_REVIEW.md`, `core/CLI_DISCIPLINE.md` and `docs/BUG_REVIEW.md`.
 Do not assume the business cwd contains ai-anti or initialize Git there.
 
 Prepare a bundle with verbatim user problem, separate analysis and explicitly
 selected evidence. Record source, original locator, coverage/omissions, environment,
 limitations and domain checks. Never reconstruct user words from inference.
 Run the resolved checkout's
-`adapters/codex/skills/claude-review/scripts/problem_review.py --bundle ABS --out NEW_ABS`.
+`adapters/codex/skills/claude-review/scripts/bug_review.py --bundle ABS --out NEW_ABS`.
 This entry uses `codex_relay.review_channel` for both hosts, **not** `review.channels`;
 `--channel claude|qwen|qoder` overrides it. It reuses existing service configuration.
 `--config-base ABS` defaults to cwd and only anchors relative credential paths.

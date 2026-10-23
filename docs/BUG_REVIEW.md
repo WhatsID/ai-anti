@@ -1,12 +1,12 @@
 # 显式问题复核
 
 这是业务分析与独立第二意见之间的文本协议，不绑定 Bug skill、Git 仓库或 App UI。
-共享语义见 [core/PROBLEM_REVIEW.md](../core/PROBLEM_REVIEW.md)。Codex 使用
-`problem-review` skill，Claude Code 使用 `/problem-review`，两者运行同一 Python 3.9+ stdlib 入口。
+共享语义见 [core/BUG_REVIEW.md](../core/BUG_REVIEW.md)。Codex 使用
+`bug-review` skill，Claude Code 使用 `/bug-review`，两者运行同一 Python 3.9+ stdlib 入口。
 先解析安装入口的符号链接定位真实源码，不从业务目录猜路径。
 
 ```bash
-python3 /resolved/ai-anti/adapters/codex/skills/claude-review/scripts/problem_review.py \
+python3 /resolved/ai-anti/adapters/codex/skills/claude-review/scripts/bug_review.py \
   --bundle /absolute/problem-bundle --out /absolute/new-review-output \
   --config-base /absolute/credential-base --channel qoder --model kimi-k3
 ```
@@ -79,7 +79,7 @@ supported 仅表示所读材料支持，不能当成生产实证、根因已证�
 补查不是自动复审。只有重要新事实或根因实质变化才允许第二轮，保持 task_id、递增 revision：
 
 ```bash
-python3 /resolved/ai-anti/adapters/codex/skills/claude-review/scripts/problem_review.py \
+python3 /resolved/ai-anti/adapters/codex/skills/claude-review/scripts/bug_review.py \
   --bundle /absolute/revised-bundle --out /absolute/new-second-output \
   --round 2 --previous /absolute/first-completed-output
 ```

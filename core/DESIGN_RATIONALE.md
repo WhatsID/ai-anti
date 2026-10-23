@@ -417,4 +417,13 @@ DESIGN 只供负责设计/规划的主模型按需读取，实施者执行定稿
 这是用户场景产生的新功能契约，不是由生产事故推导的新增全局治理规则。
 两个主机复用同一编排器及 codex_relay.review_channel，复用既有冻结材料和运行协议，不将诊断伪装成 plan。
 completed 与根因成立分离；缺证据、派生材料、身份未知和第二轮未解分歧保留诚实边界。
-补查由上层按授权执行，人工确认修复后回到既有方案评审。详见 PROBLEM_REVIEW.md。
+补查由上层按授权执行，人工确认修复后回到既有方案评审。详见 BUG_REVIEW.md。
+
+
+## 2026-10-23：问题复核公开名改为 bug-review
+
+用户明确将新功能公开名统一为 `bug-review`：命令、skill、调用脚本 `bug_review.py` 与
+`BUG_REVIEW.md` 文档路径同步改名，不保留旧公开入口；已安装对象沿 manifest 所有权规则重装迁移。
+功能仍是任意问题的通用复核，与上层业务领域解耦。内部 `problem_material.py`、
+`problem_result.py`、`mode=problem`、`problem_file` 和阶段标识保持不变，
+使既有 bundle 与 completed 首轮输出继续符合原协议；名称不对称是公开标识与持久化协议的边界。

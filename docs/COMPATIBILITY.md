@@ -324,3 +324,14 @@ sample was insufficient to establish root cause. This establishes a bounded real
 protocol run, not production diagnosis or repair. CLI identity does not prove
 backend routing. Live problem-review behavior on the other channels remains
 unverified; existing plan/diff live evidence does not establish it.
+
+
+### Public entry rename (2026-10-23)
+
+The public `problem-review` name and `problem_review.py` entry above were renamed
+to `bug-review` and `bug_review.py`; shared and user documentation now use
+`core/BUG_REVIEW.md` and `docs/BUG_REVIEW.md`. The recorded live Qoder run happened
+under the original name. This rename does not claim a second live model run.
+Internal `problem_*` modules, `mode=problem`, schema and stage markers are unchanged,
+so existing bundle and round-lineage protocols remain in place. Re-run the installer
+to migrate owned old links; user replacements remain outside installer ownership.

@@ -89,16 +89,71 @@ class HealthTests(unittest.TestCase):
 
     def test_problem_review_managed_lifecycle_and_health(self):
         self.run_install('--with-codex')
-        skill = self.home / '.agents/skills/problem-review'
-        command = self.home / '.claude/commands/problem-review.md'
+        skill = self.home / '.agents/skills/bug-review'
+        command = self.home / '.claude/commands/bug-review.md'
         self.assertTrue(skill.is_symlink())
         self.assertTrue(command.is_symlink())
         self.assertIn('状态：全部正常', self.status())
-        (self.repo / 'core/PROBLEM_REVIEW.md').unlink()
-        self.assertIn('PROBLEM_REVIEW.md', self.status())
+        (self.repo / 'core/BUG_REVIEW.md').unlink()
+        self.assertIn('BUG_REVIEW.md', self.status())
         self.run_install('--uninstall')
         self.assertFalse(skill.is_symlink())
         self.assertFalse(command.is_symlink())
+
+    def legacy_review_install(self):
+        # Recreate the just-replaced public layout using the same installer ownership
+        # mechanism, then rename sources in place so installed old links dangle.
+        pairs = [('adapters/codex/skills/bug-review', 'adapters/codex/skills/problem-review'),
+                 ('adapters/claude-code/commands/bug-review.md', 'adapters/claude-code/commands/problem-review.md'),
+                 ('adapters/codex/skills/claude-review/scripts/bug_review.py', 'adapters/codex/skills/claude-review/scripts/problem_review.py'),
+                 ('core/BUG_REVIEW.md', 'core/PROBLEM_REVIEW.md'),
+                 ('docs/BUG_REVIEW.md', 'docs/PROBLEM_REVIEW.md')]
+        installer = self.repo / 'install.sh'
+        candidate = installer.read_text()
+        for new, old in pairs:
+            (self.repo / new).rename(self.repo / old)
+        installer.write_text(candidate.replace('bug-review', 'problem-review').replace('BUG_REVIEW', 'PROBLEM_REVIEW'))
+        self.run_install('--with-codex')
+        for new, old in pairs:
+            (self.repo / old).rename(self.repo / new)
+        installer.write_text(candidate)
+        return (self.home / '.agents/skills/problem-review',
+                self.home / '.claude/commands/problem-review.md')
+
+    def test_review_rename_migrates_owned_dangling_links(self):
+        old_skill, old_command = self.legacy_review_install()
+        for path in (old_skill, old_command):
+            self.assertTrue(path.is_symlink())
+            self.assertFalse(path.exists())
+        self.run_install()
+        for path in (old_skill, old_command):
+            self.assertFalse(path.is_symlink())
+        skill = self.home / '.agents/skills/bug-review'
+        command = self.home / '.claude/commands/bug-review.md'
+        self.assertTrue((skill / 'SKILL.md').is_file())
+        self.assertTrue(command.is_file())
+        self.assertIn('状态：全部正常', self.status())
+        self.run_install('--uninstall')
+        self.assertFalse(skill.is_symlink())
+        self.assertFalse(command.is_symlink())
+
+    def test_review_rename_preserves_user_replacements(self):
+        old_skill, old_command = self.legacy_review_install()
+        old_skill.unlink()
+        old_command.unlink()
+        outside = self.home / 'user-skill'
+        outside.mkdir()
+        (outside / 'owned.txt').write_text('user content')
+        old_skill.symlink_to(outside)
+        old_command.write_text('user command')
+        self.run_install()
+        self.assertEqual(old_skill.resolve(), outside)
+        self.assertEqual(old_command.read_text(), 'user command')
+        self.assertTrue((self.home / '.agents/skills/bug-review/SKILL.md').is_file())
+        self.run_install('--uninstall')
+        self.assertEqual(old_skill.resolve(), outside)
+        self.assertEqual(old_command.read_text(), 'user command')
+        self.assertEqual((outside / 'owned.txt').read_text(), 'user content')
 
     def test_source_preflight(self):
         path = self.repo / 'core/DEBUGGING.md'

@@ -368,7 +368,7 @@ evidence, credentials and desktop recovery backups, installer writes and private
 
 ### Explicit problem second opinions
 
-Use the `problem-review` Codex skill or Claude Code `/problem-review` command to
+Use the `bug-review` Codex skill or Claude Code `/bug-review` command to
 review an existing analysis through two fresh stages, without requiring Git.
 Both use the existing `codex_relay.review_channel` configuration. Evidence collection
-and repair authorization stay with the caller. See [the bundle contract and examples](docs/PROBLEM_REVIEW.md).
+and repair authorization stay with the caller. See [the bundle contract and examples](docs/BUG_REVIEW.md).

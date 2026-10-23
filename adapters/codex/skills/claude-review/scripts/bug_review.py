@@ -68,7 +68,7 @@ def rules():
             raise MaterialError('core authority section missing: ' + prefix)
         end = core.find('\n## ', start + 1)
         sections.append(core[start:] if end < 0 else core[start:end])
-    return '\n\n'.join(sections) + '\n\n' + (ROOT / 'core/PROBLEM_REVIEW.md').read_text(encoding='utf-8')
+    return '\n\n'.join(sections) + '\n\n' + (ROOT / 'core/BUG_REVIEW.md').read_text(encoding='utf-8')
 
 
 def prepare_prompt(stage, sources, channel, logs, authority, mode, manifest):
@@ -213,7 +213,7 @@ def main():
                 'warnings': warnings, **(evidence(channel) if channel else {})})
             print(output)
         else:
-            print('problem review preparation failed: ' + str(exc), file=sys.stderr)
+            print('bug review preparation failed: ' + str(exc), file=sys.stderr)
         return 2
 
 

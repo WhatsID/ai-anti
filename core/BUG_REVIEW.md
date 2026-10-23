@@ -8,7 +8,7 @@
 调用方保存用户原话与预期为 problem_file，初步分析另存 analysis_file；不得把推断伪装成用户要求。
 分析应列候选解释、证据 id、排除依据、反证和未验证项。只声明准备送审的 UTF-8 文本；
 证据逐项标明 id、来源、原位置/时段、raw_excerpt 或 derived、范围与遗漏。derived 不是原始材料。
-完整字段与命令见 docs/PROBLEM_REVIEW.md。来源哈希只证明送审字节，不证明远端日志真伪。
+完整字段与命令见 docs/BUG_REVIEW.md。来源哈希只证明送审字节，不证明远端日志真伪。
 无证据可复核缺口，但不得声称根因已证实。
 
 先冻结全部声明材料，再以新进程完成 independent → review 两阶段。第一阶段不提供分析文件、
