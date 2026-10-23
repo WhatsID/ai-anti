@@ -19,3 +19,13 @@ read-only`、`claude -p`）、容灾实施通道（`codex exec --sandbox workspa
 `adapters/claude-code/commands/`（`codex-review.md`、`codex-implement.md`）与评审插件
 `plugins/qwen/commands/qwen-review.md`，它们只写「照本条执行」，不复制四条正文——复制正是 2026-08-11
 二次发作的成因。
+
+## 当前受管理的评审预算
+
+以上事故原文与工具参数记录保留。`600000` 是 Bash 工具等待/转后台阈值，
+不是模型硬超时；转后台仍须监控，不在600秒自行提前终止。受 ai-anti 管理的外部
+CLI 评审统一读 `~/.config/ai-anti/config.json` 的 `review.timeout` /
+`review.idle_timeout`，缺失/null默认1800/900秒，上限3600/900秒，先到者终止。
+单次覆盖不能掩盖坏配置；输出上限仍按通道，失败不自动重试。plan两个阶段分别计时，
+最坏可达2×timeout。原生Opus子代理没有可控进程，不宣称受本配置强制计时。
+未来外部CLI适配必须复用共享配置解析与受限执行入口，任意外部工具不会自动受控。

@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- 外部 CLI 评审统一使用用户配置 `review.timeout` / `review.idle_timeout`，默认1800/900秒，上限3600/900秒；idle可先终止，输出上限保持各通道原值。
+- Claude、Qoder默认总时长从600增至1800秒，App Codex检测从1200增至1800秒；plan每阶段独立计时。Claude主导命令与App检测共享配置解析，原生Opus子代理不强制计时。
+- App正式runner外围为总时间+60秒，界面预算3700秒覆盖最大3600+60，保留取消；极慢本地准备仍可能触发外围预算。
+
 ## 0.2.2 — 2026-10-22
 
 - 新增 Qoder CLI 评审通道，支持已验证的 Kimi-K3，并加固隔离与进程清理。

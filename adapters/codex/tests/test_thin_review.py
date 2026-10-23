@@ -104,6 +104,19 @@ class ThinReviewTests(unittest.TestCase):
         self.assertEqual(json.loads((out / 'status.json').read_text())['status'], status)
         self.assertNotIn('approved', (out / 'status.json').read_text().lower())
 
+    def test_shared_config_limits_prepare_only(self):
+        # No CLI invocation or credentials; effective budgets survive into evidence.
+        self.write_config({'review': {'timeout': 234, 'idle_timeout': 56}})
+        r, out = self.run_review(extra=['--prepare-only'])
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.manifest(out)['limits']['timeout'], 234)
+        self.assertEqual(self.manifest(out)['limits']['idle_timeout'], 56)
+        self.assertEqual(self.calls(), [])
+        self.write_config({'review': {'timeout': False}})
+        r, _ = self.run_review(extra=['--prepare-only', '--timeout', '123'])
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn('review.timeout', r.stderr)
+
     def test_plan_two_phases_and_shared_rules(self):
         r, out = self.run_review('plan')
         self.assert_success(r, out)

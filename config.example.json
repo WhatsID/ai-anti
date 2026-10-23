@@ -4,7 +4,9 @@
       "codex",
       "same-family"
     ],
-    "codex_model": "gpt-6-astra"
+    "codex_model": "gpt-6-astra",
+    "timeout": 1800,
+    "idle_timeout": 900
   },
   "defaults": {
     "deployment_scale": null

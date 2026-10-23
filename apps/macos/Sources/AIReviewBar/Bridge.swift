@@ -84,7 +84,9 @@ final class Bridge: @unchecked Sendable {
         }
         try begin(p)
         let action = payload["action"] as? String ?? ""
-        let timeout: Double = action == "real" ? 1900 : (action == "local" ? 40 : 30)
+        // 3700 covers the maximum review timeout (3600) + runner cleanup (60).
+        // Keep this budget in sync with review_limits; cancellation remains immediate.
+        let timeout: Double = action == "real" ? 3700 : (action == "local" ? 40 : 30)
         DispatchQueue.global().asyncAfter(deadline: .now() + timeout) { [weak self, weak p] in
             guard let self, let p, p.isRunning else { return }
             self.lock.lock()

@@ -73,10 +73,11 @@ class DesktopContract(unittest.TestCase):
         self.assertLess(view.index('Picker("协作模式"'), view.index('solo 同时停用'))
         self.assertLess(view.index('modelPicker("实施模型 ID"'), view.index('Picker("协作模式"'))
         self.assertIn('Picker("评审服务"', view)
-        self.assertIn('认证 / API 密钥', view)
-        self.assertIn('SecureField("新 API 密钥', view)
+        self.assertIn('SecureField("API 密钥"', view)
+        self.assertIn('text: $model.draft.apiKeyInput', view)
         self.assertIn('if model.draft.channel == "qwen"', view)
-        self.assertIn('DisclosureGroup("高级设置")', view)
+        self.assertIn('Picker("评审执行器"', view)
+        self.assertIn('Picker("模型 ID"', view)
         self.assertIn('登录状态未检测', view)
         self.assertNotIn('.disabled(model.dirty)', view)
         self.assertIn('Codex 评审失败即停止', view)
@@ -89,12 +90,22 @@ class DesktopContract(unittest.TestCase):
         sub=self.repo/'sub'; sub.mkdir()
         result=subprocess.run(['bash',str(ROOT/'adapters/claude-code/hooks/session-start.sh')],cwd=sub,env=self.env,capture_output=True,text=True)
         self.assertIn('auto（来源：项目模式文件）',result.stdout)
+    def test_swift_budget_covers_shared_maximum_and_cleanup(self):
+        scripts=ROOT/'adapters/codex/skills/claude-review/scripts'
+        sys.path.insert(0,str(scripts))
+        from ai_anti_config import review_limits, ConfigError
+        maximum=review_limits({'review':{'timeout':3600}})[0]
+        with self.assertRaises(ConfigError): review_limits({'review':{'timeout':3601}})
+        bridge=(ROOT/'apps/macos/Sources/AIReviewBar/Bridge.swift').read_text()
+        outer=int(re.search(r'action == "real" \? (\d+)',bridge).group(1))
+        self.assertEqual(outer,3700); self.assertGreaterEqual(outer,maximum+60)
+
     def test_codex_review_executable_model_snippet(self):
         command=(ROOT/'adapters/claude-code/commands/codex-review.md').read_text()
         code=next(x for x in re.findall(r'```python\n(.*?)```',command,re.S) if 'model_args' in x)
         scratch=self.root/'scratch'; scratch.mkdir(); (scratch/'review_prompt.txt').write_text('synthetic prompt')
         store=Store(self.root); atomic(store.paths['ai'],b'{"review":{"codex_model":"gpt-6-astra"}}')
-        harness='from pathlib import Path\nscratchpad=Path('+repr(str(scratch))+')\n'+code
+        harness='from pathlib import Path\nai_anti_root=Path('+repr(str(ROOT))+')\nscratchpad=Path('+repr(str(scratch))+')\n'+code
         fake=self.root/'codex'; fake.write_text('#!'+sys.executable+'\nimport sys,json\nprint(json.dumps(sys.argv[1:]))\n'); fake.chmod(0o700)
         env=dict(self.env,PATH=str(self.root)+':/usr/bin:/bin')
         process=subprocess.run([sys.executable,'-c',harness],env=env,capture_output=True,text=True)
@@ -137,6 +148,28 @@ class DesktopContract(unittest.TestCase):
             self.assertNotIn('ONE_FIXTURE',json.dumps(manifest)); self.assertNotIn('TWO_FIXTURE',json.dumps(manifest))
         # The UI wrapper must match actual parameter names, not an invented runner.
         actual=parser().parse_args(argv[2:]); self.assertEqual(actual.channel,'qwen')
+    def test_qwen_command_bounded_call_chain(self):
+        command=(ROOT/'plugins/qwen/commands/qwen-review.md').read_text()
+        shell=next(b for b in re.findall(r'```bash\n(.*?)```',command,re.S) if 'BOUNDED_REVIEW=' in b)
+        store=Store(self.root)
+        atomic(store.paths['secrets'],b'{"tokenplan":{"value":"offline-fixture"}}')
+        q=dict(model='fixture',base_url='https://fixture.invalid',credential_paths=[str(store.paths['secrets'])])
+        atomic(store.paths['ai'],json.dumps({'review':{'timeout':12,'idle_timeout':7},'plugins':{'qwen':q}}).encode())
+        commands=self.root/'.claude/commands'; commands.mkdir(parents=True)
+        (commands/'qwen-review.md').symlink_to(ROOT/'plugins/qwen/commands/qwen-review.md')
+        scratch=self.root/'scratch'; scratch.mkdir(); (scratch/'qwen_prompt.txt').write_text('offline prompt')
+        fake=self.root/'claude'
+        fake.write_text('#!'+sys.executable+'\nimport os,sys,json\nassert sys.stdin.read()==""\nassert os.environ["ANTHROPIC_AUTH_TOKEN"]=="offline-fixture"\nassert "ANTHROPIC_API_KEY" not in os.environ\nassert os.environ["ANTHROPIC_DEFAULT_SONNET_MODEL"]=="fixture"\nprint(json.dumps({"argv":sys.argv[1:],"is_error":False}))\n')
+        fake.chmod(0o700)
+        env=dict(self.env,PATH=str(self.root)+':'+os.path.dirname(sys.executable)+':/usr/bin:/bin',CLAUDE_CONFIG_DIR=str(commands.parent),ANTHROPIC_API_KEY='must-remove')
+        # Replace only the documented scratchpad placeholder, keeping the real template chain.
+        shell=shell.replace('<scratchpad>',str(scratch))
+        run=subprocess.run(['bash','-c',shell],env=env,cwd=self.repo,capture_output=True,text=True,timeout=20)
+        self.assertEqual(run.returncode,0,run.stderr)
+        output=json.loads((scratch/'qwen_review.json').read_text())
+        self.assertIn('offline prompt',output['argv']); self.assertIn('--allowedTools',output['argv'])
+        self.assertIn('timeout=12 idle_timeout=7',run.stderr)
+
     def test_qwen_command_credential_key_snippets(self):
         command = (ROOT/'plugins/qwen/commands/qwen-review.md').read_text()
         blocks = re.findall(r"python3 - <<'PY'\n(.*?)\nPY", command, re.S)

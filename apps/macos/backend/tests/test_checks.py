@@ -42,6 +42,8 @@ class CheckTests(unittest.TestCase):
     def test_formal_executor_limits_and_requested_only(self):
         for host in ('codex', 'claude'):
             store = self.api_store(host)
+            data=json.loads(store.paths['ai'].read_text()); data['review'].update(timeout=321,idle_timeout=45)
+            atomic(store.paths['ai'],json.dumps(data).encode())
             executor = 'codex' if host == 'codex' else 'claude'
             def fake_run(argv, cwd, log, **kwargs):
                 if '--qwen-executor' in argv:
@@ -50,10 +52,10 @@ class CheckTests(unittest.TestCase):
                         self.assertEqual(argv[argv.index('--responses-base-url')+1], 'https://example.invalid/v1')
                     else:
                         self.assertNotIn('--responses-base-url', argv)
-                    self.assertEqual(argv[argv.index('--timeout')+1], '1800')
-                    self.assertEqual(argv[argv.index('--idle-timeout')+1], '900')
+                    self.assertEqual(argv[argv.index('--timeout')+1], '321')
+                    self.assertEqual(argv[argv.index('--idle-timeout')+1], '45')
                     self.assertEqual(argv[argv.index('--max-output-bytes')+1], str(8*1024*1024))
-                    self.assertEqual(kwargs['timeout'], 1860); self.assertEqual(kwargs['limit'], 8*1024*1024)
+                    self.assertEqual(kwargs['timeout'], 381); self.assertEqual(kwargs['limit'], 8*1024*1024)
                     out = Path(argv[argv.index('--out')+1]); out.mkdir()
                     evidence = dict(status='completed', completed=True, mode='diff', channel='qwen', executor=executor, wire_api='responses' if executor == 'codex' else 'anthropic', requested_model='qwen-fixture', actual_model=None if executor == 'codex' else 'qwen-fixture')
                     if executor == 'codex': evidence['model_evidence'] = 'requested_only'
@@ -89,6 +91,8 @@ class CheckTests(unittest.TestCase):
         store = Store(self.root/'qoder-home')
         snap = store.read(); v = snap['values']; v.update(host='codex', channel='qoder')
         store.save(v, snap['fingerprints'])
+        data=json.loads(store.paths['ai'].read_text()); data['review'].update(timeout=321,idle_timeout=45)
+        atomic(store.paths['ai'],json.dumps(data).encode())
         with patch('checks.discover', return_value='/usr/bin/true') as discover:
             checks.local(store, str(ROOT))
         self.assertEqual({c.args[0] for c in discover.call_args_list}, {'codex','qodercli'})
@@ -97,8 +101,9 @@ class CheckTests(unittest.TestCase):
             if '--channel' in argv:
                 self.assertEqual(argv[argv.index('--channel')+1], 'qoder')
                 self.assertEqual(argv[argv.index('--model')+1], 'kimi-k3')
-                self.assertEqual(argv[argv.index('--timeout')+1], '600')
-                self.assertEqual(kwargs['timeout'], 660); self.assertEqual(kwargs['limit'], 2*1024*1024)
+                self.assertEqual(argv[argv.index('--timeout')+1], '321')
+                self.assertEqual(argv[argv.index('--idle-timeout')+1], '45')
+                self.assertEqual(kwargs['timeout'], 381); self.assertEqual(kwargs['limit'], 2*1024*1024)
                 self.assertEqual(kwargs['env']['HOME'], str(store.root))
                 out = Path(argv[argv.index('--out')+1]); out.mkdir()
                 for name in ('status','manifest'): (out/(name+'.json')).write_text(json.dumps(good))
@@ -113,6 +118,48 @@ class CheckTests(unittest.TestCase):
         def no_evidence(argv, cwd, log, **kwargs): return 0
         with patch('checks.discover',return_value='/usr/bin/true'), patch('checks.run',side_effect=no_evidence):
             with self.assertRaisesRegex(checks.CheckError,'证据'): checks.real(store,str(ROOT),timeout=1)
+
+    def test_isolated_store_budgets_save_and_profile_roundtrip(self):
+        store = self.api_store()
+        data = json.loads(store.paths['ai'].read_text())
+        data['review'].update(timeout=321, idle_timeout=45, future_field='keep')
+        atomic(store.paths['ai'], json.dumps(data).encode())
+        with patch.dict(os.environ, HOME=str(self.root/'unrelated')):
+            self.assertEqual(checks.review_budgets(store, ROOT), (321,45))
+            self.assertEqual(checks.review_budgets(store, ROOT, 123), (123,45))
+        for service in ('custom_api', 'token_plan'):
+            snap=store.read(); v=snap['values']; v['review_services']['active_api']=service
+            store.save(v, snap['fingerprints'])
+            self.assertEqual(store.read()['values']['review_services']['active_api'],service)
+            self.assertEqual(json.loads(store.paths['ai'].read_text())['review_services']['active_api'],service)
+            self.assertEqual(json.loads(store.paths['ai'].read_text())['review']['timeout'],321)
+            self.assertEqual(json.loads(store.paths['ai'].read_text())['review']['idle_timeout'],45)
+            self.assertEqual(json.loads(store.paths['ai'].read_text())['review']['future_field'],'keep')
+
+    def test_bad_budgets_stop_local_and_real_before_cli(self):
+        store=self.api_store()
+        data=json.loads(store.paths['ai'].read_text()); data['review']['timeout']=True
+        atomic(store.paths['ai'],json.dumps(data).encode())
+        with patch('checks.run') as run, patch('checks.discover') as discover:
+            for check in (checks.local, checks.real):
+                with self.assertRaisesRegex(checks.CheckError,'review.timeout'): check(store,str(ROOT))
+            with self.assertRaises(checks.CheckError): checks.real(store,str(ROOT),timeout=1)
+            run.assert_not_called(); discover.assert_not_called()
+
+    def test_old_source_clear_error(self):
+        store=Store(self.root/'home')
+        for content in (None, 'def load(path): return {}'):
+            scripts=self.root/'old/adapters/codex/skills/claude-review/scripts'; scripts.mkdir(parents=True,exist_ok=True)
+            if content is not None: (scripts/'ai_anti_config.py').write_text(content)
+            with self.assertRaisesRegex(checks.CheckError,'review_limits.*更新'):
+                checks.review_budgets(store,self.root/'old')
+
+    def test_native_idle_and_continuing_output_total(self):
+        cases=[('import time; time.sleep(20)',2,.2,'空闲超时'),
+               ('import time\nwhile True:\n print("p",flush=True); time.sleep(.05)',.3,.2,'检测超时')]
+        for source,total,idle,message in cases:
+            with self.assertRaisesRegex(checks.CheckError,message):
+                checks.run([sys.executable,'-c',source],self.root,self.root/'log',timeout=total,idle_timeout=idle)
 
     def test_version_nonzero_and_timeout(self):
         for text, timeout, expected in [('import sys; sys.exit(4)',2,4), ('import time; time.sleep(30)',.2,None)]:
@@ -160,9 +207,15 @@ class CheckTests(unittest.TestCase):
         fake=self.root/'codex'
         fake.write_text('#!'+sys.executable+'\nimport sys,json\nfrom pathlib import Path\nif "--help" in sys.argv:\n print("--json --sandbox --ephemeral --ignore-user-config --ignore-rules")\nelse:\n assert sys.argv[sys.argv.index("--model")+1]=="chosen"\n marker=Path("sample.txt").read_text().split("READ_TOKEN=")[1].strip()\n print(json.dumps({"type":"item.completed","item":{"type":"agent_message","text":marker}}))\n print(json.dumps({"type":"turn.completed"}))\n')
         fake.chmod(0o700)
+        data=json.loads(store.paths['ai'].read_text()); data['review'].update(timeout=321,idle_timeout=45)
+        atomic(store.paths['ai'],json.dumps(data).encode())
+        original_run=checks.run
         original=checks.discover
-        with patch('checks.discover',side_effect=lambda name: str(fake) if name=='codex' else original(name)):
-            value=checks.real(store,str(ROOT),timeout=10)
+        with patch('checks.run',wraps=original_run) as runner, patch('checks.discover',side_effect=lambda name: str(fake) if name=='codex' else original(name)):
+            value=checks.real(store,str(ROOT))
+        model_call=next(c for c in runner.call_args_list if c.kwargs.get('idle_timeout') is not None)
+        self.assertEqual(model_call.kwargs['timeout'],321)
+        self.assertEqual(model_call.kwargs['idle_timeout'],45)
         self.assertEqual(value['state'],'passed'); self.assertEqual(value['actual_model'],'未知')
     def test_local_does_not_claim_login(self):
         store=Store(self.root/'home')
@@ -180,7 +233,7 @@ class CheckTests(unittest.TestCase):
         store=Store(self.root/'home'); snap=store.read(); v=snap['values']; v['reviewer_model']='chosen'; store.save(v,snap['fingerprints'])
         def fake_events(path,marker):
             atomic(store.paths['claude'],b'{"model":"external"}'); return 'unknown'
-        with patch('checks.discover',return_value='/usr/bin/true'), patch('checks.run',return_value=0), patch('checks.codex_events',side_effect=fake_events), patch.object(Path,'read_text',return_value='--json --sandbox --ephemeral --ignore-user-config --ignore-rules'):
+        with patch('checks.review_budgets',return_value=(10,900)), patch('checks.discover',return_value='/usr/bin/true'), patch('checks.run',return_value=0), patch('checks.codex_events',side_effect=fake_events), patch.object(Path,'read_text',return_value='--json --sandbox --ephemeral --ignore-user-config --ignore-rules'):
             with self.assertRaisesRegex(checks.CheckError,'作废'): checks.real(store,str(ROOT),timeout=10)
 
 if __name__ == '__main__': unittest.main()

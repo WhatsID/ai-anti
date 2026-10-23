@@ -53,7 +53,7 @@ Codex 使用隔离临时合成仓库、提示词文件、DEVNULL、文件日志�
 无error且返回文件里的随机值。实际模型只有结构化字段才显示，否则未知；请求ID或exit=0不是实际模型证明。
 评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3（kmodel_latest，已验证 CLI 1.1.74）；Codex 保留四个目录模型和 CLI 默认；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Codex 服务仅 Claude 主模型可新选；既有其他路由保留显示。
 
-API 服务显示服务地址和“认证 / API 密钥”，CLI 服务隐藏这些字段，使用现有 CLI 登录并默认显示“登录状态未检测”。高级设置说明固定执行器及协议：Claude 使用 Anthropic，Codex 使用 Responses；不承诺 Chat Completions。API 合成检测最多 30 分钟；Qoder 正式入口使用 600 秒、外围 660 秒、2MiB 输出上限，保留正式 runner 全部门禁和实际 Kimi-K3 证据校验。
+API 服务显示服务地址和“认证 / API 密钥”，CLI 服务隐藏这些字段，使用现有 CLI 登录并默认显示“登录状态未检测”。高级设置说明固定执行器及协议：Claude 使用 Anthropic，Codex 使用 Responses；不承诺 Chat Completions。所有真实合成检测统一读取用户配置 `review.timeout` / `review.idle_timeout`（默认1800/900秒，上限3600/900秒，先到者终止）。Qwen/Qoder正式入口外围为总时间+60秒，界面3700秒覆盖最大3600+60并支持取消；极慢本地准备仍可能触发外围预算。Qoder保留2MiB输出上限，保留正式 runner 全部门禁和实际 Kimi-K3 证据校验。
 
 两个主导工具共享当前 API 服务及其模型、凭证；两种协议地址独立。每个服务独立保留模型、地址、未保存输入及认证动作，切回恢复；同服务换模型不会改密钥。千问新草稿预填官方两种协议地址，自定义留空。取消放弃全部服务与主导工具草稿，保存失败保留草稿，保存仅影响下次调用。菜单显示服务与模型，未完成配置时引导设置，不保存空地址。
 

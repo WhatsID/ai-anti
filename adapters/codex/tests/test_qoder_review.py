@@ -22,6 +22,16 @@ class QoderReviewTests(thin.ThinReviewTests):
         (self.bindir / 'qodercli').chmod(0o700)
         self.write_config({'codex_relay': {'review_channel': 'qoder'}})
 
+    def test_configured_limits_prepare_only(self):
+        config=json.loads(self.config.read_text())
+        config['review']={'timeout':234,'idle_timeout':56}
+        self.write_config(config)
+        r,out=self.run_review(extra=['--prepare-only'])
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertEqual(self.manifest(out)['limits']['timeout'],234)
+        self.assertEqual(self.manifest(out)['limits']['idle_timeout'],56)
+        self.assertEqual(self.calls(),[])
+
     def test_formal_plan_diff_and_alias(self):
         for mode in ('plan', 'diff'):
             r, out = self.run_review(mode, extra=['--channel', 'qoder', '--model', 'kimi-k3'])
@@ -32,7 +42,7 @@ class QoderReviewTests(thin.ThinReviewTests):
                                   'cli_model': 'kmodel_latest', 'actual_model': 'Kimi-K3',
                                   'material_transport': 'material_ids'}.items():
                 self.assertEqual(m[key], expected)
-            self.assertEqual(m['limits'], {'timeout': 600, 'idle_timeout': 900,
+            self.assertEqual(m['limits'], {'timeout': 1800, 'idle_timeout': 900,
                                           'max_output_bytes': 2 * 1024 * 1024})
             self.assertEqual(len(m['stages']), 2 if mode == 'plan' else 1)
             for stage in m['stages'].values():

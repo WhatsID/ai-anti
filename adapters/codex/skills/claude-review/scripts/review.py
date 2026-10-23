@@ -15,7 +15,7 @@ from pathlib import Path
 from review_material import (MaterialError, diff_material, enforce_limit, full_git_metadata,
                              git_root, read_text, safe_out, selected, sha, validate_plan, write_snapshot)
 from review_runner import MODEL_FAMILIES, RunError, capability, run_stage
-from ai_anti_config import ConfigError, load as load_config, model_families
+from ai_anti_config import ConfigError, load as load_config, model_families, review_limits
 from review_channels import resolve, evidence, child_environment
 from review_chunks import chunk_stage, chunk_file, required_files, source_labels
 from review_materials import build_registry, mcp_config
@@ -133,7 +133,7 @@ def parser(families=None):
     result.add_argument("--model", default=None, help="Claude aliases: " +
                         ','.join(sorted(families or MODEL_FAMILIES)) + "; Qoder: kimi-k3,kmodel_latest")
     result.add_argument("--timeout", type=int, default=None)
-    result.add_argument("--idle-timeout", type=int, default=900)
+    result.add_argument("--idle-timeout", type=int, default=None)
     result.add_argument("--max-output-bytes", type=int, default=None)
     result.add_argument("--prepare-only", action="store_true")
     return result
@@ -233,7 +233,7 @@ def main():
         repo = git_root(args.repo)
         channel = resolve(config, args.channel, args.model, repo, families, args.qwen_executor, args.responses_base_url)
         codex_executor = channel.get("executor") == "codex"
-        args.timeout = args.timeout if args.timeout is not None else (1800 if channel["channel"] == "qwen" else 600)
+        args.timeout, args.idle_timeout = review_limits(config, args.timeout, args.idle_timeout)
         args.max_output_bytes = args.max_output_bytes if args.max_output_bytes is not None else (8 if channel["channel"] == "qwen" else 2) * 1024 * 1024
         check_arguments(args, argument_parser)
         output = safe_out(args.out, repo)

@@ -126,7 +126,7 @@ struct SettingsView: View {
         .disabled(model.busy && !model.checking)
         .alert("测试会消耗模型额度", isPresented: $confirmReal) {
             Button("开始合成检测") { model.check(real: true) }; Button("取消", role: .cancel) {}
-        } message: { Text("仅使用临时合成仓库；不读取业务材料。API 最多 30 分钟，Qoder 最多 10 分钟，无自动重试或降级。") }
+        } message: { Text("仅使用临时合成仓库；不读取业务材料。统一使用评审预算配置（默认总时长 30 分钟、空闲 15 分钟），无自动重试或降级。") }
         .alert("恢复上次保存？", isPresented: $confirmRestore) {
             Button("恢复") { model.restore() }; Button("取消", role: .cancel) {}
         } message: { Text("只在保存后没有外部修改时恢复，备份可能包含敏感配置。") }

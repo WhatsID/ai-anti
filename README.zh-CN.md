@@ -198,9 +198,12 @@ Codex → Claude/Qwen 用法示例：
 Claude 默认 Opus，可用 `--model fable` 或配置家族。Qwen 直接复用 `plugins.qwen`，
 无需安装插件；默认保留 Claude CLI，用 sonnet 别名映射配置模型，拒绝显式 `--model`。
 相对凭证路径按 `--repo` 解析，推荐绝对路径或 `~`；Claude 插件按调用 cwd 解析。
-`--prepare-only` 不读凭证、不调用 CLI。Qwen 默认每阶段 1800 秒，Claude 600 秒，
-idle 均 900 秒；显式覆盖优先，上限为总时间 3600 秒、idle 900 秒。
+`--prepare-only` 不读凭证、不调用 CLI。所有受管理的 CLI 评审统一读取 `~/.config/ai-anti/config.json` 的
+`review.timeout` / `review.idle_timeout`，默认每阶段1800/900秒。Claude、Qoder默认从600增至1800秒，App Codex检测从1200增至1800秒。
+缺失/null使用默认；坏配置启动前拒绝，不能用单次覆盖掩盖。显式覆盖优先，上限为总时间 3600 秒、idle 900 秒。
 manifest/status 留证通道与模型，init 模型精确校验不证明端点内部路由。
+
+plan 的 inventory/review 每阶段独立计时，最坏运行可达2×timeout；输出上限保留通道差异。未来外部CLI适配须复用共享解析与受限执行入口，任意外部工具、原生Opus子代理不会自动受本配置强制计时。
 
 ```bash
 REVIEW_SOURCE=/absolute/path/to/ai-anti/adapters/codex/skills/claude-review/scripts/review.py
@@ -224,7 +227,7 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
 0.160.0 历史正式 plan 与真实 diff 已通过；0.163.0 于2026-10-20通过合成 plan 两阶段验收，未验证新版业务 diff 或用户级入口全流程；大增量仍可能长时间无输出，900/1800秒仅为本次通过的预算。
 macOS 设置窗口固定显示各组合的执行器，不可选择；CLI 仍支持显式选择执行器。详见[验证记录与边界](docs/COMPATIBILITY.md)。
 
-AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex API 执行器配置会生成待保存草稿，保存后才能检测。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，不推导或替换域名；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。API 合成检测预算为运行1800秒、空闲900秒、输出8MiB，外围1860秒、界面1900秒留清理余量，可取消。
+AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex API 执行器配置会生成待保存草稿，保存后才能检测。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，不推导或替换域名；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。合成检测使用相同可配置预算（默认总时间1800秒、空闲900秒），idle可能先终止。API输出仍限8MiB、Qoder仍限2MiB；正式runner外围为总时间+60秒，界面3700秒覆盖最大3600+60并保留取消。极慢本地准备仍可能触发外围预算。
 
 ## 配置
 

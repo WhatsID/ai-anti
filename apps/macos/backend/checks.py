@@ -1,4 +1,5 @@
 """Bounded synthetic checks; no business repository is ever read."""
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -38,11 +39,12 @@ def discover(name):
             return candidate
     raise CheckError('未找到 ' + name + ' CLI；请安装或设置启动环境')
 
-def run(argv, cwd, log, timeout=8, limit=2*1024*1024, env=None):
+def run(argv, cwd, log, timeout=8, limit=2*1024*1024, env=None, idle_timeout=None):
     global _active
     if _cancelled:
         raise CheckError('检测已取消')
-    start = time.monotonic()
+    start = last_output = time.monotonic()
+    last_size = 0
     with open(log, 'wb') as out:
         os.chmod(log, 0o600)
         _active = subprocess.Popen(argv, cwd=cwd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
@@ -50,10 +52,16 @@ def run(argv, cwd, log, timeout=8, limit=2*1024*1024, env=None):
         reason = None
         try:
             while _active.poll() is None:
+                now = time.monotonic()
+                size = Path(log).stat().st_size
+                if size != last_size:
+                    last_size, last_output = size, now
                 if _cancelled:
                     reason = '检测已取消'
                 elif time.monotonic() - start > timeout:
                     reason = '检测超时，已终止进程'
+                elif idle_timeout is not None and now - last_output >= idle_timeout:
+                    reason = '检测空闲超时，已终止进程'
                 elif Path(log).stat().st_size > limit:
                     reason = '检测输出超过上限，已终止进程'
                 if reason:
@@ -94,6 +102,23 @@ def source_root(store, explicit=None):
             return root.resolve()
     raise CheckError('找不到已安装 ai-anti 源码；使用 --source-root 指定经过验证的 checkout')
 
+def review_budgets(store, root, timeout=None):
+    """Load the validated checkout's parser, using the Store's config path."""
+    path = root / 'adapters/codex/skills/claude-review/scripts/ai_anti_config.py'
+    if not path.is_file():
+        raise CheckError('ai-anti 源码缺少 review_limits；请更新 ai-anti 源码')
+    spec = importlib.util.spec_from_file_location('_aianti_check_config', path)
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+        if not callable(getattr(module, 'review_limits', None)):
+            raise CheckError('ai-anti 源码缺少 review_limits；请更新 ai-anti 源码')
+        return module.review_limits(module.load(store.paths['ai']), timeout=timeout)
+    except CheckError:
+        raise
+    except (ValueError, OSError, ImportError, SyntaxError) as exc:
+        raise CheckError('评审预算配置或源码无效：' + str(exc)) from exc
+
 def result(kind, state, message, snapshot, actual='未知'):
     return dict(kind=kind, state=state, message=message, signature=snapshot['signature'], actual_model=actual,
                 checked_at=time.strftime('%Y-%m-%d %H:%M:%S'), timestamp=time.time())
@@ -104,7 +129,7 @@ def local(store, source=None):
     if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
     # Validation builds bytes but never writes them.
     store.outputs(v, '')
-    source_root(store, source)
+    review_budgets(store, source_root(store, source))
     names = {v['host'], effective_executor(v) if v['channel'] == 'qwen' else 'qodercli' if v['channel'] == 'qoder' else 'codex'}
     with tempfile.TemporaryDirectory(prefix='ai-anti-local-') as temp:
         for name in names:
@@ -173,7 +198,7 @@ def real(store, source=None, timeout=None):
     if v['mode'] == 'solo': raise CheckError('solo 模式停用交叉评审')
     store.outputs(v, '')
     root = source_root(store, source)
-    timeout = timeout if timeout is not None else (1800 if v['channel'] == 'qwen' else 600 if v['channel'] == 'qoder' else 1200)
+    timeout, idle_timeout = review_budgets(store, root, timeout)
     with tempfile.TemporaryDirectory(prefix='ai-anti-probe-') as temp:
         temp = Path(temp).resolve()
         os.chmod(temp, 0o700)
@@ -200,7 +225,7 @@ def real(store, source=None, timeout=None):
             argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
                     '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
                     '--out', str(out), '--channel', 'qwen', '--qwen-executor', effective_executor(v),
-                    '--timeout', str(timeout), '--idle-timeout', '900', '--max-output-bytes', str(8*1024*1024)]
+                    '--timeout', str(timeout), '--idle-timeout', str(idle_timeout), '--max-output-bytes', str(8*1024*1024)]
             if effective_executor(v) == 'codex':
                 argv += ['--responses-base-url', v['responses_base_url']]
             if run(argv, repo, temp / 'runner.log', timeout=timeout+60, limit=8*1024*1024, env=env) != 0:
@@ -216,7 +241,7 @@ def real(store, source=None, timeout=None):
             argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
                     '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
                     '--out', str(out), '--channel', 'qoder', '--model', 'kimi-k3', '--timeout', str(timeout),
-                    '--max-output-bytes', str(2*1024*1024)]
+                    '--idle-timeout', str(idle_timeout), '--max-output-bytes', str(2*1024*1024)]
             if run(argv, repo, temp / 'runner.log', timeout=timeout+60, limit=2*1024*1024, env=env) != 0:
                 raise CheckError('Qoder 正式入口检测失败；未自动重试或降级')
             try:
@@ -242,7 +267,7 @@ def real(store, source=None, timeout=None):
             prompt.write_text('Read sample.txt in this synthetic repository using your read-only tools. Return the exact READ_TOKEN value found in the file. Do not modify anything. This is only a model availability check, not a business review.\n')
             argv = [cli, 'exec', '--sandbox', 'read-only', '--json', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--model', chosen, prompt.read_text()]
             log = temp / 'codex.jsonl'
-            if run(argv, repo, log, timeout=timeout, env=env) != 0:
+            if run(argv, repo, log, timeout=timeout, env=env, idle_timeout=idle_timeout) != 0:
                 raise CheckError('Codex 合成调用失败；原始错误已隐藏，未自动重试')
             actual = codex_events(log, marker)
         if store.read()['signature'] != snapshot['signature']:

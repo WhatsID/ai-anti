@@ -73,3 +73,20 @@ def model_families(data, defaults):
         except re.error as exc:
             raise ConfigError('ai-anti config: invalid pattern for ' + alias + ': ' + str(exc)) from exc
     return families
+
+
+def review_limits(data, timeout=None, idle_timeout=None):
+    """Validate persisted budgets before applying per-call overrides (seconds)."""
+    if not isinstance(data, dict) or ('review' in data and not isinstance(data['review'], dict)):
+        raise ConfigError('ai-anti config: review must be an object')
+    values = []
+    for key, default, maximum, override in (
+            ('timeout', 1800, 3600, timeout), ('idle_timeout', 900, 900, idle_timeout)):
+        value = lookup(data, 'review.' + key)
+        if value is None:
+            value = default
+        for candidate in (value, override):
+            if candidate is not None and (type(candidate) is not int or not 0 < candidate <= maximum):
+                raise ConfigError('invalid bounded resource limits: ai-anti config review.' + key + ' must be an integer in 1..' + str(maximum))
+        values.append(value if override is None else override)
+    return tuple(values)

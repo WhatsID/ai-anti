@@ -257,9 +257,14 @@ plugin installation, defaulting to Claude CLI with a sonnet alias mapped to the 
 model. Explicit `--model` is rejected for Qwen. Relative credential paths resolve
 against `--repo`; the Claude plugin resolves them against invocation cwd. Prefer
 absolute paths or `~`. `--prepare-only` reads no credentials and calls no CLI.
-Qwen defaults to 1800 seconds per stage, Claude to 600, both to 900 seconds idle.
+All managed CLI reviews read `review.timeout` / `review.idle_timeout` from
+`~/.config/ai-anti/config.json`, defaulting to 1800/900 seconds per stage.
+Claude and Qoder defaults change from 600 to 1800 seconds; App Codex checks from 1200 to 1800.
+Missing/null fields use defaults; invalid values fail before launch, even with explicit overrides.
 Explicit overrides win; caps are 3600 seconds total and 900 idle. Model evidence
 and exact init matching do not prove endpoint-internal routing.
+
+Plan inventory and review each start a fresh budget; worst-case execution is 2×timeout. Output caps remain channel-specific. Future external CLI integrations must reuse the shared parser and bounded execution; arbitrary tools and native Opus subagents are not automatically timed.
 
 ```bash
 REVIEW_SOURCE=/absolute/path/to/ai-anti/adapters/codex/skills/claude-review/scripts/review.py
@@ -284,7 +289,7 @@ explicitly requests medium effort; other CLI versions stop at preflight. It reco
 Historical 0.160.0 formal plan and actual diff calls passed; 0.163.0 passed a synthetic two-stage plan check on 2026-10-20. The newer version has no verified business diff or full user-entry workflow. Large diffs can still remain silent for minutes;
 900/1800 seconds is the tested budget, not a latency guarantee. The macOS settings display a fixed executor for each supported combination; the CLI still supports explicit executor selection. See [verification and limits](docs/COMPATIBILITY.md).
 
-AIAnti settings use Codex CLI for Codex-led API reviews, Claude Code CLI for Claude-led API reviews, and Codex CLI for Claude-to-Codex reviews. The executor field is disabled. Legacy Codex API executor changes are staged and require an explicit save before checks can run. Anthropic and Responses URLs are stored independently, with only the active protocol shown. Codex checks confirm the requested model only; the server's actual model remains unknown. Synthetic API checks allow 1800 seconds, 900 seconds idle and 8 MiB output, with 1860/1900-second outer cleanup budgets and cancellation. DeepSeek's full workflow remains unverified.
+AIAnti settings use Codex CLI for Codex-led API reviews, Claude Code CLI for Claude-led API reviews, and Codex CLI for Claude-to-Codex reviews. The executor field is disabled. Legacy Codex API executor changes are staged and require an explicit save before checks can run. Anthropic and Responses URLs are stored independently, with only the active protocol shown. Codex checks confirm the requested model only; the server's actual model remains unknown. Synthetic checks use the same configurable budgets (default 1800 seconds total, 900 idle); idle can terminate first. API output remains capped at 8 MiB and Qoder at 2 MiB. Formal runners get total+60 seconds for cleanup; the app allows 3700 seconds to cover the maximum 3600+60, with cancellation. Extremely slow local preparation can still exceed the outer budget. DeepSeek's full workflow remains unverified.
 
 ## Configuration
 

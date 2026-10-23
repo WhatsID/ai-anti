@@ -22,7 +22,7 @@ description: qwen 插件评审通道:经 anthropic 兼容端点让用户配置�
 不当作「未配置」静默降档（防止配置写坏后悄悄换通道）。
 
 **调用方式**（Bash timeout 设 600000；超时会自动转后台，**转后台后必须主动查进度**，
-长时间零输出即判定卡死）：
+600000仅为工具等待/转后台阈值；由受限包装器按统一预算终止，不能在600秒自行终止）：
 
 ```bash
 QWEN_CONF=$(python3 - <<'PY'
@@ -78,16 +78,21 @@ sys.exit(3)
 PY
 ) || { echo "qwen 档不可用：凭证按查找顺序均缺失，报告主模型"; exit 3; }
 
+# 安装的命令是 symlink；从其源码解析共享包装器，不能按业务 cwd 猜路径。
+BOUNDED_REVIEW=$(python3 -c 'import os,pathlib; p=(pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()/"commands/qwen-review.md").resolve(); print(p.parents[3]/"adapters/codex/skills/claude-review/scripts/bounded_review.py")')
 env -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL \
   ANTHROPIC_BASE_URL="$QWEN_BASE_URL" \
   ANTHROPIC_AUTH_TOKEN="$TOKENPLAN_KEY" \
   ANTHROPIC_DEFAULT_SONNET_MODEL="$QWEN_MODEL" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="$QWEN_MODEL" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="$QWEN_MODEL" \
+  python3 "$BOUNDED_REVIEW" --log <scratchpad>/qwen_review.json --max-output-bytes 2097152 -- \
   claude -p "$(cat <scratchpad>/qwen_prompt.txt)" --model sonnet \
   --allowedTools "Read,Grep,Glob,Bash(git show *),Bash(git -C * show *),Bash(git diff *),Bash(git -C * diff *),Bash(git log *),Bash(git -C * log *),Bash(git status*),Bash(git branch*)" \
-  --output-format json < /dev/null > <scratchpad>/qwen_review.json 2>&1
+  --output-format json < /dev/null
 ```
+
+统一读取 `review.timeout` / `review.idle_timeout`，默认1800/900秒，上限3600/900；坏配置启动前拒绝。包装器进度写stderr，模型stdout/stderr仍合流直写结果文件，输出上限2MiB，无自动重试。
 
 要点：
 - **模型名必须走「档位别名 + 档位默认模型映射」，不能用 `ANTHROPIC_MODEL` 直传**
@@ -100,7 +105,7 @@ env -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL \
   示范过 `export ANTHROPIC_MODEL=…`，某台机器的 shell rc 导出它的概率不为零，一旦继承
   就会再次触发客户端校验。
 - **怎么判这一发成没成**（2026-08-18 立、2026-08-19 三态实测补全；防的是把成功误判成
-  失败而白白降档）。本命令是 `2>&1`，stdout 与 stderr **合流进同一个文件**，别按「分看
+  失败而白白降档）。本命令由包装器合并stdout/stderr，stdout 与 stderr **合流进同一个文件**，别按「分看
   两个流」去读。三种形态实测如下：
 
   | 形态 | 文件里有 JSON 吗 | `is_error` | 判读 |

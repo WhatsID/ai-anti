@@ -80,7 +80,7 @@ For the Claude executor, the init capability gate admits no plugins except the C
 The project governance document supplies `--scale`. A plan review performs two
 serial calls per round: an inventory call without the plan, then a fresh review
 call with the frozen plan and original inventory. Each call has its own timeout
-and bounded output (default 600 seconds total for Claude or 1800 for Qwen, 900 seconds without output,
+and bounded output (default 1800 seconds total, 900 seconds without output,
 2 MiB log per Claude call or 8 MiB per Qwen call; configure with `--timeout`, `--idle-timeout`,
 `--max-output-bytes`). The entry does not retry a failed call or silently fall back
 to another model. New material or a material change requires a new review round;
@@ -164,9 +164,8 @@ and counted in manifest/status/report separately from transport warnings. Raw lo
 remain unchanged; there are no aliases, automatic CLI restarts or extra model calls.
 Manifest/status record selected channel and configured/requested/CLI model; manifest
 records actual init model and effective limits. These fields do not prove endpoint-internal
-routing. Explicit resource overrides win; upper bounds remain 3600 seconds total,
-900 seconds idle, and 8 MiB output per call. The idle default is 900 seconds;
-explicit `--idle-timeout` values still take precedence within that cap. Qwen total defaults to 1800 seconds.
+routing. All channels use `review.timeout` / `review.idle_timeout` from the user config, default 1800/900 seconds. Invalid persisted values fail before overrides. Explicit resource overrides win; upper bounds remain 3600 seconds total,
+900 seconds idle, and 8 MiB output per call. Missing/null budget fields use defaults. Explicit `--idle-timeout` values take precedence within that cap. Idle may exceed total; whichever expires first terminates.
 
 
 ## Qwen Responses executor (explicit opt-in)
@@ -251,8 +250,8 @@ Both plan phases and frozen diff use ID-only materials. Qoder's original string
 tool response and top-level text blocks must independently match frozen bytes
 before normalization into the shared material audit. Every required block must
 be fully read before a unique successful final result; post-final events fail.
-Raw logs/hashes, timing, byte counts and credits are retained. Defaults are 600
-seconds total, 900 seconds idle and 2 MiB output per stage; total timeout wins.
+Raw logs/hashes, timing, byte counts and credits are retained. Defaults are 1800
+seconds total, 900 seconds idle and 2 MiB output per stage; whichever timeout expires first wins.
 Cleanup targets only the new process group: poll before TERM and after its grace,
 then KILL remaining descendants even if the leader exited. An EPERM race is
 retried only if polling newly reaps the leader; real permission failures remain

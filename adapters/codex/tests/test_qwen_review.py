@@ -16,6 +16,16 @@ class QwenReviewTests(thin.ThinReviewTests):
         self.write_config(self.qconfig)
         self.env['FAKE_ENV_AUDIT'] = '1'
 
+    def test_configured_limits_prepare_only(self):
+        config=json.loads(self.config.read_text())
+        config['review']={'timeout':234,'idle_timeout':56}
+        self.write_config(config)
+        r,out=self.run_review(extra=['--prepare-only'])
+        self.assertEqual(r.returncode,0,r.stderr)
+        self.assertEqual(self.manifest(out)['limits']['timeout'],234)
+        self.assertEqual(self.manifest(out)['limits']['idle_timeout'],56)
+        self.assertEqual(self.calls(),[])
+
     def test_qwen_plan_and_diff(self):
         for mode in ('plan', 'diff'):
             r, out = self.run_review(mode, fake='noise_repeat')
@@ -58,7 +68,7 @@ class QwenReviewTests(thin.ThinReviewTests):
     def test_explicit_channel_model_and_limits(self):
         r, out = self.run_review(extra=['--channel', 'claude'])
         self.assert_success(r, out)
-        self.assertEqual(self.manifest(out)['limits']['timeout'], 600)
+        self.assertEqual(self.manifest(out)['limits']['timeout'], 1800)
         self.assertEqual(self.manifest(out)['limits']['idle_timeout'], 900)
         self.assertEqual(self.manifest(out)['limits']['max_output_bytes'], 2 * 1024 * 1024)
         r, out = self.run_review(extra=['--max-output-bytes', str(2 * 1024 * 1024)])
