@@ -95,12 +95,13 @@ PY
 }
 
 assert_full_install() {
-  for name in codex-implement codex-review opus-review relay-mode; do
+  for name in codex-implement codex-review opus-review relay-mode problem-review; do
     check link_is "$C/commands/$name.md" "$CHECKOUT/adapters/claude-code/commands/$name.md"
   done
   check link_is "$C/commands/qwen-review.md" "$CHECKOUT/plugins/qwen/commands/qwen-review.md"
   check link_is "$C/agents/implementer.md" "$CHECKOUT/adapters/claude-code/agents/implementer.md"
   check link_is "$S/claude-review" "$CHECKOUT/adapters/codex/skills/claude-review"
+  check link_is "$S/problem-review" "$CHECKOUT/adapters/codex/skills/problem-review"
   check link_is "$S/codex-relay" "$CHECKOUT/adapters/codex/skills/codex-relay"
   check pyjson "$C/ai-anti.manifest.json" \
     'data["plugins"] == ["qwen"] and data["codex_skills"]["installed"] and data["hook"]["injected"]'
@@ -172,7 +173,7 @@ mkdir -p "$S"
 ln -s "$CHECKOUT/adapters/codex/skills/claude-review" "$S/claude-review"
 check inst --with-codex
 check link_is "$S/claude-review" "$CHECKOUT/adapters/codex/skills/claude-review"
-check pyjson "$C/ai-anti.manifest.json" "sum(l['component'] == 'codex' for l in data['links']) == 2"
+check pyjson "$C/ai-anti.manifest.json" "sum(l['component'] == 'codex' for l in data['links']) == 3"
 check inst --uninstall
 check test ! -e "$S/claude-review" -a ! -L "$S/claude-review"
 check test ! -L "$S/codex-relay"
@@ -244,10 +245,11 @@ check inst_from "$OLD" --with-hook --with-plugin qwen --with-codex
 mkdir -p "$(dirname "$NEW")"
 mv "$OLD" "$NEW"
 check inst_from "$NEW"
-for name in codex-implement codex-review opus-review relay-mode; do
+for name in codex-implement codex-review opus-review relay-mode problem-review; do
   check link_is "$C/commands/$name.md" "$NEW/adapters/claude-code/commands/$name.md"
 done
 check link_is "$C/commands/qwen-review.md" "$NEW/plugins/qwen/commands/qwen-review.md"
+check link_is "$S/problem-review" "$NEW/adapters/codex/skills/problem-review"
 check link_is "$S/codex-relay" "$NEW/adapters/codex/skills/codex-relay"
 NEW_PY=$(python3 -c 'import sys; print(repr(sys.argv[1]))' "$NEW")
 check pyjson "$C/ai-anti.manifest.json" "data['repo'] == $NEW_PY and all(l['target'].startswith($NEW_PY + '/') for l in data['links'])"

@@ -33,7 +33,23 @@ for index, (mid, material) in enumerate(registry['materials'].items()):
     item.update(status='completed', result={'content': [{'type': 'text', 'text': raw}], 'structured_content': None})
     emit(type='item.completed', item=item)
     if mode == 'duplicate': emit(type='item.completed', item=item)
-if mode != 'progress_only': emit(type='item.completed', item={'id': 'final', 'type': 'agent_message', 'text': 'FAKE REPORT 中文评审'})
+
+# Opt-in diagnostic fixture; existing plan/diff behavior remains unchanged.
+problem_prompt = next((arg for arg in sys.argv if 'Problem review stage: ' in arg), '')
+if problem_prompt:
+    problem_result = ('INDEPENDENT: candidate alternatives and missing checks' if
+                      'Problem review stage: independent' in problem_prompt else
+                      json.dumps({'assessment': 'partially_supported', 'findings': [
+                          {'id': 'F1', 'claim': 'Candidate cause', 'assessment': 'partially_supported',
+                           'evidence_ids': ['E1'], 'reason': 'Visible excerpt supports only part of the claim',
+                           'alternative': 'Another explanation remains', 'next_check': {
+                               'needed': 'Additional trace', 'purpose': 'Separate candidates',
+                               'distinguishing_observation': 'Observe a correlated event'}}],
+                          'coverage': 'Declared excerpts only', 'limitations': ['No production verification']}))
+    if os.environ.get('FAKE_PROBLEM_RESULT') and 'Problem review stage: review' in problem_prompt:
+        problem_result = os.environ['FAKE_PROBLEM_RESULT']
+
+if mode != 'progress_only': emit(type='item.completed', item={'id': 'final', 'type': 'agent_message', 'text': problem_result if problem_prompt else 'FAKE REPORT 中文评审'})
 if mode != 'no_terminal': emit(type='turn.completed', usage={'input_tokens': 1, 'output_tokens': 1})
 if mode == 'duplicate_terminal': emit(type='turn.completed')
 if mode == 'broken': print('{')

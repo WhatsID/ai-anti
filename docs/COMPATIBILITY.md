@@ -301,3 +301,26 @@ credits 2.715255756 / 4.346137296 / 5.057092842，合计 12.118485894。
 哈希、命令/agent 可见项及报告保留在本次外部验收记录。运行时版本尚未登记，
 因此保留一条预期的兼容清单不可用警告，登记后纯兼容检查已通过，无需再次付费调用。
 该有限合成样本不证明所有真实业务、未来版本或完整用户级接力可用。
+
+## Problem review entry (2026-10-23)
+
+The explicit `problem_review.py` entry reuses existing channel capability and protocol
+gates without changing their admitted CLI versions. Offline fixtures cover fresh
+independent/review stages for Claude, Qwen through Claude, Qwen through Codex
+Responses, and Qoder. These fixtures establish local orchestration and protocol
+behavior only; they are not live channel acceptance. Python 3.11 candidate testing
+is recorded in the implementation handoff; the 25 new behavior tests also passed
+on Python 3.9.6. The main model independently verified a real synthetic website
+problem-review run with Qoder CLI 1.1.74 / Kimi-K3: completed, zero warnings, and
+complete reads of all 3 independent-stage blocks and 5 review-stage blocks.
+The independent stage took 94.422 seconds (30,236 log bytes, 3.847712376 credits);
+the review stage took 57.826 seconds (40,125 log bytes, 3.218680926 credits).
+Both stages recorded zero read recoveries. Candidate fingerprints remained unchanged
+during acceptance; output hashes and the status/manifest seal were checked.
+
+The result was partially_supported with five findings: the proposed database cause
+lacked support, serial upstream calls fit the visible evidence better, and one
+sample was insufficient to establish root cause. This establishes a bounded real
+protocol run, not production diagnosis or repair. CLI identity does not prove
+backend routing. Live problem-review behavior on the other channels remains
+unverified; existing plan/diff live evidence does not establish it.

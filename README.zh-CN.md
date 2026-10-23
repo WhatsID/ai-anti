@@ -304,3 +304,9 @@ Qwen Responses 精确限定 0.160.0 或 0.163.0，两版本均登记通用集合
 密钥复用已有文件或存入受限明文 secrets.json，不是钥匙串；保存有指纹、备份与冲突检查，支持恢复上次保存。
 构建交付本地签名 `.app`，不自动安装/登录自启；Finder启动不依赖交互shell PATH，需要 Python3.11+ 和 CLI。
 功能边界、配置契约、历史证据与检测限制见 [产品说明](docs/MACOS_REVIEW_APP.md)。
+
+### 显式问题复核
+
+Codex 使用 `problem-review` skill，Claude Code 使用 `/problem-review`，以独立分析→结论复核
+两阶段审查已有问题分析，不要求 Git。两种入口都复用 `codex_relay.review_channel`。
+采集、补证、逐项裁决和人工确认修复由调用方负责。见[材料协议与接入示例](docs/PROBLEM_REVIEW.md)。

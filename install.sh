@@ -31,7 +31,7 @@ COMPAT="$REPO/compat.json"
 CODEX_HOME_DIR=${CODEX_HOME:-$HOME/.codex}
 CODEX_GLOBAL_MD="$REPO/adapters/codex/AGENTS.global.md"
 CODEX_ENTRY_META=""
-CODEX_SKILLS="claude-review codex-relay"
+CODEX_SKILLS="claude-review codex-relay problem-review"
 PY=${AI_ANTI_PYTHON:-python3}
 TAB=$(printf '\t')
 NL='
@@ -49,7 +49,7 @@ ai-anti 用户级安装器
   ./install.sh --without-hook       移除本工具注入的 SessionStart hook
   ./install.sh --with-plugin NAME   安装评审插件 plugins/NAME（可重复）
   ./install.sh --remove-plugin NAME 移除评审插件 NAME 的托管链接（可重复）
-  ./install.sh --with-codex         安装 Codex 用户入口及 skill（claude-review、codex-relay）
+  ./install.sh --with-codex         安装 Codex 用户入口及 skill（claude-review、codex-relay、problem-review）
   ./install.sh --without-codex      移除 Codex 入口自有块及 skill 托管链接
   ./install.sh --uninstall          按 manifest 精确卸载
   ./install.sh --status --project DIR  可选只读项目根/模式/基线诊断
@@ -589,10 +589,10 @@ check_sources() {
   "$PY" - "$REPO" "$1" "$MODE" <<'PY'
 import os, pathlib, stat, sys
 root = pathlib.Path(sys.argv[1])
-names = ["core/" + n + ".md" for n in ("WORKFLOW_ENTRY", "PLANNING", "DESIGN", "RETRO", "DEBUGGING", "TESTING", "REVIEW_PRINCIPLES", "CLI_DISCIPLINE")]
-names += ["adapters/claude-code/CLAUDE.global.md", "adapters/claude-code/agents/implementer.md", "adapters/claude-code/commands/codex-implement.md"]
+names = ["core/" + n + ".md" for n in ("WORKFLOW_ENTRY", "PLANNING", "DESIGN", "RETRO", "DEBUGGING", "TESTING", "PROBLEM_REVIEW", "REVIEW_PRINCIPLES", "CLI_DISCIPLINE")]
+names += ["adapters/claude-code/CLAUDE.global.md", "adapters/claude-code/agents/implementer.md", "adapters/claude-code/commands/codex-implement.md", "adapters/claude-code/commands/problem-review.md"]
 if sys.argv[2] == "1":
-    names += ["adapters/codex/AGENTS.global.md"] + ["adapters/codex/skills/" + n + "/SKILL.md" for n in ("claude-review", "codex-relay")]
+    names += ["adapters/codex/AGENTS.global.md"] + ["adapters/codex/skills/" + n + "/SKILL.md" for n in ("claude-review", "codex-relay", "problem-review")]
 errors = 0
 for name in names:
     path = root / name
@@ -1009,9 +1009,10 @@ if valid and data:
     entries = {n["path"]: n["target"] for n in data.get("links", [])}
     required = {os.path.join(claude, "agents/implementer.md"): os.path.join(repo, "adapters/claude-code/agents/implementer.md"),
                 os.path.join(claude, "commands/codex-implement.md"): os.path.join(repo, "adapters/claude-code/commands/codex-implement.md")}
+    required[os.path.join(claude, "commands/problem-review.md")] = os.path.join(repo, "adapters/claude-code/commands/problem-review.md")
     if data.get("codex_skills", {}).get("installed"):
         if data["codex_skills"].get("dir") != skills: error("Codex skill 目录与当前安装路径不一致")
-        for name in ("claude-review", "codex-relay"):
+        for name in ("claude-review", "codex-relay", "problem-review"):
             required[os.path.join(skills, name)] = os.path.join(repo, "adapters/codex/skills", name)
     for dest, want in required.items():
         if entries.get(dest) != want: error("托管路由未登记或目标错误：" + dest)

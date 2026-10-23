@@ -365,3 +365,10 @@ evidence, credentials and desktop recovery backups, installer writes and private
 ## License
 
 [Apache-2.0](LICENSE)
+
+### Explicit problem second opinions
+
+Use the `problem-review` Codex skill or Claude Code `/problem-review` command to
+review an existing analysis through two fresh stages, without requiring Git.
+Both use the existing `codex_relay.review_channel` configuration. Evidence collection
+and repair authorization stay with the caller. See [the bundle contract and examples](docs/PROBLEM_REVIEW.md).

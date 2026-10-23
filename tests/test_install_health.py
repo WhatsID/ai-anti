@@ -87,6 +87,19 @@ class HealthTests(unittest.TestCase):
         self.assertEqual(project, self.tree_snapshot(self.project))
         self.run_install('--uninstall')
 
+    def test_problem_review_managed_lifecycle_and_health(self):
+        self.run_install('--with-codex')
+        skill = self.home / '.agents/skills/problem-review'
+        command = self.home / '.claude/commands/problem-review.md'
+        self.assertTrue(skill.is_symlink())
+        self.assertTrue(command.is_symlink())
+        self.assertIn('状态：全部正常', self.status())
+        (self.repo / 'core/PROBLEM_REVIEW.md').unlink()
+        self.assertIn('PROBLEM_REVIEW.md', self.status())
+        self.run_install('--uninstall')
+        self.assertFalse(skill.is_symlink())
+        self.assertFalse(command.is_symlink())
+
     def test_source_preflight(self):
         path = self.repo / 'core/DEBUGGING.md'
         for kind in ('empty', 'bad-utf8', 'fifo', 'missing'):

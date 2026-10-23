@@ -36,8 +36,24 @@ for mid, raw in materials.items():
         'tool_use_id': 'call-' + mid,
         'content': raw if raw else '(' + tool + ' completed with no output)'}]},
         'tool_use_result': [{'type': 'text', 'text': raw}]})
+
+# Opt-in diagnostic fixture; existing plan/diff behavior remains unchanged.
+problem_prompt = next((arg for arg in sys.argv if 'Problem review stage: ' in arg), '')
+if problem_prompt:
+    problem_result = ('INDEPENDENT: candidate alternatives and missing checks' if
+                      'Problem review stage: independent' in problem_prompt else
+                      json.dumps({'assessment': 'partially_supported', 'findings': [
+                          {'id': 'F1', 'claim': 'Candidate cause', 'assessment': 'partially_supported',
+                           'evidence_ids': ['E1'], 'reason': 'Visible excerpt supports only part of the claim',
+                           'alternative': 'Another explanation remains', 'next_check': {
+                               'needed': 'Additional trace', 'purpose': 'Separate candidates',
+                               'distinguishing_observation': 'Observe a correlated event'}}],
+                          'coverage': 'Declared excerpts only', 'limitations': ['No production verification']}))
+    if os.environ.get('FAKE_PROBLEM_RESULT') and 'Problem review stage: review' in problem_prompt:
+        problem_result = os.environ['FAKE_PROBLEM_RESULT']
+
 events.append({'type': 'result', 'subtype': 'success', 'is_error': False,
                'permission_denials': [], 'stop_reason': 'end_turn',
-               'result': 'FAKE REPORT', 'total_credits': 0.25})
+               'result': problem_result if problem_prompt else 'FAKE REPORT', 'total_credits': 0.25})
 for event in events:
     print(json.dumps(event, ensure_ascii=False))

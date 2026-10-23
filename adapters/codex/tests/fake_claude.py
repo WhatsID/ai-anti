@@ -143,6 +143,28 @@ if mode == 'long_inventory' and root.name == 'inventory':
     result['result'] = 'x' * 2001
 if mode == 'overflow_inventory' and root.name == 'inventory':
     result['result'] = ('x' * 1000 + '\n') * 1000
+
+# Opt-in diagnostic fixture; existing plan/diff behavior remains unchanged.
+problem_prompt = next((arg for arg in sys.argv if 'Problem review stage: ' in arg), '')
+if problem_prompt:
+    problem_result = ('INDEPENDENT: candidate alternatives and missing checks' if
+                      'Problem review stage: independent' in problem_prompt else
+                      json.dumps({'assessment': 'partially_supported', 'findings': [
+                          {'id': 'F1', 'claim': 'Candidate cause', 'assessment': 'partially_supported',
+                           'evidence_ids': ['E1'], 'reason': 'Visible excerpt supports only part of the claim',
+                           'alternative': 'Another explanation remains', 'next_check': {
+                               'needed': 'Additional trace', 'purpose': 'Separate candidates',
+                               'distinguishing_observation': 'Observe a correlated event'}}],
+                          'coverage': 'Declared excerpts only', 'limitations': ['No production verification']}))
+    if os.environ.get('FAKE_PROBLEM_RESULT') and 'Problem review stage: review' in problem_prompt:
+        problem_result = os.environ['FAKE_PROBLEM_RESULT']
+
+if problem_prompt:
+    if 'Problem review stage: independent' in problem_prompt:
+        problem_result = os.environ.get('FAKE_PROBLEM_INDEPENDENT', problem_result)
+        if os.environ.get('FAKE_PROBLEM_MUTATE_ORIGIN'):
+            Path(os.environ['FAKE_PROBLEM_MUTATE_ORIGIN']).write_text('CHANGED AFTER FREEZE')
+    result['result'] = problem_result
 if mode == 'insufficient_quota':
     result.update(subtype='error_during_execution', is_error=True, result='insufficient_quota')
 if mode == 'missing_error':
