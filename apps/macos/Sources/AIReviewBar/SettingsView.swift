@@ -35,6 +35,11 @@ struct SettingsView: View {
     @State private var confirmRestore = false
     @State private var confirmRefresh = false
     private var isSolo: Bool { model.draft.mode == "solo" }
+    private var versionLabel: String {
+        guard let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
+              !version.isEmpty else { return "当前版本：开发版" }
+        return "当前版本：v\(version)"
+    }
     private var reviewModelID: String {
         model.draft.channel == "qoder" ? "kmodel_latest" : model.draft.channel == "codex" ? (model.draft.reviewerModel.isEmpty ? "CLI 默认" : model.draft.reviewerModel) : model.draft.qwenModel
     }
@@ -121,7 +126,8 @@ struct SettingsView: View {
                 Button("保存", action: model.save).buttonStyle(.borderedProminent).tint(.blue)
                     .disabled(model.busy || !model.loaded || !model.dirty)
             }.controlSize(.regular).fixedSize(horizontal: false, vertical: true)
-
+            Text(versionLabel).font(.caption).foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
         }.padding(20).frame(width: 740, height: 760)
         .disabled(model.busy && !model.checking)
         .alert("测试会消耗模型额度", isPresented: $confirmReal) {
