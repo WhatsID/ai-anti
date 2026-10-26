@@ -96,11 +96,11 @@ class CheckTests(unittest.TestCase):
         with patch('checks.discover', return_value='/usr/bin/true') as discover:
             checks.local(store, str(ROOT))
         self.assertEqual({c.args[0] for c in discover.call_args_list}, {'codex','qodercli'})
-        good = dict(status='completed',completed=True,mode='diff',channel='qoder',executor='qoder',wire_api='qoder-cli',requested_model='kimi-k3',actual_model='Kimi-K3')
+        good = dict(status='completed',completed=True,mode='diff',channel='qoder',executor='qoder',wire_api='qoder-cli',requested_model='kimi-k3.1-pro',actual_model='Kimi-K3.1-Pro')
         def fake_run(argv, cwd, log, **kwargs):
             if '--channel' in argv:
                 self.assertEqual(argv[argv.index('--channel')+1], 'qoder')
-                self.assertEqual(argv[argv.index('--model')+1], 'kimi-k3')
+                self.assertEqual(argv[argv.index('--model')+1], 'kimi-k3.1-pro')
                 self.assertEqual(argv[argv.index('--timeout')+1], '321')
                 self.assertEqual(argv[argv.index('--idle-timeout')+1], '45')
                 self.assertEqual(kwargs['timeout'], 381); self.assertEqual(kwargs['limit'], 2*1024*1024)
@@ -109,8 +109,8 @@ class CheckTests(unittest.TestCase):
                 for name in ('status','manifest'): (out/(name+'.json')).write_text(json.dumps(good))
             return 0
         with patch('checks.discover', return_value='/usr/bin/true'), patch('checks.run', side_effect=fake_run):
-            self.assertEqual(checks.real(store, str(ROOT))['actual_model'], 'Kimi-K3')
-        for key, bad in [('completed',False),('mode','plan'),('status','failed'),('channel','qwen'),('executor','codex'),('wire_api','responses'),('requested_model','other'),('actual_model','other')]:
+            self.assertEqual(checks.real(store, str(ROOT))['actual_model'], 'Kimi-K3.1-Pro')
+        for key, bad in [('completed',False),('mode','plan'),('status','failed'),('channel','qwen'),('executor','codex'),('wire_api','responses'),('requested_model','other'),('requested_model','kimi-k3'),('actual_model','other'),('actual_model','Kimi-K3'),('actual_model',None)]:
             for side in (0,1):
                 if (key == 'mode' and side == 0) or (key == 'completed' and side == 1): continue
                 pair = [dict(good),dict(good)]; pair[side][key] = bad

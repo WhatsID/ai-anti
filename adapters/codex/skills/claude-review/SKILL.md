@@ -228,16 +228,20 @@ that reasoning effort caused observed live silence, or that live latency is fixe
 
 ## Qoder subscription reviewer (explicit opt-in)
 
-Use `--channel qoder --model kimi-k3` with the formal `review.py plan|diff`
+Use `--channel qoder --model kimi-k3.1-pro` with the formal `review.py plan|diff`
 entry. Existing `codex_relay.review_channel=qoder` also selects it; no new user
 configuration keys are needed. Omitted `--model` defaults to `kmodel_latest`;
-only `kimi-k3` and `kmodel_latest` are accepted, both requesting CLI model
-`kmodel_latest`. Init and every assistant message must report exactly `Kimi-K3`.
+`kimi-k3.1-pro` is canonical; `kimi-k3` and `kmodel_latest` remain compatible
+input aliases. All three request CLI model
+`kmodel_latest`. Init and every assistant message must report exactly `Kimi-K3.1-Pro`; old `Kimi-K3` is rejected.
 These are CLI identity claims, not proof of internal backend routing. Qoder uses
 the existing subscription login; it neither reads Qwen credentials nor changes
 the user's Qoder default model or login configuration. No automatic fallback or retry.
 
-Only `qodercli` 1.1.74 is admitted. This version has verified hidden isolation flags;
+Only the explicit `qodercli` versions 1.1.74 and 1.1.77 are admitted.
+The 1.1.74 hidden isolation flags were previously verified; 1.1.77 passed
+formal bug-review two-stage acceptance with Kimi-K3.1-Pro. Its plan/diff paths
+have offline coverage only. For either admitted version,
 the runtime init must still show empty skills/plugins, `dontAsk`, and exactly one
 connected materials server and `mcp__materials__read_material` tool. Hook events,
 unknown execution tools, permission denials and mismatched models fail closed.

@@ -72,10 +72,12 @@ class ProblemReviewTests(unittest.TestCase):
         output=self.run_review('--channel','claude')
         self.assertEqual(json.loads((output / 'findings.json').read_text())['findings'][0]['evidence_ids'],['E1'])
     def test_qoder_fixture(self):
-        output=self.run_review('--channel','qoder')
-        manifest=json.loads((output / 'manifest.json').read_text())
-        self.assertEqual(set(manifest['stages']), {'independent','review'})
-        self.assertEqual(manifest['actual_model'],'Kimi-K3')
+        for version in ('1.1.74', '1.1.77'):
+            self.env.update(FAKE_VERSION=version, FAKE_INIT_VERSION=version)
+            output=self.run_review('--channel','qoder','--model','kimi-k3.1-pro')
+            manifest=json.loads((output / 'manifest.json').read_text())
+            self.assertEqual(set(manifest['stages']), {'independent','review'})
+            self.assertEqual(manifest['actual_model'],'Kimi-K3.1-Pro')
     def test_qwen_claude_and_codex_fixtures(self):
         self.config()
         for executor in ('claude','codex'):

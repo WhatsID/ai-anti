@@ -86,7 +86,7 @@ struct SettingsView: View {
                         SecureField("API 密钥", text: $model.draft.apiKeyInput).disabled(isSolo)
                         Text("Claude 与 Codex 共享当前 API 服务、模型及凭证；两个协议地址独立保存。切换服务保留各自草稿，未保存不写入磁盘。").font(.caption).foregroundStyle(.secondary)
                     } else {
-                        Text(model.draft.channel == "qoder" ? "使用现有 Qoder CLI 登录；登录状态未检测。当前固定 Kimi-K3；仅支持 Codex 主模型。" : "使用现有 Codex CLI 登录；登录状态未检测。").font(.caption).foregroundStyle(.secondary)
+                        Text(model.draft.channel == "qoder" ? "使用现有 Qoder CLI 登录；登录状态未检测。当前固定 Kimi-K3.1-Pro；仅支持 Codex 主模型。" : "使用现有 Codex CLI 登录；登录状态未检测。").font(.caption).foregroundStyle(.secondary)
                     }
                     if model.draft.host == "claude" { Text("Qoder 暂不支持 Claude 主模型。").font(.caption).foregroundStyle(.secondary) }
                     Picker("评审执行器", selection: .constant(model.draft.channel)) {

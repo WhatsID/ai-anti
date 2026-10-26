@@ -16,12 +16,12 @@ from review_materials import TOOL, read_material
 class QoderProtocolTests(materials.MaterialIds):
     def events(self):
         events = super().events()
-        events[0].update(model='Kimi-K3', qodercli_version='1.1.74', plugins=[],
+        events[0].update(model='Kimi-K3.1-Pro', qodercli_version='1.1.77', plugins=[],
                          slash_commands=['help'], agents=['Explore'])
         events[0]['mcp_servers'] = [{'name': 'materials', 'status': 'connected'}]
         for event in events:
             if event['type'] == 'assistant':
-                event['message']['model'] = 'Kimi-K3'
+                event['message']['model'] = 'Kimi-K3.1-Pro'
             if event['type'] == 'user':
                 raw = event['tool_use_result'][0]['text']
                 event['message']['content'][0]['content'] = raw or '(' + TOOL + ' completed with no output)'
@@ -31,8 +31,18 @@ class QoderProtocolTests(materials.MaterialIds):
     def check(self, events, code=0):
         self.log.write_text(''.join(json.dumps(e) + '\n' for e in events))
         return validate(self.log, code, 'kmodel_latest', self.stage,
-                        expected_model='Kimi-K3', required=[v['path'] for v in
+                        expected_model='Kimi-K3.1-Pro', required=[v['path'] for v in
                         self.registry['materials'].values()], registry=self.registry)
+
+    def test_explicit_versions_and_invalid_init_versions(self):
+        for version in ('1.1.74', '1.1.77'):
+            events = self.events(); events[0]['qodercli_version'] = version
+            self.assertEqual(self.check(events)['model'], 'Kimi-K3.1-Pro')
+        for version in (None, 1177, [], '1.1.78', '', '1.1.77\nnoise'):
+            events = self.events(); events[0]['qodercli_version'] = version
+            with self.subTest(version=version), self.assertRaises(RunError): self.check(events)
+        events = self.events(); del events[0]['qodercli_version']
+        with self.assertRaises(RunError): self.check(events)
 
     def test_raw_strings_empty_unicode_and_repeated_material(self):
         events = self.events()
@@ -67,7 +77,7 @@ class QoderProtocolTests(materials.MaterialIds):
 
     def test_init_model_tools_skills_plugins_hooks_and_order(self):
         cases = []
-        for key, value in [('model', 'Kimi-K3-extra'), ('tools', [TOOL, 'Read']),
+        for key, value in [('model', 'Kimi-K3'), ('model', 'Kimi-K3.1-Pro-extra'), ('tools', [TOOL, 'Read']),
                            ('skills', ['debug']), ('plugins', [{'name': 'builtin'}]),
                            ('mcp_servers', []), ('permissionMode', 'default'),
                            ('qodercli_version', '1.1.75'), ('agents', None)]:
@@ -76,7 +86,7 @@ class QoderProtocolTests(materials.MaterialIds):
             events = self.events(); events.insert(1, {'type': 'system', 'subtype': subtype}); cases.append(events)
         events = self.events(); events.insert(1, copy.deepcopy(events[0])); cases.append(events)
         events = self.events(); events[0], events[1] = events[1], events[0]; cases.append(events)
-        events = self.events(); events[1]['message']['model'] = 'Other'; cases.append(events)
+        events = self.events(); events[1]['message']['model'] = 'Kimi-K3'; cases.append(events)
         events = self.events(); del events[1]['message']['model']; cases.append(events)
         events = self.events(); events[1]['message']['role'] = 'user'; cases.append(events)
         events = self.events(); events[1]['message']['content'][0]['type'] = 'unknown'; cases.append(events)

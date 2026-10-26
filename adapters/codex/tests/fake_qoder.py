@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline Qoder 1.1.74 wire fixture; no live subscription access."""
+"""Offline Qoder wire fixture; no live subscription access."""
 import json
 import os
 from pathlib import Path
@@ -26,11 +26,12 @@ tool = 'mcp__materials__read_material'
 events = [{'type': 'system', 'subtype': 'init', 'tools': [tool],
            'mcp_servers': [{'name': 'materials', 'status': 'connected'}],
            'skills': [], 'plugins': [], 'permissionMode': 'dontAsk',
-           'qodercli_version': '1.1.74', 'model': 'Kimi-K3',
+           'qodercli_version': os.environ.get('FAKE_INIT_VERSION', os.environ.get('FAKE_VERSION', '1.1.74')),
+           'model': os.environ.get('FAKE_INIT_MODEL', 'Kimi-K3.1-Pro'),
            'slash_commands': ['help', 'review'], 'agents': ['Explore']},
           {'type': 'system', 'subtype': 'artifacts_update', 'artifacts': []}]
 for mid, raw in materials.items():
-    events.append({'type': 'assistant', 'message': {'model': 'Kimi-K3', 'content': [
+    events.append({'type': 'assistant', 'message': {'model': os.environ.get('FAKE_ASSISTANT_MODEL', 'Kimi-K3.1-Pro'), 'content': [
         {'type': 'tool_use', 'id': 'call-' + mid, 'name': tool, 'input': {'id': mid}}]}})
     events.append({'type': 'user', 'message': {'content': [{'type': 'tool_result',
         'tool_use_id': 'call-' + mid,

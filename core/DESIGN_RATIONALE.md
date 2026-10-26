@@ -427,3 +427,15 @@ completed 与根因成立分离；缺证据、派生材料、身份未知和第�
 功能仍是任意问题的通用复核，与上层业务领域解耦。内部 `problem_material.py`、
 `problem_result.py`、`mode=problem`、`problem_file` 和阶段标识保持不变，
 使既有 bundle 与 completed 首轮输出继续符合原协议；名称不对称是公开标识与持久化协议的边界。
+
+
+## 2026-10-26：Qoder 显式版本与精确模型身份
+
+真实 Qoder CLI 1.1.77 在版本预检被旧 1.1.74 单版本门禁拒绝；本次将启动预检与
+init 校验统一为显式集合 1.1.74 / 1.1.77，未知版本继续失败。CLI 自动升级与服务端
+`kmodel_latest` 模型漂移互相独立，关闭客户端自动更新不会固定服务端模型。
+用户明确选择 Kimi-K3.1-Pro，因此 init 与每条 assistant 只接受该精确身份。
+规范 alias `kimi-k3.1-pro` 与兼容输入 `kimi-k3`、`kmodel_latest` 都请求后者，
+不代表继续接受旧 Kimi-K3。其他协议、材料完整性及隔离守卫保持不变。
+主模型已在冻结候选上完成 1.1.77 / Kimi-K3.1-Pro 正式 bug-review 双阶段真实验收，
+随后登记兼容版本；1.1.77 plan/diff 仍仅离线覆盖，旧版历史实测不改写。

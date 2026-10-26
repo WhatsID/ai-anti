@@ -129,11 +129,11 @@ struct Draft: Equatable {
     }
     var reviewFamily: String { draft.service }
     var savedReviewFamily: String { saved.service }
-    var title: String { "\(saved.host == "claude" ? "Claude" : "Codex") → \(ReviewService.title(savedReviewFamily) + " · " + (saved.channel == "codex" ? (saved.reviewerModel.isEmpty ? "CLI 默认" : saved.reviewerModel) : saved.channel == "qoder" ? "Kimi-K3" : saved.qwenModel))" }
+    var title: String { "\(saved.host == "claude" ? "Claude" : "Codex") → \(ReviewService.title(savedReviewFamily) + " · " + (saved.channel == "codex" ? (saved.reviewerModel.isEmpty ? "CLI 默认" : saved.reviewerModel) : saved.channel == "qoder" ? "Kimi-K3.1-Pro" : saved.qwenModel))" }
     var primaryOptions: [ModelOption] { ModelCatalog.options(draft.host, preserving: [defaults[draft.host] ?? "", draft.host == saved.host ? saved.primaryModel : "", draft.primaryModel], emptyLabel: "保留当前默认值") }
     var secondaryOptions: [ModelOption] { ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定") }
     var reviewerOptions: [ModelOption] {
-        if draft.channel == "qoder" { return [ModelOption(id: "kmodel_latest", label: "Kimi-K3")] }
+        if draft.channel == "qoder" { return [ModelOption(id: "kmodel_latest", label: "Kimi-K3.1-Pro")] }
         if draft.channel == "codex" { return ModelCatalog.options("codex", preserving: [saved.reviewerModel, draft.reviewerModel], emptyLabel: "CLI 默认") }
         let ids = draft.activeAPI == "token_plan" ? ["qwen3.8-max", "deepseek-v4-pro"] : []
         var result = ids.map { ModelOption(id: $0, label: $0 == "qwen3.8-max" ? "Qwen3.8-Max" : "DeepSeek-V4-Pro") }

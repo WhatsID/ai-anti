@@ -32,11 +32,11 @@ def resolve(config, channel, model, repo, families, executor=None, responses_url
                 'cli_model': model, 'pattern': families[model]}
     if channel == 'qoder':
         model = 'kmodel_latest' if model is None else model
-        if model not in ('kimi-k3', 'kmodel_latest'):
-            raise ConfigError('Qoder supports only kimi-k3 or kmodel_latest (Kimi-K3)')
-        return {'channel': channel, 'requested_model': model, 'configured_model': 'Kimi-K3',
+        if model not in ('kimi-k3.1-pro', 'kimi-k3', 'kmodel_latest'):
+            raise ConfigError('Qoder supports only kimi-k3.1-pro, kimi-k3 or kmodel_latest (Kimi-K3.1-Pro)')
+        return {'channel': channel, 'requested_model': model, 'configured_model': 'Kimi-K3.1-Pro',
                 'cli_model': 'kmodel_latest', 'executor': 'qoder', 'wire_api': 'qoder-cli',
-                'pattern': re.compile(re.escape('Kimi-K3'))}
+                'pattern': re.compile(re.escape('Kimi-K3.1-Pro'))}
     if model is not None:
         raise ConfigError('Qwen rejects --model; configure plugins.qwen.model instead')
     model = single_line(lookup(config, 'plugins.qwen.model'), 'plugins.qwen.model')

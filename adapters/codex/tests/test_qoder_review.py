@@ -33,27 +33,29 @@ class QoderReviewTests(thin.ThinReviewTests):
         self.assertEqual(self.calls(),[])
 
     def test_formal_plan_diff_and_alias(self):
-        for mode in ('plan', 'diff'):
-            r, out = self.run_review(mode, extra=['--channel', 'qoder', '--model', 'kimi-k3'])
-            self.assert_success(r, out)
-            m = self.manifest(out)
-            for key, expected in {'channel': 'qoder', 'executor': 'qoder', 'wire_api': 'qoder-cli',
-                                  'requested_model': 'kimi-k3', 'configured_model': 'Kimi-K3',
-                                  'cli_model': 'kmodel_latest', 'actual_model': 'Kimi-K3',
-                                  'material_transport': 'material_ids'}.items():
-                self.assertEqual(m[key], expected)
-            self.assertEqual(m['limits'], {'timeout': 1800, 'idle_timeout': 900,
-                                          'max_output_bytes': 2 * 1024 * 1024})
-            self.assertEqual(len(m['stages']), 2 if mode == 'plan' else 1)
-            for stage in m['stages'].values():
-                self.assertEqual(stage['credits'], .25)
-                self.assertEqual(stage['read_recoveries'], [])
-                self.assertEqual(stage['visible_context']['agents'], ['Explore'])
-            if mode == 'plan':
-                calls = self.calls()[-2:]
-                self.assertNotIn('Handle zero denominator', ''.join(calls[0]['files'].values()))
-                self.assertIn('Handle zero denominator', ''.join(calls[1]['files'].values()))
-                self.assertIn('FAKE REPORT', ''.join(calls[1]['files'].values()))
+        for version in ('1.1.74', '1.1.77'):
+            for mode in ('plan', 'diff'):
+                r, out = self.run_review(mode, extra=['--channel', 'qoder', '--model', 'kimi-k3.1-pro'],
+                                         env_extra={'FAKE_VERSION': version, 'FAKE_INIT_VERSION': version})
+                self.assert_success(r, out)
+                m = self.manifest(out)
+                for key, expected in {'channel': 'qoder', 'executor': 'qoder', 'wire_api': 'qoder-cli',
+                                      'requested_model': 'kimi-k3.1-pro', 'configured_model': 'Kimi-K3.1-Pro',
+                                      'cli_model': 'kmodel_latest', 'actual_model': 'Kimi-K3.1-Pro',
+                                      'material_transport': 'material_ids'}.items():
+                    self.assertEqual(m[key], expected)
+                self.assertEqual(m['limits'], {'timeout': 1800, 'idle_timeout': 900,
+                                              'max_output_bytes': 2 * 1024 * 1024})
+                self.assertEqual(len(m['stages']), 2 if mode == 'plan' else 1)
+                for stage in m['stages'].values():
+                    self.assertEqual(stage['credits'], .25)
+                    self.assertEqual(stage['read_recoveries'], [])
+                    self.assertEqual(stage['visible_context']['agents'], ['Explore'])
+                if mode == 'plan':
+                    calls = self.calls()[-2:]
+                    self.assertNotIn('Handle zero denominator', ''.join(calls[0]['files'].values()))
+                    self.assertIn('Handle zero denominator', ''.join(calls[1]['files'].values()))
+                    self.assertIn('FAKE REPORT', ''.join(calls[1]['files'].values()))
 
     def test_verified_isolation_flags_and_environment(self):
         r, out = self.run_review(env_extra={'ANTHROPIC_API_KEY': 'wrong', 'OPENAI_API_KEY': 'wrong',
@@ -76,11 +78,11 @@ class QoderReviewTests(thin.ThinReviewTests):
         self.assertNotIn('SYNTHETIC_DO_NOT_LOG', self.audit.read_text())
 
     def test_model_validation_and_missing_cli(self):
-        for model in ('opus', 'auto', 'ultimate', 'Kimi-K3', ''):
+        for model in ('opus', 'auto', 'ultimate', 'Kimi-K3.1-Pro', ''):
             r, _ = self.run_review(extra=['--model', model, '--prepare-only'])
             self.assertNotEqual(r.returncode, 0)
             self.assertIn('Qoder supports only', r.stderr)
-        for alias in ('kimi-k3', 'kmodel_latest'):
+        for alias in ('kimi-k3.1-pro', 'kimi-k3', 'kmodel_latest'):
             r, out = self.run_review(extra=['--model', alias, '--prepare-only'])
             self.assert_success(r, out, 'prepared')
         for model in ('kimi-k3', ''):
@@ -92,8 +94,22 @@ class QoderReviewTests(thin.ThinReviewTests):
         self.assertNotEqual(r.returncode, 0)
         self.assertIn('qodercli not found on PATH', (out / 'status.json').read_text())
 
+    def test_supported_177_regression(self):
+        r, out = self.run_review(env_extra={'FAKE_VERSION': '1.1.77'})
+        self.assert_success(r, out)
+
+    def test_177_rejects_old_or_missing_model_and_unknown_init(self):
+        for field, values in {'FAKE_INIT_MODEL': ('Kimi-K3', 'Other', ''),
+                              'FAKE_ASSISTANT_MODEL': ('Kimi-K3', 'Other', ''),
+                              'FAKE_INIT_VERSION': ('1.1.78', '', 'noise 1.1.77')}.items():
+            for value in values:
+                with self.subTest(field=field, value=value):
+                    r, out = self.run_review(env_extra={'FAKE_VERSION': '1.1.77', field: value})
+                    self.assertNotEqual(r.returncode, 0)
+                    self.assertEqual(self.manifest(out)['status'], 'failed')
+
     def test_version_pin(self):
-        for version in ('1.1.75', 'noise 1.1.74', '1.1.74\nnoise'):
+        for version in ('', '1.1.75', '1.1.78', 'noise 1.1.74', '1.1.74\nnoise'):
             r, out = self.run_review(env_extra={'FAKE_VERSION': version})
             self.assertNotEqual(r.returncode, 0)
             self.assertIn('unsupported Qoder CLI version', (out / 'status.json').read_text())

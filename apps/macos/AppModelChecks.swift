@@ -110,6 +110,7 @@ import Combine
         model.discard(); assert(model.reviewFamily == "custom_api" && !model.dirty && model.draft.secret.isEmpty)
         model.switchReviewFamily("codex"); assert(model.draft.channel == "qwen", "Codex cannot review Codex")
         model.switchReviewFamily("qoder"); assert(model.draft.channel == "qoder" && model.reviewerOptions.first?.id == "kmodel_latest")
+        assert(model.reviewerOptions.first?.label == "Kimi-K3.1-Pro")
         model.discard()
         model.switchHost("claude"); assert(model.primaryOptions.contains { $0.id == "legacy-claude" })
         model.switchReviewFamily("qoder"); assert(model.draft.channel != "qoder")

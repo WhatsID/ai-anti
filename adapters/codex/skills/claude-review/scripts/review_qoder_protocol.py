@@ -1,10 +1,14 @@
-"""Qoder 1.1.74 evidence gates; never broaden Claude's wire protocol."""
+"""Explicit Qoder version evidence gates; never broaden Claude's wire protocol."""
 import copy
 import json
 from pathlib import Path
 
 from review_materials import MaterialAudit, TOOL, read_material
 from review_runner import RunError, blocks
+
+
+SUPPORTED_VERSIONS = ('1.1.74', '1.1.77')
+ACTUAL_MODEL = 'Kimi-K3.1-Pro'
 
 
 def validate(logfile, code, requested, cwd, families=None, expected_model=None,
@@ -36,8 +40,8 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None,
                     or event.get('mcp_servers') != [{'name': 'materials', 'status': 'connected'}]
                     or event.get('skills') != [] or event.get('plugins') != []
                     or event.get('permissionMode') != 'dontAsk'
-                    or event.get('qodercli_version') != '1.1.74'
-                    or event.get('model') != 'Kimi-K3'):
+                    or event.get('qodercli_version') not in SUPPORTED_VERSIONS
+                    or event.get('model') != ACTUAL_MODEL):
                 raise RunError('unsafe or missing Qoder init capability set')
             for key in ('slash_commands', 'agents'):
                 if not isinstance(event.get(key), list) or any(not isinstance(x, str) for x in event[key]):
@@ -66,7 +70,7 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None,
             raise RunError('unexpected Qoder message role')
         if kind == 'assistant':
             assistants += 1
-            if event['message'].get('model') != 'Kimi-K3':
+            if event['message'].get('model') != ACTUAL_MODEL:
                 raise RunError('unexpected assistant model')
         if any('is_error' in b and b['is_error'] is not False for b in event_blocks):
             raise RunError('incomplete material review: tool error')
@@ -89,9 +93,9 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None,
         raise RunError('nonzero CLI exit: ' + str(code))
     if init is None or final is None or not assistants:
         raise RunError('expected init, assistant and terminal result')
-    if requested != 'kmodel_latest' or expected_model != 'Kimi-K3':
+    if requested != 'kmodel_latest' or expected_model != ACTUAL_MODEL:
         raise RunError('unexpected requested Qoder model')
-    return {'model': 'Kimi-K3', 'result': final['result'], 'complete_reads': set(audit.complete),
+    return {'model': ACTUAL_MODEL, 'result': final['result'], 'complete_reads': set(audit.complete),
             'read_recoveries': [], 'read_recovery_count': 0, 'transport_warnings': [],
             'credits': final.get('total_credits'),
             'visible_context': {key: init[key] for key in ('slash_commands', 'agents')}}

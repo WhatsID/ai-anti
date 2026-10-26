@@ -16,6 +16,7 @@
 | Qwen 经 Claude CLI | Claude 2.1.280 | 正式 plan / scoped diff，含编号 MCP 正式增量；只支持记录中的模型与材料范围 |
 | Qwen Responses 经 Codex | Codex 0.160.0 | 正式 plan 与历史 scoped diff；`actual_model=null`、`model_evidence=requested_only` |
 | Qwen Responses 经 Codex | Codex 0.163.0 | 2026-10-20 合成 plan 两阶段；未验证新版业务 diff 或用户级入口全流程，模型证据仍为 requested_only |
+| Codex → Qoder | Qoder CLI 1.1.74 / 1.1.77，实际 Kimi-K3.1-Pro | 1.1.77 正式 bug-review 双阶段；新版 plan/diff 仅离线覆盖，旧版历史证据归属见下文 |
 | Codex 用户级入口 / 共享方法 | Codex 0.160.0 | 有限跨项目发现、隔离接力与方法样本；不是任意任务遵循保证 |
 | Claude 普通登录主导完整链路 | 待补验 | 历史 Login expired；Qwen bare 鉴权不能代替普通登录验收 |
 | DeepSeek | 历史端点 / 离线能力 | 不代表当前配置、桌面外部调用或完整接力通过 |
@@ -335,3 +336,30 @@ under the original name. This rename does not claim a second live model run.
 Internal `problem_*` modules, `mode=problem`, schema and stage markers are unchanged,
 so existing bundle and round-lineage protocols remain in place. Re-run the installer
 to migrate owned old links; user replacements remain outside installer ownership.
+
+
+## 2026-10-26 Qoder 1.1.77 / Kimi-K3.1-Pro 兼容验收
+
+启动预检与 init 共用显式准入集合 1.1.74 / 1.1.77，其他版本继续拒绝。
+规范 alias 为 `kimi-k3.1-pro`；`kimi-k3`、`kmodel_latest` 保留输入兼容，
+三者均请求服务端滚动路由 `kmodel_latest`，init 与每条 assistant 必须精确报告
+`Kimi-K3.1-Pro`，旧 `Kimi-K3` 不再满足当前门禁。CLI 版本固定与服务端模型
+漂移互相独立；这些身份是 CLI 报告，不证明供应方内部路由。此前旧模型实测记录
+保留原始身份，不追溯改写。1.1.74 的新身份方案评审使用任务临时精确模型适配
+工具副本完成，原始日志与工具边界独立留证。
+
+主模型在冻结正式候选上完成 CLI 1.1.77 的真实 `bug_review.py` 双阶段验收：
+`status=completed`，规范请求 alias、实际模型 `Kimi-K3.1-Pro`，independent / review
+分别完整校验 9 / 11 块材料，耗时 142.508 / 213.535 秒。每阶段总预算 1200 秒、
+idle 900 秒、输出上限 2 MiB；零读取恢复、零 transport warning，既有工具、
+skills/plugins/hooks、原文副本与终止序列门禁均通过。运行器与输入 bundle 哈希
+前后不变，status/manifest seal 已核对。原始证据保留于本机
+`qoder-177-compat-20261026/live-bug-review` 和 `live-acceptance.json`。
+
+调用时兼容表尚未登记新版，因此原 status 保留一条“不在 tested list”的预期警告；
+本次真实成功后才追加 `tested.qoder=1.1.77`，不改写成功或此前失败日志。
+主模型独立运行适配器 134、App backend 61、root 45、安装 shell 14 项及
+最终 66 条相对链接检查、Swift AppModelChecks，均通过；实施自测另完成 release App
+构建，产物只在临时目录，未安装或启动用户 App。
+1.1.77 的 plan/diff 仅离线覆盖；本次不证明桌面真实合成检测、所有业务根因、
+任意规模材料或未来版本可用。复核完成也不等于问题根因已确诊。

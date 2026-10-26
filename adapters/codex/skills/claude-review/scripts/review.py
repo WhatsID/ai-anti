@@ -131,7 +131,7 @@ def parser(families=None):
     result.add_argument("--qwen-executor", choices=("claude", "codex"))
     result.add_argument("--responses-base-url")
     result.add_argument("--model", default=None, help="Claude aliases: " +
-                        ','.join(sorted(families or MODEL_FAMILIES)) + "; Qoder: kimi-k3,kmodel_latest")
+                        ','.join(sorted(families or MODEL_FAMILIES)) + "; Qoder: kimi-k3.1-pro (aliases: kimi-k3,kmodel_latest)")
     result.add_argument("--timeout", type=int, default=None)
     result.add_argument("--idle-timeout", type=int, default=None)
     result.add_argument("--max-output-bytes", type=int, default=None)

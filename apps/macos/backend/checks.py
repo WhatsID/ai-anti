@@ -188,8 +188,8 @@ def qwen_evidence(status, manifest, values):
 def qoder_evidence(status, manifest):
     if status.get('completed') is not True or manifest.get('mode') != 'diff': raise ValueError()
     for item in (status, manifest):
-        if any(item.get(k) != v for k,v in dict(status='completed',channel='qoder',executor='qoder',wire_api='qoder-cli',requested_model='kimi-k3',actual_model='Kimi-K3').items()): raise ValueError()
-    return 'Kimi-K3'
+        if any(item.get(k) != v for k,v in dict(status='completed',channel='qoder',executor='qoder',wire_api='qoder-cli',requested_model='kimi-k3.1-pro',actual_model='Kimi-K3.1-Pro').items()): raise ValueError()
+    return 'Kimi-K3.1-Pro'
 
 def real(store, source=None, timeout=None):
     snapshot = store.read()
@@ -240,7 +240,7 @@ def real(store, source=None, timeout=None):
             import sys
             argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
                     '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
-                    '--out', str(out), '--channel', 'qoder', '--model', 'kimi-k3', '--timeout', str(timeout),
+                    '--out', str(out), '--channel', 'qoder', '--model', 'kimi-k3.1-pro', '--timeout', str(timeout),
                     '--idle-timeout', str(idle_timeout), '--max-output-bytes', str(2*1024*1024)]
             if run(argv, repo, temp / 'runner.log', timeout=timeout+60, limit=2*1024*1024, env=env) != 0:
                 raise CheckError('Qoder 正式入口检测失败；未自动重试或降级')

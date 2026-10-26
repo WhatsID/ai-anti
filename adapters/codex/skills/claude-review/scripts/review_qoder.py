@@ -4,7 +4,7 @@ import json
 import time
 
 from review_materials import load_registry, mcp_config, TOOL
-from review_qoder_protocol import validate
+from review_qoder_protocol import validate, SUPPORTED_VERSIONS
 from review_runner import execute, RunError
 
 SETTINGS = {'disableAllHooks': True, 'skills': {'enabled': False, 'disableShellExecution': True},
@@ -26,7 +26,7 @@ def capability(cli, out, env=None, material_config=None):
     code = execute([cli, '--version'], out, path, 20, 15, 65536, env=env)
     data = path.read_bytes()
     version = data.decode('utf-8').strip()
-    if code or version != '1.1.74':
+    if code or version not in SUPPORTED_VERSIONS:
         raise RunError('unsupported Qoder CLI version: ' + version)
     # Several verified isolation flags are hidden from --help. Runtime init gates
     # are authoritative; unknown versions cannot inherit this capability claim.

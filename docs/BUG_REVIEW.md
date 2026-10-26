@@ -8,12 +8,12 @@
 ```bash
 python3 /resolved/ai-anti/adapters/codex/skills/claude-review/scripts/bug_review.py \
   --bundle /absolute/problem-bundle --out /absolute/new-review-output \
-  --config-base /absolute/credential-base --channel qoder --model kimi-k3
+  --config-base /absolute/credential-base --channel qoder --model kimi-k3.1-pro
 ```
 
 默认通道是既有 `codex_relay.review_channel`（缺省 Claude），**不是** Claude 工作流的
 `review.channels`。可覆盖 `--channel claude|qwen|qoder`；Claude 支持既有模型别名，Qoder
-支持 kimi-k3/kmodel_latest，Qwen 模型来自现有配置且拒绝 --model。Qwen 的
+规范 alias 为 kimi-k3.1-pro；kimi-k3/kmodel_latest 保留输入兼容，均请求 kmodel_latest，且只接受实际模型 Kimi-K3.1-Pro。CLI 明确准入 1.1.74/1.1.77；1.1.77 + Kimi-K3.1-Pro 已完成真实双阶段验收（详见 [兼容记录](COMPATIBILITY.md)）。Qwen 模型来自现有配置且拒绝 --model。Qwen 的
 `--qwen-executor claude|codex`、`--responses-base-url` 与既有评审相同。
 `--config-base` 默认为调用 cwd，只用于相对凭证路径；它不授权读取该目录其他材料。
 无 Git 目录直接调用即可，不初始化仓库、不读取 HEAD。
