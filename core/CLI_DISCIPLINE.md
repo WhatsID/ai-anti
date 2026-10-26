@@ -30,3 +30,27 @@ CLI 评审统一读 `~/.config/ai-anti/config.json` 的 `review.timeout` /
 阶段预算包含 attempt 与 30/90 秒退避，通用 execute 与写命令不自动重试。plan两个阶段分别计时，
 最坏可达2×timeout。原生Opus子代理没有可控进程，不宣称受本配置强制计时。
 未来外部CLI适配必须复用共享配置解析与受限执行入口，任意外部工具不会自动受控。
+
+## Qoder 宿主联网权限
+
+2026-10-26 同一 Qoder 1.1.77 请求在受限宿主返回通用 CLI 500，沙箱外成功；
+DNS/TCP 对照支持环境差异，但没有内部栈证明首先失败的操作。事实依据见
+[DESIGN_RATIONALE.md](DESIGN_RATIONALE.md) 的同日 Qoder 网络记录。
+
+已知宿主联网受限时，**开始正式入口前**用宿主 `exec_command` 的
+`sandbox_permissions=require_escalated` 和具体 `justification` 申请本次命令：
+标明工作目录、模型、冻结材料、输出目录及联网用途。权限限本次授权范围，不能从
+诊断获批推断完整复核获批。CLI `--permission-mode dont_ask` 只是材料工具策略，
+不是宿主联网批准。不得用 sudo、删除 sandbox 参数、全局网络配置或子进程自动升级绕过批准。
+
+意外通用 500 先保留失败输出和 attempts，检查 `.network.json` 与宿主权限上下文。
+诊断仅观察固定 `center.qoder.sh` / `api3.qoder.sh` 的直接 DNS 和首个地址 TCP/443，
+不使用代理、凭证或 HTTP；它不能证明全部地址不可用、模型接口可用或 sandbox 已确诊。
+`environment_network_unavailable` 是此次直接探针观察；权限 errno 可支持申请升级，
+DNS 错误、超时或诊断失败本身不能确认沙箱原因，连通成功也不证明 CLI 500 来自上游。
+
+若需恢复，宿主权限申请须明确请求**完整的新逻辑运行**，指出此前失败及保留的证据、
+新输出目录和将重做的全部阶段；没有阶段续跑语义，先前成功阶段也会重做。
+批准只诊断不批准重启，批准拒绝或无法取得即停。不得自动包装失败入口、自动新建目录
+重启或额外套 shell 重试。显式获批的新完整运行保留 [MODEL_RETRY.md](MODEL_RETRY.md)
+的正常有限预算，不继承旧失败计数，也不强制 `--max-retries 0`。

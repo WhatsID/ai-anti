@@ -238,6 +238,11 @@ These are CLI identity claims, not proof of internal backend routing. Qoder uses
 the existing subscription login; it neither reads Qwen credentials nor changes
 the user's Qoder default model or login configuration. No automatic fallback; bounded stage retry follows same-source `core/MODEL_RETRY.md`.
 
+Before formal Qoder calls with known restricted host networking, follow same-source
+`core/CLI_DISCIPLINE.md` → “Qoder 宿主联网权限”. CLI `dont_ask` governs material tools,
+not host networking. Validated generic CLI 500 stops after one attempt with bounded
+diagnostic evidence; it does not prove upstream failure or authorize a restart.
+
 Only the explicit `qodercli` versions 1.1.74 and 1.1.77 are admitted.
 The 1.1.74 hidden isolation flags were previously verified; 1.1.77 passed
 formal bug-review two-stage acceptance with Kimi-K3.1-Pro. Its plan/diff paths

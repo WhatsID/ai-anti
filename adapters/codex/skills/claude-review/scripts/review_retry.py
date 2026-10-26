@@ -12,7 +12,7 @@ BACKOFF = (30, 90)
 CAPACITY = 'Selected model is at capacity. Please try a different model'
 
 
-def classify(error):
+def classify(error, source=None):
     """Only call with an error envelope established by a protocol validator."""
     if not isinstance(error, dict):
         return 'unknown_upstream'
@@ -28,6 +28,12 @@ def classify(error):
     types = [error.get(k) for k in ('type', 'code')]
     if any(x in ('server_error', 'internal_server_error', 'overloaded_error', 'rate_limit_error', 'temporary_capacity') for x in types):
         return 'retryable_upstream'
+    messages = [error.get('message')] + (error.get('errors') if isinstance(error.get('errors'), list) else [])
+    if source == 'qoder' and type(error.get('error_code')) is int and error['error_code'] == 500:
+        if (CAPACITY not in messages and not any(type(x) is int and x == 10500 for x in codes)
+                and not any(type(error.get(k)) is int and error[k] in (500, 502, 503, 504, 529)
+                            for k in ('status', 'status_code'))):
+            return 'ambiguous_model_error'
     if any(type(x) is int and x in (10500, 500, 502, 503, 504, 529) for x in codes):
         return 'retryable_upstream'
     messages = [error.get('message')] + (error.get('errors') if isinstance(error.get('errors'), list) else [])
@@ -36,9 +42,13 @@ def classify(error):
     return 'unknown_upstream'
 
 
-def upstream_error(error, code=None):
+def upstream_error(error, code=None, source=None):
     from review_runner import RunError
-    exc = RunError('model upstream failure (' + classify(error) + ')', classify(error))
+    kind = classify(error, source)
+    label = 'model CLI failure' if kind == 'ambiguous_model_error' else 'model upstream failure'
+    exc = RunError(label + ' (' + kind + ')', kind)
+    exc.error_source = source
+    exc.model_error = error
     exc.exit_code = code
     return exc
 
@@ -106,6 +116,9 @@ def retry(operation, logfile, timeout, max_retries=MAX_RETRIES, inputs=(), clock
                 record['kind'] = 'cancelled' if isinstance(exc, KeyboardInterrupt) else exc.kind
                 record['error'] = str(exc)
                 record['exit_code'] = getattr(exc, 'exit_code', None)
+                for field in ('error_source', 'model_error', 'network_diagnostic'):
+                    if hasattr(exc, field):
+                        record[field] = getattr(exc, field)
                 record.setdefault('finished_at', time.time())
                 record['log_sha256'] = hashlib.sha256(raw.read_bytes()).hexdigest() if raw.exists() else None
                 if record['kind'] != 'retryable_upstream' or index == max_retries:

@@ -40,7 +40,7 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None,
                 raise RunError('unexpected requested Qoder model')
             if synthetic is not None and synthetic not in event['errors']:
                 raise RunError('synthetic error does not match terminal')
-            raise upstream_error(event, code)
+            raise upstream_error(event, code, source='qoder')
         if synthetic is not None:
             raise RunError('synthetic assistant without matching terminal failure')
         if ('hook' in str(kind).lower() or 'hook' in str(subtype).lower()

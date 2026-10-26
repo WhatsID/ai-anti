@@ -34,6 +34,15 @@ rate_limit_error，已知结构化 HTTP 500/502/503/504/529，以及上述精确
 Qoder synthetic 仅可作为匹配失败 envelope，绝不是有效模型。非法 init/工具/材料或
 畸形流不能借尾部错误恢复；成功仍须完整材料读取及原有身份门禁。
 
+Qoder 合法失败 envelope 中的通用 `error_code=500` 若没有可信 typed transient、
+10500、精确 capacity 或结构化 HTTP status 来源，归 `ambiguous_model_error`，不重试；
+不改变其他通道分类。永久/配额与协议门禁仍优先。其他裸数字码的来源收紧另登记待办。
+只在此合法模糊 500 后收集一次独立子进程诊断：固定两主机 DNS/TCP443，最多10秒且
+不超过阶段剩余预算，输出64KiB，无凭证/HTTP，无 SDK/子进程重试。
+原始 CLI raw 不变；attempt 保存原 envelope、退出码、原分类和诊断 sidecar/hash。
+诊断失败或预算耗尽不覆盖原错误，网络观察不转换成可信上游故障。
+宿主权限及显式完整新运行边界见 [CLI_DISCIPLINE.md](CLI_DISCIPLINE.md#qoder-宿主联网权限)。
+
 固定原模型、通道、执行器、凭证环境和 prompt/材料。重试前验证输入快照及 registry；
 变化即停止。通用 execute、preflight、git 和任意写命令不隐式重试。readonly 直接命令
 必须显式指定协议和可核验输入路径；每 attempt raw 独立保存，成功正文独立提取。

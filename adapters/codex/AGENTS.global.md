@@ -16,3 +16,6 @@
 
 已激活的同任务阶段衔接，按同源 `core/WORKFLOW_CONTINUITY.md` 实际读取与执行；
 rules/auto 不按单阶段大小省略门禁。任务记录不是授权，plan-only 不自动实施。
+
+Qoder 正式调用前，已知宿主联网受限时按同源 `core/CLI_DISCIPLINE.md` 的
+「Qoder 宿主联网权限」节先申请执行权限；CLI 的 dont_ask 不代表宿主授权。
