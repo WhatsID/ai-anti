@@ -26,6 +26,7 @@ read-only`、`claude -p`）、容灾实施通道（`codex exec --sandbox workspa
 不是模型硬超时；转后台仍须监控，不在600秒自行提前终止。受 ai-anti 管理的外部
 CLI 评审统一读 `~/.config/ai-anti/config.json` 的 `review.timeout` /
 `review.idle_timeout`，缺失/null默认1800/900秒，上限3600/900秒，先到者终止。
-单次覆盖不能掩盖坏配置；输出上限仍按通道，失败不自动重试。plan两个阶段分别计时，
+单次覆盖不能掩盖坏配置；输出上限仍按通道；明确暂态模型失败依 [MODEL_RETRY.md](MODEL_RETRY.md) 有限重试。
+阶段预算包含 attempt 与 30/90 秒退避，通用 execute 与写命令不自动重试。plan两个阶段分别计时，
 最坏可达2×timeout。原生Opus子代理没有可控进程，不宣称受本配置强制计时。
 未来外部CLI适配必须复用共享配置解析与受限执行入口，任意外部工具不会自动受控。

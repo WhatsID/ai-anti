@@ -86,13 +86,17 @@ env -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL \
   ANTHROPIC_DEFAULT_SONNET_MODEL="$QWEN_MODEL" \
   ANTHROPIC_DEFAULT_OPUS_MODEL="$QWEN_MODEL" \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="$QWEN_MODEL" \
-  python3 "$BOUNDED_REVIEW" --log <scratchpad>/qwen_review.json --max-output-bytes 2097152 -- \
+  python3 "$BOUNDED_REVIEW" --log <scratchpad>/qwen_review.json --retry-protocol claude-json --report <scratchpad>/qwen_report.txt \
+  --input <scratchpad>/qwen_prompt.txt --input <declared-input-path> --max-output-bytes 2097152 -- \
   claude -p "$(cat <scratchpad>/qwen_prompt.txt)" --model sonnet \
   --allowedTools "Read,Grep,Glob,Bash(git show *),Bash(git -C * show *),Bash(git diff *),Bash(git -C * diff *),Bash(git log *),Bash(git -C * log *),Bash(git status*),Bash(git branch*)" \
   --output-format json < /dev/null
 ```
 
-统一读取 `review.timeout` / `review.idle_timeout`，默认1800/900秒，上限3600/900；坏配置启动前拒绝。包装器进度写stderr，模型stdout/stderr仍合流直写结果文件，输出上限2MiB，无自动重试。
+统一读取 `review.timeout` / `review.idle_timeout`，默认1800/900秒，上限3600/900；坏配置启动前拒绝。包装器进度写stderr，模型stdout/stderr仍合流直写结果文件，每 attempt 输出上限2MiB；先读取同源 `core/MODEL_RETRY.md`，显式协议仅按可信暂态错误有限重试。
+编排者将 `<declared-input-path>` 替换为 plan/request 与选定源码的精确路径，每个文件重复 `--input`；
+缺少可核验输入就停止，不声明含输出目录的整个 cwd。成功读取 `qwen_report.txt` 正文，
+保留 `qwen_review.json` 及 attempts raw 中的权限字段按下述 R10 规则判读。
 
 要点：
 - **模型名必须走「档位别名 + 档位默认模型映射」，不能用 `ANTHROPIC_MODEL` 直传**

@@ -293,15 +293,47 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None, 
         if not isinstance(event, dict):
             raise RunError('non-object stream event')
         kind = event.get('type')
+        if kind not in ('system', 'assistant', 'user', 'result'):
+            raise RunError('unknown stream event')
+        if kind == 'system' and event.get('subtype') != 'init':
+            raise RunError('unknown system event')
+        if kind != 'system' and not inits:
+            raise RunError('event before init')
+        if kind == 'assistant':
+            family = (MODEL_FAMILIES if families is None else families).get(requested)
+            actual = event.get('message', {}).get('model')
+            if actual is not None and (family is None or not isinstance(actual, str) or not family.fullmatch(actual)):
+                raise RunError('unexpected assistant model')
         if finals and kind in ('assistant', 'user', 'result'):
             raise RunError('unexpected content after terminal result')
         if kind == 'system' and event.get('subtype') == 'init':
             inits.append(event)
+            safe_tools = event.get('tools') == [TOOL] if audit is not None else set(event.get('tools', [])) == ALLOWED
+            safe_servers = (event.get('mcp_servers') == [{'name': 'materials', 'status': 'connected', 'source': 'dynamic'}]
+                            if audit is not None else event.get('mcp_servers') == [])
+            family = (MODEL_FAMILIES if families is None else families).get(requested)
+            if (len(inits) != 1 or not safe_tools or not safe_servers
+                    or not builtin_plugins_only(event.get('plugins')) or event.get('permissionMode') != 'dontAsk'
+                    or event.get('skills') != [] or event.get('slash_commands') != []):
+                raise RunError('unsafe or missing init capability set')
+            if family is None or not isinstance(event.get('model'), str) or not family.fullmatch(event['model']):
+                raise RunError('unexpected actual model: ' + str(event.get('model')))
         if kind == 'result':
+            if (event.get('is_error') is True and event.get('subtype') == 'error_during_execution'
+                    and not event.get('permission_denials') and len(inits) == 1
+                    and event is events[-1] and isinstance(event.get('errors'), list)
+                    and event['errors'] and all(isinstance(x, str) for x in event['errors'])):
+                from review_retry import upstream_error
+                raise upstream_error(event, code)
             finals.append(event)
         if event.get('is_error') or event.get('permission_denials') or event.get('subtype') == 'permission_denied':
             raise RunError('incomplete review: error or permission denial')
         event_blocks = blocks(event)
+        if kind in ('assistant', 'user'):
+            allowed = ('text', 'thinking', 'tool_use') if kind == 'assistant' else ('tool_result',)
+            if (not event_blocks or any(b.get('type') not in allowed for b in event_blocks)
+                    or event['message'].get('role', kind) != kind):
+                raise RunError('unexpected message block or role')
         if audit is not None:
             if any('is_error' in b and b['is_error'] is not False for b in event_blocks):
                 raise RunError('incomplete material review: tool error or malformed error flag')

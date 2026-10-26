@@ -22,6 +22,18 @@ mode = os.environ.get('FAKE_CODEX_MODE', '')
 def emit(**event): print(json.dumps(event, ensure_ascii=False), flush=True)
 emit(type='thread.started', thread_id='fixture-thread')
 emit(type='turn.started')
+
+# Fixture-only state; no production retry switches.
+if os.environ.get('FAKE_RETRY_STATE'):
+    state_path = Path(os.environ['FAKE_RETRY_STATE'])
+    counts = json.loads(state_path.read_text()) if state_path.exists() else {}
+    stage_name = Path.cwd().name
+    counts[stage_name] = counts.get(stage_name, 0) + 1
+    state_path.write_text(json.dumps(counts))
+    target = os.environ.get('FAKE_RETRY_STAGE', stage_name)
+    if stage_name == target and counts[stage_name] <= int(os.environ.get('FAKE_RETRY_FAILURES', '1')):
+        emit(type='turn.failed', error={'type':os.environ.get('FAKE_RETRY_ERROR', 'overloaded_error')}); sys.exit(1)
+
 emit(type='item.completed', item={'id': 'progress', 'type': 'agent_message', 'text': 'Progress only'})
 for index, (mid, material) in enumerate(registry['materials'].items()):
     if mode == 'missing' and index == 0: continue

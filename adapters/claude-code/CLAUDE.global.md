@@ -71,12 +71,12 @@
 
 ## 异常与边界
 
-- **implementer 因 API 故障中断的容灾阶梯**（仅针对 529/5xx/超时等 API 层故障；方案层面的卡点仍走第 4 步的修订重派规则）：
-  ①退避重试：恢复同一 implementer（SendMessage 续上下文，工作树增量进度天然保留），间隔按 5→15 分钟退避；累计中断满 3 次或阻塞超约 30 分钟进入下一级。
+- **implementer 因 API 故障中断的容灾阶梯**（先读取同源 `core/MODEL_RETRY.md`，仅针对其中明确可恢复的 API 故障；方案层面的卡点仍走第 4 步的修订重派规则）：
+  ①退避重试：恢复同一 implementer（SendMessage 续上下文，工作树增量进度天然保留），依 `core/MODEL_RETRY.md` 最多两次 30/90 秒恢复；先核对停止、单写者、HEAD/scope、部分改动与副作用。耗尽或不可恢复后才按既有授权进入下一级；用户固定模型时不得自动换模型或主模型接管。
   ②Codex 接手实施：`codex exec --sandbox workspace-write`（timeout 600000；提示词模板见 `adapters/claude-code/commands/codex-implement.md`），输入含方案文件路径、主模型按 git diff 整理的已完成/待完成清单、与 implementer 相同的硬边界。**该任务不再让 Codex 评审增量**（不能自己审自己），对抗性增量审查由主模型在终审中亲自承担；最终汇报标注「Codex 实施」。
   ③主模型亲自实施：Codex 也失败（调用错误、输出空/截断、或改动明显偏离方案）时，主模型直接完成剩余实施；汇报标注。
   全程不变：方案定稿与裁决权在主模型，终审、验证闸门、提交与授权边界照旧，同一时刻只允许一个实施者改动工作树。已知局限：Anthropic API 整体不可用时主模型自身也无法工作，此阶梯只解决「子代理请求撞上部分过载」的情形。
-- **评审通道降级阶梯**（通道顺序读用户配置 `review.channels`，缺省 `["codex", "same-family"]`；判定为失败的情形：调用失败、超时、输出为空或明显截断、配额耗尽；每档失败重试一次，确定性的配额耗尽不重试）：按通道顺序逐档尝试。**每档只报告本档成败，是否进入下一档由主模型按本顺序决定**；配置里写了未安装的插件、配置缺失或凭证缺失的通道，即判该档不可用，如实标注后直接降下一档。
+- **评审通道降级阶梯**（通道顺序读用户配置 `review.channels`，缺省 `["codex", "same-family"]`；判定为失败的情形：调用失败、超时、输出为空或明显截断、配额耗尽；各逻辑阶段依 `core/MODEL_RETRY.md` 有限重试，确定性配额耗尽、未知/协议/材料失败不重试）：按通道顺序逐档尝试。**每档只报告本档成败，是否进入下一档由主模型按本顺序决定**；配置里写了未安装的插件、配置缺失或凭证缺失的通道，即判该档不可用，如实标注后直接降下一档。
   - `codex`（内置跨模型档，缺省第一档）：`codex exec --sandbox read-only`，模板见 `adapters/claude-code/commands/codex-review.md`。
   - 插件档（跨模型，如 `qwen`；契约见 `docs/PLUGINS.md`，经 `install.sh --with-plugin <name>` 安装）：命令由插件提供，qwen 为 `/qwen-review`（经 anthropic 兼容端点做代理式只读评审，模板见 `plugins/qwen/commands/qwen-review.md`），评审纪律与 Codex 完全相同，汇报标注插件 `plugin.json` 的 `label`（qwen 为「qwen 评审」）。插件凭证按其模板的查找接口取用；全部缺失即判本档不可用，直接降下一档。
   - `same-family`（同族评审子代理档，2026-08-07 用户批准）：派 `adversarial-reviewer` 子代理（定义见 `adapters/claude-code/agents/adversarial-reviewer.md`，model opus + **effort max** + 只读工具白名单），编排模板见 `adapters/claude-code/commands/opus-review.md`；汇报必须标注「同族评审，非跨模型」。补偿条款、空上下文输入和独立复核要求见 `core/REVIEW_PRINCIPLES.md` R9，缺一即不算过评审；本档仍是受限例外，**无论在配置中排第几，都只在配置中的全部跨模型通道均不可用时启用**，不得作为默认；任一跨模型通道恢复即回到跨模型评审。

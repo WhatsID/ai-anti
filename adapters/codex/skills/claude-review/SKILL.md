@@ -48,7 +48,7 @@ adds existing read-only relative files inside the repository, never external abs
 paths or `..`; it must not overlap `--files`. These existence restrictions on planned
 additions apply to `plan`: `diff` still accepts actual new untracked files and actual
 deletions, and must retain the complete diff scope. Report failures under the user's
-stop-on-failure instruction; this guidance grants no automatic retry or external call.
+stop-on-failure instruction; this guidance grants no external call beyond the authorized entry; read same-source `core/MODEL_RETRY.md` for bounded transient retries.
 
 `--out` must
 be a new directory outside the reviewed repository, with an existing parent.
@@ -82,7 +82,7 @@ serial calls per round: an inventory call without the plan, then a fresh review
 call with the frozen plan and original inventory. Each call has its own timeout
 and bounded output (default 1800 seconds total, 900 seconds without output,
 2 MiB log per Claude call or 8 MiB per Qwen call; configure with `--timeout`, `--idle-timeout`,
-`--max-output-bytes`). The entry does not retry a failed call or silently fall back
+`--max-output-bytes`). The entry retries only validated transient stage failures under same-source `core/MODEL_RETRY.md` (30/90 seconds, at most two retries, shared stage budget); it does not silently fall back
 to another model. New material or a material change requires a new review round;
 the shared two-round limit still applies.
 
@@ -200,7 +200,7 @@ Same-user credential files under CODEX_HOME may remain readable; this is not
 filesystem credential isolation. Official Model Studio
 qwen3.8-max catalog metadata is narrowed to text review; unknown models use the
 CLI fallback with its exact warning. Global and per-tool output limits are explicit.
-No automatic retry or fallback occurs. Plan still has independent inventory and review.
+Only the shared stage wrapper retries trusted transient failures; no automatic fallback occurs. Plan still has independent inventory and review.
 
 Codex exec JSONL supplies no actual model identity: `actual_model=null` and
 `model_evidence=requested_only` are mandatory, and the report warns that server routing
@@ -236,7 +236,7 @@ input aliases. All three request CLI model
 `kmodel_latest`. Init and every assistant message must report exactly `Kimi-K3.1-Pro`; old `Kimi-K3` is rejected.
 These are CLI identity claims, not proof of internal backend routing. Qoder uses
 the existing subscription login; it neither reads Qwen credentials nor changes
-the user's Qoder default model or login configuration. No automatic fallback or retry.
+the user's Qoder default model or login configuration. No automatic fallback; bounded stage retry follows same-source `core/MODEL_RETRY.md`.
 
 Only the explicit `qodercli` versions 1.1.74 and 1.1.77 are admitted.
 The 1.1.74 hidden isolation flags were previously verified; 1.1.77 passed

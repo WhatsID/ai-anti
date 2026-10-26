@@ -152,7 +152,14 @@ returned agent ID when exposed (for example its session `turn_context.model`).
 Provider-internal routing that is not observable is `unknown`. If the model
 cannot be explicitly selected or its runtime model cannot be evidenced, or quota
 fails, stop and record `blocked`/`partial`: do not substitute a model, retry in a
-loop, or implement it in the primary. Explicit request plus evidence that an
+loop, or implement it in the primary. For explicitly recoverable host model failures,
+read same-source `core/MODEL_RETRY.md` and apply its bounded native reviewer/implementer
+recovery (30/90 seconds, at most two retries). Confirm the previous writer stopped,
+repo/root/branch/HEAD, scope, tracked/untracked partial diff and external side effects
+before continuing the same agent; retain completed work and tests. A replacement
+agent must keep the specified model and cumulative count. Unknown effects or concurrent
+changes stop recovery. Fixed models never authorize fallback or primary takeover.
+Native reviews retain R9 empty context; do not pass primary conclusions or prior bias. Explicit request plus evidence that an
 independent agent performed the work and runtime model metadata are required for
 the specified-secondary-model full-chain claim.
 

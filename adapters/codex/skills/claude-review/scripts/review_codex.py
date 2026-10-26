@@ -1,4 +1,4 @@
-"""Bounded Qwen Responses review via Codex CLI; no automatic retry/fallback."""
+"""Bounded Qwen Responses review via Codex CLI; stage retry is owned by review_retry; no fallback."""
 import hashlib
 import json
 import os

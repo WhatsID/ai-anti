@@ -15,6 +15,7 @@ from pathlib import Path
 from review_material import (MaterialError, diff_material, enforce_limit, full_git_metadata,
                              git_root, read_text, safe_out, selected, sha, validate_plan, write_snapshot)
 from review_runner import MODEL_FAMILIES, RunError, capability, run_stage
+from review_retry import stage_runner, attempt_summary
 from ai_anti_config import ConfigError, load as load_config, model_families, review_limits
 from review_channels import resolve, evidence, child_environment
 from review_chunks import chunk_stage, chunk_file, required_files, source_labels
@@ -133,6 +134,7 @@ def parser(families=None):
     result.add_argument("--model", default=None, help="Claude aliases: " +
                         ','.join(sorted(families or MODEL_FAMILIES)) + "; Qoder: kimi-k3.1-pro (aliases: kimi-k3,kmodel_latest)")
     result.add_argument("--timeout", type=int, default=None)
+    result.add_argument("--max-retries", type=int, choices=(0, 1, 2), default=2)
     result.add_argument("--idle-timeout", type=int, default=None)
     result.add_argument("--max-output-bytes", type=int, default=None)
     result.add_argument("--prepare-only", action="store_true")
@@ -281,6 +283,7 @@ def main():
         claude = shutil.which(executor)
         if not claude:
             raise RunError(executor + " not found on PATH")
+        stage_run = stage_runner(stage_run, args.max_retries)
         manifest["capabilities"] = preflight(claude, logs, env=env, material_config=mcp_config(initial_registry_path) if initial_registry_path else None)
         if codex_executor:
             warnings.extend(manifest["capabilities"].get("warnings", []))
@@ -334,13 +337,16 @@ def main():
         read_recoveries = {stage: item["read_recoveries"] for stage, item in manifest["stages"].items()}
         recovery_warnings = [stage + " 阶段已纠正 " + str(len(items)) + " 次 Read 缺文件错误"
                              for stage, items in read_recoveries.items() if items]
+        recovery_warnings += [stage + " 阶段经 " + str(item["retry_count"]) + " 次暂态重试后成功"
+                              for stage, item in manifest["stages"].items() if item.get("retry_count")]
         if warnings or recovery_warnings:
             report = "".join("> 警告：" + item + "\n" for item in warnings + recovery_warnings) + "\n" + report
         (output / "report.md").write_text(report, encoding="utf-8")
+        manifest["attempts"] = attempt_summary(logs)
         manifest.update({"status": "completed", "actual_model": second["model"], "exit_reason": "verified result", "finished_at": time.time()})
         write_json(output / "manifest.json", manifest)
         write_json(output / "status.json", {"status": "completed", "completed": True, "out": str(output),
-                                            "warnings": warnings, **evidence(channel), "actual_model": second["model"],
+                                            "attempts": attempt_summary(logs), "warnings": warnings, **evidence(channel), "actual_model": second["model"],
                                             "limits": manifest["limits"], "material_transport": manifest["material_transport"], "read_recoveries": read_recoveries,
                                             "read_recovery_counts": {stage: len(items) for stage, items in read_recoveries.items()}})
         print(output)
@@ -348,11 +354,12 @@ def main():
     except (MaterialError, RunError, OSError, ValueError, TypeError, KeyboardInterrupt) as exc:
         if output:
             if manifest:
+                manifest["attempts"] = attempt_summary(output / "logs")
                 manifest.update({"status": "failed", "exit_reason": str(exc), "finished_at": time.time()})
                 write_json(output / "manifest.json", manifest)
             write_json(output / "status.json", {"status": "failed", "completed": False, "error": str(exc),
                                                 "failure_kind": getattr(exc, "kind", "preparation_failed"),
-                                                "warnings": warnings, **evidence(channel)})
+                                                "attempts": attempt_summary(output / "logs"), "warnings": warnings, **evidence(channel)})
             print(output)
         else:
             print("review preparation failed: " + str(exc), file=sys.stderr)

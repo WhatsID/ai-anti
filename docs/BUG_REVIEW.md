@@ -58,7 +58,8 @@ evidence 可为空；每项的 id/file/source/locator/coverage 为非空字符�
 `--prepare-only` 不读凭证、不启动模型，只生成第一阶段提示词和 prepared 状态，第二阶段等待独立结果。
 每阶段独立限时：Claude/Qoder默认600秒、Qwen默认1800秒；idle默认900秒，输出默认2/8 MiB。
 可通过 --timeout/--idle-timeout/--max-output-bytes 设置，硬上限3600秒/900秒/8 MiB。
-失败保留状态/日志；不自动重试、降级或调用模型修格式。
+可信暂态故障依 [MODEL_RETRY.md](../core/MODEL_RETRY.md) 重试失败阶段最多两次，
+30/90 秒退避计入阶段预算；最终失败保留状态/日志，不降级或调用模型修格式。
 
 输出目录必须在 bundle 外且独占新建，父目录须已存在。先读 status.json，再读完整 report.md。
 manifest.json 是本次运行清单（区别于 bundle 输入清单），记录任务、轮次、通道身份、限额、来源、

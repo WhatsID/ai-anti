@@ -2,16 +2,16 @@
 import json
 from pathlib import Path
 from review_runner import RunError
+from review_retry import upstream_error
 from review_materials import load_registry, read_material
 
 
 def validate(logfile, code, requested, cwd, required, registry):
-    if code:
-        raise RunError('nonzero Codex CLI exit: ' + str(code))
     if Path(registry['root']).resolve() != Path(cwd).resolve() or set(required) != {x['path'] for x in registry['materials'].values()}:
         raise RunError('registry does not match stage requirements')
     thread = turn = terminal = False
     pending, seen, complete = {}, set(), set()
+    failure = None
     report = None
     warnings = []
     try:
@@ -78,6 +78,11 @@ def validate(logfile, code, requested, cwd, required, registry):
                         report = item['text']
                 else:
                     raise RunError('unexpected Codex item: ' + str(typ))
+            elif kind == 'turn.failed':
+                if not turn or not isinstance(event.get('error'), dict):
+                    raise RunError('invalid failed turn')
+                terminal = True
+                failure = upstream_error(event['error'], code)
             elif kind == 'turn.completed':
                 if not turn or pending or not report or set(required) - complete:
                     raise RunError('incomplete Codex review', 'incomplete_reads')
@@ -86,6 +91,10 @@ def validate(logfile, code, requested, cwd, required, registry):
                 raise RunError('unexpected Codex event: ' + str(kind))
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise RunError('truncated or malformed Codex JSONL') from exc
+    if failure is not None:
+        raise failure
+    if code:
+        raise RunError('nonzero Codex CLI exit: ' + str(code))
     if not terminal:
         raise RunError('missing terminal Codex result')
     return {'model': None, 'model_evidence': 'requested_only', 'result': report,

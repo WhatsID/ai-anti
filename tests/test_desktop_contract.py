@@ -105,8 +105,8 @@ class DesktopContract(unittest.TestCase):
         code=next(x for x in re.findall(r'```python\n(.*?)```',command,re.S) if 'model_args' in x)
         scratch=self.root/'scratch'; scratch.mkdir(); (scratch/'review_prompt.txt').write_text('synthetic prompt')
         store=Store(self.root); atomic(store.paths['ai'],b'{"review":{"codex_model":"gpt-6-astra"}}')
-        harness='from pathlib import Path\nai_anti_root=Path('+repr(str(ROOT))+')\nscratchpad=Path('+repr(str(scratch))+')\n'+code
-        fake=self.root/'codex'; fake.write_text('#!'+sys.executable+'\nimport sys,json\nprint(json.dumps(sys.argv[1:]))\n'); fake.chmod(0o700)
+        harness='from pathlib import Path\nreview_inputs=[]\nai_anti_root=Path('+repr(str(ROOT))+')\nscratchpad=Path('+repr(str(scratch))+')\n'+code
+        fake=self.root/'codex'; fake.write_text('#!'+sys.executable+'\nimport sys,json\nfor e in [{"type":"thread.started","thread_id":"fixture"},{"type":"turn.started"},{"type":"item.completed","item":{"id":"final","type":"agent_message","text":json.dumps(sys.argv[1:])}},{"type":"turn.completed"}]:print(json.dumps(e))\n'); fake.chmod(0o700)
         env=dict(self.env,PATH=str(self.root)+':/usr/bin:/bin')
         process=subprocess.run([sys.executable,'-c',harness],env=env,capture_output=True,text=True)
         self.assertEqual(process.returncode,0,process.stderr)
@@ -116,6 +116,8 @@ class DesktopContract(unittest.TestCase):
             process=subprocess.run([sys.executable,'-c',harness],env=env,capture_output=True,text=True)
             self.assertNotEqual(process.returncode,0)
         atomic(store.paths['ai'],b'{}')
+        for output_file in scratch.glob('review*'):
+            if output_file.name != 'review_prompt.txt': output_file.unlink()
         subprocess.run([sys.executable,'-c',harness],env=env,check=True)
         self.assertNotIn('--model',json.loads((scratch/'review_out.txt').read_text()))
     def test_qwen_formal_entry_prepare_contract(self):
@@ -159,16 +161,18 @@ class DesktopContract(unittest.TestCase):
         (commands/'qwen-review.md').symlink_to(ROOT/'plugins/qwen/commands/qwen-review.md')
         scratch=self.root/'scratch'; scratch.mkdir(); (scratch/'qwen_prompt.txt').write_text('offline prompt')
         fake=self.root/'claude'
-        fake.write_text('#!'+sys.executable+'\nimport os,sys,json\nassert sys.stdin.read()==""\nassert os.environ["ANTHROPIC_AUTH_TOKEN"]=="offline-fixture"\nassert "ANTHROPIC_API_KEY" not in os.environ\nassert os.environ["ANTHROPIC_DEFAULT_SONNET_MODEL"]=="fixture"\nprint(json.dumps({"argv":sys.argv[1:],"is_error":False}))\n')
+        fake.write_text('#!'+sys.executable+'\nimport os,sys,json\nassert sys.stdin.read()==""\nassert os.environ["ANTHROPIC_AUTH_TOKEN"]=="offline-fixture"\nassert "ANTHROPIC_API_KEY" not in os.environ\nassert os.environ["ANTHROPIC_DEFAULT_SONNET_MODEL"]=="fixture"\nprint(json.dumps({"type":"result","subtype":"success","result":"offline report","permission_denials":[],"argv":sys.argv[1:],"is_error":False}))\n')
         fake.chmod(0o700)
         env=dict(self.env,PATH=str(self.root)+':'+os.path.dirname(sys.executable)+':/usr/bin:/bin',CLAUDE_CONFIG_DIR=str(commands.parent),ANTHROPIC_API_KEY='must-remove')
         # Replace only the documented scratchpad placeholder, keeping the real template chain.
-        shell=shell.replace('<scratchpad>',str(scratch))
+        material=self.repo/'input.txt'; material.write_text('declared source')
+        shell=shell.replace('<scratchpad>',str(scratch)).replace('<declared-input-path>',str(material))
         run=subprocess.run(['bash','-c',shell],env=env,cwd=self.repo,capture_output=True,text=True,timeout=20)
         self.assertEqual(run.returncode,0,run.stderr)
         output=json.loads((scratch/'qwen_review.json').read_text())
         self.assertIn('offline prompt',output['argv']); self.assertIn('--allowedTools',output['argv'])
         self.assertIn('timeout=12 idle_timeout=7',run.stderr)
+        self.assertEqual((scratch/'qwen_report.txt').read_text(),'offline report')
 
     def test_qwen_command_credential_key_snippets(self):
         command = (ROOT/'plugins/qwen/commands/qwen-review.md').read_text()

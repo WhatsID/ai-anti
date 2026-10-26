@@ -4,7 +4,7 @@ description: 容灾用:Anthropic API 过载导致 implementer 无法工作时,�
 
 用 Codex CLI 接手实施。参数: $ARGUMENTS(方案文件路径,必填)。
 
-**前置**:仅在 `CLAUDE.global.md` 容灾阶梯第②级触发时使用——implementer 已按退避重试仍中断满 3 次或阻塞超约 30 分钟。调用前主模型先用 `git status --short` + `git diff --stat` 整理「已完成/待完成」清单,连同任务外文件列表(须原样保留的并行改动)一并写入提示词。
+**前置**:仅在 `CLAUDE.global.md` 容灾阶梯第②级触发时使用——implementer 已按同源 `core/MODEL_RETRY.md` 有限恢复耗尽或不可恢复，且既有授权允许本档（用户固定模型时不得自动换模型）。调用前主模型先用 `git status --short` + `git diff --stat` 整理「已完成/待完成」清单,连同任务外文件列表(须原样保留的并行改动)一并写入提示词。
 
 主模型从实际加载的 `CLAUDE.global.md` 定位真实机制根，读取适用共享方法，
 在下列提示词中填入 `DEBUGGING.md` / `TESTING.md` 的明确绝对路径。
@@ -22,3 +22,7 @@ codex exec --sandbox workspace-write "你是实施工程师,接手一个因故�
 - **亲自做对抗性增量审查**(该任务不再调用 `/codex-review diff`——Codex 不能自己审自己);
 - 复跑方案规定的全部验证;
 - 最终汇报中标注「Codex 实施」及接手范围。
+
+部分实施恢复必须先读取同源 `core/MODEL_RETRY.md`，核对停止、单写者、HEAD/scope、
+tracked/untracked 实际改动及外部副作用；保留部分进度，同模型续同 agent，累计次数不重置。
+写命令不由通用 execute 自动重试。

@@ -5,6 +5,7 @@ from pathlib import Path
 
 from review_materials import MaterialAudit, TOOL, read_material
 from review_runner import RunError, blocks
+from review_retry import upstream_error
 
 
 SUPPORTED_VERSIONS = ('1.1.74', '1.1.77')
@@ -22,12 +23,26 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None,
         raise RunError('truncated or malformed Qoder stream-json') from exc
     init = final = None
     assistants = 0
-    for event in events:
+    synthetic = None
+    for index, event in enumerate(events):
         if not isinstance(event, dict):
             raise RunError('non-object stream event')
         kind, subtype = event.get('type'), event.get('subtype', '')
         if final is not None:
             raise RunError('unexpected event after terminal result')
+        if (kind == 'result' and subtype == 'error_during_execution' and event.get('is_error') is True
+                and init is not None and event.get('permission_denials', []) == []
+                and not event.get('error')
+                and isinstance(event.get('errors'), list) and event['errors']
+                and all(isinstance(x, str) for x in event['errors'])
+                and index == len(events) - 1):
+            if requested != 'kmodel_latest' or expected_model != ACTUAL_MODEL:
+                raise RunError('unexpected requested Qoder model')
+            if synthetic is not None and synthetic not in event['errors']:
+                raise RunError('synthetic error does not match terminal')
+            raise upstream_error(event, code)
+        if synthetic is not None:
+            raise RunError('synthetic assistant without matching terminal failure')
         if ('hook' in str(kind).lower() or 'hook' in str(subtype).lower()
                 or event.get('is_error') or event.get('error')
                 or event.get('permission_denials') or subtype == 'permission_denied'):
@@ -90,6 +105,15 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None,
             raise RunError('unexpected Qoder message role')
         if kind == 'assistant':
             assistants += 1
+            if event['message'].get('model') == '<synthetic>':
+                if (len(event_blocks) != 1 or event_blocks[0].get('type') != 'text'
+                        or any('is_error' in b and b['is_error'] is not False for b in event_blocks)
+                        or not isinstance(event_blocks[0].get('text'), str)
+                        or event['message'].get('stop_reason') != 'stop_sequence'
+                        or index != len(events) - 2):
+                    raise RunError('unsupported synthetic failure envelope')
+                synthetic = event_blocks[0]['text']
+                continue
             if event['message'].get('model') != ACTUAL_MODEL:
                 raise RunError('unexpected assistant model')
         if any('is_error' in b and b['is_error'] is not False for b in event_blocks):

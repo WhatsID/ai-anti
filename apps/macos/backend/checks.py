@@ -229,7 +229,7 @@ def real(store, source=None, timeout=None):
             if effective_executor(v) == 'codex':
                 argv += ['--responses-base-url', v['responses_base_url']]
             if run(argv, repo, temp / 'runner.log', timeout=timeout+60, limit=8*1024*1024, env=env) != 0:
-                raise CheckError('Qwen 正式入口检测失败；日志已隐藏，未自动重试或降级')
+                raise CheckError('Qwen 正式入口检测失败；日志已隐藏，已按有限重试策略结束，未降级')
             try:
                 status = json.loads((out / 'status.json').read_text())
                 manifest = json.loads((out / 'manifest.json').read_text())
@@ -243,7 +243,7 @@ def real(store, source=None, timeout=None):
                     '--out', str(out), '--channel', 'qoder', '--model', 'kimi-k3.1-pro', '--timeout', str(timeout),
                     '--idle-timeout', str(idle_timeout), '--max-output-bytes', str(2*1024*1024)]
             if run(argv, repo, temp / 'runner.log', timeout=timeout+60, limit=2*1024*1024, env=env) != 0:
-                raise CheckError('Qoder 正式入口检测失败；未自动重试或降级')
+                raise CheckError('Qoder 正式入口检测失败；已按有限重试策略结束，未降级')
             try:
                 status = json.loads((out / 'status.json').read_text())
                 manifest = json.loads((out / 'manifest.json').read_text())

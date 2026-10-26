@@ -34,6 +34,42 @@ class QoderProtocolTests(materials.MaterialIds):
                         expected_model='Kimi-K3.1-Pro', required=[v['path'] for v in
                         self.registry['materials'].values()], registry=self.registry)
 
+    def test_retryable_terminal_after_safe_prefix(self):
+        events = self.events()[:-1]
+        events.append(dict(type='result', subtype='error_during_execution', is_error=True,
+                           error_code=10500, errors=['Internal server error.']))
+        with self.assertRaises(RunError) as caught:
+            self.check(events, code=1)
+        self.assertEqual(caught.exception.kind, 'retryable_upstream')
+
+    def test_bad_prefix_and_synthetic_cannot_borrow_terminal_error(self):
+        failure = dict(type='result', subtype='error_during_execution', is_error=True,
+                       error_code=10500, errors=['Internal server error.'], permission_denials=[])
+        prefix = self.events()[:-1]
+        synthetic = dict(type='assistant', message=dict(model='<synthetic>', stop_reason='stop_sequence',
+                         content=[dict(type='text', text='Internal server error.')]))
+        good = prefix + [synthetic, failure]
+        self.log.write_text(''.join(json.dumps(e) + '\n' for e in good))
+        with self.assertRaises(RunError) as caught:self.check(good,1)
+        self.assertEqual(caught.exception.kind, 'retryable_upstream')
+        cases=[]
+        for mutate in ('init', 'model', 'text', 'block_error', 'terminal_error', 'after', 'unknown'):
+            events=copy.deepcopy(good)
+            if mutate=='init':events[0]['tools'].append('Bash')
+            if mutate=='model':events[1]['message']['model']='other'
+            if mutate=='text':events[-2]['message']['content'][0]['text']='different'
+            if mutate=='block_error':events[-2]['message']['content'][0]['is_error']=True
+            if mutate=='terminal_error':events[-1]['error']={'type':'permission_denied'}
+            if mutate=='after':events.append(dict(type='system',subtype='artifacts_update',artifacts=[]))
+            if mutate=='unknown':events.insert(-2,dict(type='unknown'))
+            cases.append(events)
+        for events in cases:
+            with self.assertRaises(RunError) as caught:self.check(events,1)
+            self.assertNotEqual(caught.exception.kind,'retryable_upstream')
+        quota=copy.deepcopy(good);quota[-1]['errors']=['insufficient_quota'];quota[-2]['message']['content'][0]['text']='insufficient_quota'
+        with self.assertRaises(RunError) as caught:self.check(quota,1)
+        self.assertEqual(caught.exception.kind,'quota_exhausted')
+
     def queue(self, status='queued'):
         # Transport shape observed in the 1.1.77 failure; no business log content.
         return dict(type='system', subtype='model_queue_status', status=status,

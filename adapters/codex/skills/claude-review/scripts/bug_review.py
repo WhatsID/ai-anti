@@ -18,6 +18,7 @@ from review_channels import resolve, evidence, child_environment
 from review_chunks import chunk_file, required_files, source_labels
 from review_materials import build_registry, mcp_config
 from review_runner import MODEL_FAMILIES, RunError, capability, run_stage
+from review_retry import stage_runner, attempt_summary
 
 ROOT = Path(__file__).resolve().parents[5]
 
@@ -40,6 +41,7 @@ def parser():
     p.add_argument('--qwen-executor', choices=('claude', 'codex'))
     p.add_argument('--responses-base-url')
     p.add_argument('--timeout', type=int)
+    p.add_argument('--max-retries', type=int, choices=(0, 1, 2), default=2)
     p.add_argument('--idle-timeout', type=int, default=900)
     p.add_argument('--max-output-bytes', type=int)
     p.add_argument('--round', type=int, choices=(1, 2), default=1)
@@ -151,6 +153,7 @@ def main():
         cli = shutil.which(executor)
         if not cli:
             raise RunError(executor + ' not found on PATH')
+        runner = stage_runner(runner, args.max_retries)
         manifest['capabilities'] = preflight(cli, logs, env=env, material_config=mcp_config(initial_registry) if initial_registry else None)
         warnings.extend(manifest['capabilities'].get('warnings', []))
         manifest['cli_version'] = manifest['capabilities']['cli_version']
@@ -191,26 +194,30 @@ def main():
         identity = {**evidence(channel), 'actual_model': result['model']}
         warnings.extend(name + ' 阶段纠正 Read 缺文件错误：' + str(len(item.get('read_recoveries', [])))
                         for name, item in manifest['stages'].items() if item.get('read_recoveries'))
+        warnings.extend(name + ' 阶段经 ' + str(item['retry_count']) + ' 次暂态重试后成功'
+                        for name, item in manifest['stages'].items() if item.get('retry_count'))
         warning_text = ''.join('> 警告：' + warning + '\n' for warning in warnings)
         (output / 'report.md').write_text(warning_text + report(findings, independent, identity, source_manifest), encoding='utf-8')
+        manifest['attempts'] = attempt_summary(logs)
         manifest.update(status='completed', actual_model=result['model'], finished_at=time.time(),
                         exit_reason='verified protocol result; not proof of root cause')
         manifest['output_hashes'] = {name: sha((output / name).read_bytes()) for name in
                                      ('findings.json', 'report.md', 'independent.md', 'review.raw.txt')}
         write_json(output / 'manifest.json', manifest)
         write_json(output / 'status.json', {'status': 'completed', 'completed': True, **identity,
-                    'warnings': warnings, 'limits': manifest['limits'],
+                    'attempts': attempt_summary(logs), 'warnings': warnings, 'limits': manifest['limits'],
                     'manifest_sha256': sha((output / 'manifest.json').read_bytes())})
         print(output)
         return 0
     except (MaterialError, ConfigError, RunError, OSError, ValueError, TypeError, KeyError, KeyboardInterrupt) as exc:
         if output:
             if manifest:
+                manifest["attempts"] = attempt_summary(output / "logs")
                 manifest.update(status='failed', exit_reason=str(exc), finished_at=time.time())
                 write_json(output / 'manifest.json', manifest)
             write_json(output / 'status.json', {'status': 'failed', 'completed': False,
                 'error': str(exc), 'failure_kind': getattr(exc, 'kind', 'preparation_failed'),
-                'warnings': warnings, **(evidence(channel) if channel else {})})
+                'attempts': attempt_summary(output / 'logs'), 'warnings': warnings, **(evidence(channel) if channel else {})})
             print(output)
         else:
             print('bug review preparation failed: ' + str(exc), file=sys.stderr)

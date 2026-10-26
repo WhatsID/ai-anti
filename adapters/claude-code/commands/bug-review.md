@@ -13,7 +13,7 @@ python3 /resolved/ai-anti/adapters/codex/skills/claude-review/scripts/bug_review
 
 与 Codex skill 使用同一编排器，默认读取 codex_relay.review_channel，**不是 review.channels**。
 可显式 --channel claude|qwen|qoder；--config-base 默认 cwd，仅解析相对凭证路径，不授权读取业务目录。
-不需要 Git。prepare-only 不读凭证、不启动模型。失败不自动重试或降级。
+不需要 Git。prepare-only 不读凭证、不启动模型。先读取同源 `core/MODEL_RETRY.md`，可信暂态故障仅重试失败阶段最多两次；最终失败不由上层再次重发或降级。
 先读 status.json，再完整读取报告和原始输出。逐条按证据采纳/待验证/驳回；
 completed 是协议成功，supported 是可见材料支持，不是根因已证实或已修复。
 核对主模型与实际评审模型；同模型、未知或 requested_only 必须披露身份边界。

@@ -78,6 +78,18 @@ if mode != 'no_init':
           'tools': (['mcp__materials__read_material'] if qwen else ['Read', 'Glob', 'Grep']) + (['Bash'] if mode == 'extra_tool' else []),
           'plugins': plugins, 'mcp_servers': ([{'name': 'materials', 'status': 'connected', 'source': 'dynamic'}] if qwen else []) + ([{'name': 'extra'}] if mode == 'extra_mcp' else []),
           'permissionMode': 'dontAsk', 'skills': [], 'slash_commands': [], 'cwd': str(root)})
+# Fixture-only state; no production retry switches.
+if os.environ.get('FAKE_RETRY_STATE'):
+    state_path = Path(os.environ['FAKE_RETRY_STATE'])
+    counts = json.loads(state_path.read_text()) if state_path.exists() else {}
+    stage_name = Path.cwd().name
+    counts[stage_name] = counts.get(stage_name, 0) + 1
+    state_path.write_text(json.dumps(counts))
+    target = os.environ.get('FAKE_RETRY_STAGE', stage_name)
+    if stage_name == target and counts[stage_name] <= int(os.environ.get('FAKE_RETRY_FAILURES', '1')):
+        emit({'type':'result','subtype':'error_during_execution','is_error':True,'permission_denials':[], 'errors':[os.environ.get('FAKE_RETRY_ERROR', 'Selected model is at capacity. Please try a different model')]}); sys.exit(1)
+
+
 for i, (name, content) in enumerate(files.items()):
     if mode.startswith('recover_') and i == 0:
         for attempt in range(int(mode.rsplit('_', 1)[1])):
