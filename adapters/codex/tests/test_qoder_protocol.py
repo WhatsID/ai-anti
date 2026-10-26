@@ -10,7 +10,9 @@ SCRIPTS = Path(__file__).resolve().parents[1] / 'skills/claude-review/scripts'
 sys.path.insert(0, str(SCRIPTS))
 from review_qoder_protocol import validate
 from review_runner import RunError, validate as claude_validate
-from review_materials import TOOL, read_material
+from review_materials import TOOL, read_material, build_registry
+from review_chunks import chunk_stage
+from review_material import MaterialError
 
 
 class QoderProtocolTests(materials.MaterialIds):
@@ -140,6 +142,66 @@ class QoderProtocolTests(materials.MaterialIds):
         pair[1]['message']['content'][0]['tool_use_id'] = 'again'
         events[-1:-1] = pair
         self.assertEqual(len(self.check(events)['complete_reads']), 2)
+
+    def material_events(self, raw):
+        # Freeze an independent byte sample, then derive ordinary read envelopes.
+        self.stage = self.root / ('sample-' + str(len(list(self.root.glob('sample-*')))))
+        self.stage.mkdir()
+        (self.stage / 'unicode.txt').write_bytes('中文\n\n'.encode('utf-8'))
+        (self.stage / 'empty.txt').write_bytes(b'')
+        (self.stage / 'sample.txt').write_bytes(raw.encode('utf-8'))
+        self.registry = build_registry(self.stage, chunk_stage(self.stage), self.path)
+        events = self.events()
+        result = next(e for e in events if e.get('type') == 'user'
+                      and e['tool_use_result'] == [{'type': 'text', 'text': raw}])
+        return events, result
+
+    def test_lf_only_wrapper_and_direct_raw(self):
+        wrapper = '(' + TOOL + ' completed with no output)'
+        for raw in ('\n', '\n\n'):
+            events, result = self.material_events(raw)
+            for version in ('1.1.74', '1.1.77'):
+                events[0]['qodercli_version'] = version
+                self.assertEqual(len(self.check(events)['complete_reads']), 3)
+            result['message']['content'][0]['content'] = wrapper
+            self.assertEqual(len(self.check(events)['complete_reads']), 3)
+            events[0]['qodercli_version'] = '1.1.74'
+            with self.assertRaises(RunError): self.check(events)
+
+    def test_no_output_wrapper_excludes_other_whitespace(self):
+        wrapper = '(' + TOOL + ' completed with no output)'
+        for raw in ('text', ' ', '\t', '\r', '\r\n', '\n ', '\n\t', '\u00a0', '\u2003', '\u2028'):
+            with self.subTest(raw=raw):
+                events, result = self.material_events(raw)
+                self.check(events)  # Exact direct delivery remains valid.
+                result['message']['content'][0]['content'] = wrapper
+                with self.assertRaises(RunError): self.check(events)
+
+    def test_lf_wrapper_preserves_both_envelopes_and_audit(self):
+        events, result = self.material_events('\n')
+        wrapper = '(' + TOOL + ' completed with no output)'
+        result['message']['content'][0]['content'] = wrapper
+        index = events.index(result)
+        for top in (None, [], [{'type': 'text', 'text': ''}],
+                    [{'type': 'text', 'text': '\n\n'}],
+                    [{'type': 'text', 'text': '\n'}, {'type': 'text', 'text': ''}]):
+            changed = copy.deepcopy(events)
+            if top is None: del changed[index]['tool_use_result']
+            else: changed[index]['tool_use_result'] = top
+            with self.subTest(top=top), self.assertRaises(RunError): self.check(changed)
+        for message in (wrapper + ' ', wrapper + '\n', '', '\n\n'):
+            changed = copy.deepcopy(events)
+            changed[index]['message']['content'][0]['content'] = message
+            with self.subTest(message=message), self.assertRaises(RunError): self.check(changed)
+        changed = copy.deepcopy(events); del changed[index - 1:index + 1]
+        with self.assertRaises(RunError): self.check(changed)
+        changed = copy.deepcopy(events); changed.insert(index + 1, copy.deepcopy(result))
+        with self.assertRaises(RunError): self.check(changed)
+        self.check(events)
+        mid = events[index - 1]['message']['content'][0]['input']['id']
+        target = self.stage / self.registry['materials'][mid]['path']
+        target.write_bytes(b'X')  # Same byte count, different frozen hash.
+        with self.assertRaises(MaterialError): self.check(events)
 
     def test_raw_text_copies_are_checked_before_normalizing(self):
         events = self.events()

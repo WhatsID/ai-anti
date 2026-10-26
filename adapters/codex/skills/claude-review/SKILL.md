@@ -257,7 +257,12 @@ skills and setting sources are disabled, with an explicit read-only system promp
 
 Both plan phases and frozen diff use ID-only materials. Qoder's original string
 tool response and top-level text blocks must independently match frozen bytes
-before normalization into the shared material audit. Every required block must
+before normalization into the shared material audit. The existing empty-material
+no-output wrapper remains accepted. Only 1.1.77 may also use that exact wrapper
+for nonempty LF-only material; the top-level text blocks must still equal the
+original frozen text, and size/hash checks remain unchanged. Spaces, tabs, CR and
+Unicode whitespace receive no exception. This transport case has offline regression
+and original-log replay coverage only. Every required block must
 be fully read before a unique successful final result; post-final events fail.
 Raw logs/hashes, timing, byte counts and credits are retained. Defaults are 1800
 seconds total, 900 seconds idle and 2 MiB output per stage; whichever timeout expires first wins.

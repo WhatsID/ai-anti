@@ -127,9 +127,14 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None,
                     raise RunError('unmatched or duplicate tool result')
                 raw = read_material(registry, audit.pending[uid])
                 expected = [{'type': 'text', 'text': raw}]
-                message = '(' + TOOL + ' completed with no output)' if raw == '' else raw
+                wrapper = '(' + TOOL + ' completed with no output)'
+                message = wrapper if raw == '' else raw
+                message_matches = block.get('content') == message
+                if (init['qodercli_version'] == '1.1.77' and raw
+                        and raw.replace('\n', '') == '' and block.get('content') == wrapper):
+                    message_matches = True
                 # Verify BOTH raw envelopes before normalization. Never replace forged text.
-                if block.get('content') != message or event.get('tool_use_result') != expected:
+                if not message_matches or event.get('tool_use_result') != expected:
                     raise RunError('material text does not match frozen snapshot')
                 block['content'] = expected
         audit.consume(normalized, normalized_blocks)
