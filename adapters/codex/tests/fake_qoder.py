@@ -30,6 +30,15 @@ events = [{'type': 'system', 'subtype': 'init', 'tools': [tool],
            'model': os.environ.get('FAKE_INIT_MODEL', 'Kimi-K3.1-Pro'),
            'slash_commands': ['help', 'review'], 'agents': ['Explore']},
           {'type': 'system', 'subtype': 'artifacts_update', 'artifacts': []}]
+if os.environ.get('FAKE_QODER_QUEUE'):
+    events[0]['session_id'] = 'fixture-session'
+    def queue(status, request):
+        return dict(type='system', subtype='model_queue_status', status=status,
+                    request_id=request, request_set_id='fixture-set', model_key='kmodel_latest',
+                    queue_type='p0', queue_count=0, wait_time_ms=0, queue_wait_elapsed_ms=0,
+                    queue_max_wait_ms=3600000, service_available=True, uuid='fixture-' + request,
+                    session_id='fixture-session')
+    events.extend([queue('queued', 'first'), queue('queued', 'second')])
 for mid, raw in materials.items():
     events.append({'type': 'assistant', 'message': {'model': os.environ.get('FAKE_ASSISTANT_MODEL', 'Kimi-K3.1-Pro'), 'content': [
         {'type': 'tool_use', 'id': 'call-' + mid, 'name': tool, 'input': {'id': mid}}]}})
@@ -37,6 +46,9 @@ for mid, raw in materials.items():
         'tool_use_id': 'call-' + mid,
         'content': raw if raw else '(' + tool + ' completed with no output)'}]},
         'tool_use_result': [{'type': 'text', 'text': raw}]})
+
+if os.environ.get('FAKE_QODER_QUEUE'):
+    events.append(queue('ready', 'third'))
 
 # Opt-in diagnostic fixture; existing plan/diff behavior remains unchanged.
 problem_prompt = next((arg for arg in sys.argv if 'Problem review stage: ' in arg), '')

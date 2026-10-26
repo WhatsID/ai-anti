@@ -51,6 +51,26 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None,
             raise RunError('event before Qoder init')
         if kind == 'system' and subtype == 'artifacts_update' and event.get('artifacts') == []:
             continue
+        if kind == 'system' and subtype == 'model_queue_status':
+            fields = {'type', 'subtype', 'status', 'request_id', 'request_set_id',
+                      'model_key', 'queue_type', 'queue_count', 'wait_time_ms',
+                      'queue_wait_elapsed_ms', 'queue_max_wait_ms', 'service_available',
+                      'uuid', 'session_id'}
+            if (init['qodercli_version'] != '1.1.77' or set(event) != fields
+                    or event.get('status') not in ('queued', 'ready')
+                    or event.get('model_key') != 'kmodel_latest'
+                    or event.get('queue_type') != 'p0'
+                    or event.get('service_available') is not True):
+                raise RunError('unsupported or malformed Qoder queue notification')
+            for key in ('queue_count', 'wait_time_ms', 'queue_wait_elapsed_ms', 'queue_max_wait_ms'):
+                if type(event[key]) is not int or event[key] < 0:
+                    raise RunError('malformed Qoder queue count or time')
+            for key in ('request_id', 'request_set_id', 'uuid', 'session_id'):
+                if not isinstance(event[key], str) or not event[key].strip():
+                    raise RunError('malformed Qoder queue identifier')
+            if event['session_id'] != init.get('session_id'):
+                raise RunError('Qoder queue session does not match init')
+            continue
         if kind == 'result':
             if (event.get('subtype') != 'success' or event.get('is_error') is not False
                     or event.get('permission_denials') != [] or event.get('stop_reason') != 'end_turn'

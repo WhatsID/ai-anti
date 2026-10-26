@@ -34,6 +34,58 @@ class QoderProtocolTests(materials.MaterialIds):
                         expected_model='Kimi-K3.1-Pro', required=[v['path'] for v in
                         self.registry['materials'].values()], registry=self.registry)
 
+    def queue(self, status='queued'):
+        # Transport shape observed in the 1.1.77 failure; no business log content.
+        return dict(type='system', subtype='model_queue_status', status=status,
+                    request_id='request-a', request_set_id='set-a', model_key='kmodel_latest',
+                    queue_type='p0', queue_count=0, wait_time_ms=0, queue_wait_elapsed_ms=0,
+                    queue_max_wait_ms=3600000, service_available=True, uuid='event-a',
+                    session_id='session-a')
+
+    def queued_events(self):
+        events = self.events()
+        events[0]['session_id'] = 'session-a'
+        events.insert(1, self.queue())
+        ready = self.queue('ready'); ready['request_id'] = 'request-b'
+        events.insert(4, ready)  # Between material reads; no pairing requirement.
+        events.insert(-1, self.queue())
+        return events
+
+    def test_queue_notifications_preserve_material_reads(self):
+        self.assertEqual(len(self.check(self.queued_events())['complete_reads']), 2)
+
+    def test_queue_shape_version_session_and_original_guards(self):
+        cases = []
+        for key in self.queue():
+            events = self.queued_events(); del events[1][key]; cases.append(events)
+        for key, value in [('status', 'waiting'), ('type', 'notice'), ('model_key', 'other'),
+                           ('queue_type', 'p1'), ('service_available', False),
+                           ('service_available', 1), ('session_id', 'other'),
+                           ('error', 'failed'), ('is_error', True),
+                           ('permission_denials', ['Read']), ('payload', {})]:
+            events = self.queued_events(); events[1][key] = value; cases.append(events)
+        for key in ('queue_count', 'wait_time_ms', 'queue_wait_elapsed_ms', 'queue_max_wait_ms'):
+            for value in (True, -1, '0', 0.0, None):
+                events = self.queued_events(); events[1][key] = value; cases.append(events)
+        for key in ('request_id', 'request_set_id', 'uuid', 'session_id'):
+            for value in ('', '  ', 1, None):
+                events = self.queued_events(); events[1][key] = value; cases.append(events)
+        for version in ('1.1.74',):
+            events = self.queued_events(); events[0]['qodercli_version'] = version; cases.append(events)
+        for value in ('', None, 1):
+            events = self.queued_events(); events[0]['session_id'] = value; cases.append(events)
+        events = self.queued_events(); del events[0]['session_id']; cases.append(events)
+        events = self.queued_events(); events.insert(0, events.pop(1)); cases.append(events)
+        events = self.queued_events(); events.append(self.queue()); cases.append(events)
+        events = self.queued_events(); events.insert(2, copy.deepcopy(events[0])); cases.append(events)
+        events = self.queued_events(); events.insert(2, dict(type='system', subtype='hook_started')); cases.append(events)
+        events = self.queued_events(); del events[2:4]; cases.append(events)  # Missing material.
+        events = self.queued_events(); events[2]['message']['model'] = 'Other'; cases.append(events)
+        events = self.queued_events(); events.pop(); cases.append(events)
+        for events in cases:
+            with self.subTest(events=events[:3]), self.assertRaises(RunError): self.check(events)
+        with self.assertRaises(RunError): self.check(self.queued_events(), code=1)
+
     def test_explicit_versions_and_invalid_init_versions(self):
         for version in ('1.1.74', '1.1.77'):
             events = self.events(); events[0]['qodercli_version'] = version

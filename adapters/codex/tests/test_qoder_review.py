@@ -33,10 +33,11 @@ class QoderReviewTests(thin.ThinReviewTests):
         self.assertEqual(self.calls(),[])
 
     def test_formal_plan_diff_and_alias(self):
-        for version in ('1.1.74', '1.1.77'):
+        for version, queue in (('1.1.74', ''), ('1.1.77', ''), ('1.1.77', '1')):
             for mode in ('plan', 'diff'):
                 r, out = self.run_review(mode, extra=['--channel', 'qoder', '--model', 'kimi-k3.1-pro'],
-                                         env_extra={'FAKE_VERSION': version, 'FAKE_INIT_VERSION': version})
+                                         env_extra={'FAKE_VERSION': version, 'FAKE_INIT_VERSION': version,
+                                                    'FAKE_QODER_QUEUE': queue})
                 self.assert_success(r, out)
                 m = self.manifest(out)
                 for key, expected in {'channel': 'qoder', 'executor': 'qoder', 'wire_api': 'qoder-cli',

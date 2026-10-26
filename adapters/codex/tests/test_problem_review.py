@@ -72,12 +72,30 @@ class ProblemReviewTests(unittest.TestCase):
         output=self.run_review('--channel','claude')
         self.assertEqual(json.loads((output / 'findings.json').read_text())['findings'][0]['evidence_ids'],['E1'])
     def test_qoder_fixture(self):
-        for version in ('1.1.74', '1.1.77'):
-            self.env.update(FAKE_VERSION=version, FAKE_INIT_VERSION=version)
+        for version, queue in (('1.1.74', ''), ('1.1.77', ''), ('1.1.77', '1')):
+            self.env.update(FAKE_VERSION=version, FAKE_INIT_VERSION=version, FAKE_QODER_QUEUE=queue)
             output=self.run_review('--channel','qoder','--model','kimi-k3.1-pro')
             manifest=json.loads((output / 'manifest.json').read_text())
             self.assertEqual(set(manifest['stages']), {'independent','review'})
             self.assertEqual(manifest['actual_model'],'Kimi-K3.1-Pro')
+            self.assertEqual(json.loads((output / 'status.json').read_text())['status'], 'completed')
+            calls=[json.loads(line) for line in self.audit.read_text().splitlines()][-2:]
+            self.assertNotIn('ANALYSIS-SECRET', ''.join(calls[0]['files'].values()))
+            self.assertIn('ANALYSIS-SECRET', ''.join(calls[1]['files'].values()))
+            self.assertIn((output / 'independent.md').read_text(), ''.join(calls[1]['files'].values()))
+            if queue:
+                for stage in ('independent', 'review'):
+                    raw=(output / ('logs/' + stage + '.jsonl')).read_text()
+                    self.assertIn('model_queue_status', raw)
+
+    def test_qoder_queue_failure_stops_before_second_stage(self):
+        self.env.update(FAKE_VERSION='1.1.74', FAKE_QODER_QUEUE='1')
+        output=self.run_review('--channel','qoder','--model','kimi-k3.1-pro',success=False)
+        self.assertEqual(len(self.audit.read_text().splitlines()), 1)
+        self.assertEqual(json.loads((output / 'status.json').read_text())['status'], 'failed')
+        self.assertFalse((output / 'logs/review.jsonl').exists())
+        self.assertIn('model_queue_status', (output / 'logs/independent.jsonl').read_text())
+
     def test_qwen_claude_and_codex_fixtures(self):
         self.config()
         for executor in ('claude','codex'):
