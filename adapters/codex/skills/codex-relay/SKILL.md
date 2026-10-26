@@ -84,6 +84,19 @@ Explicit relay requests do not grant implementation authority. `solo` remains
 primary-only and is reported as partial, never a complete relay.
 `desktop.primary_host` is an editor preference, not executor or permission evidence.
 
+## Activated workflow continuation
+
+For the same task activated by a loaded trusted skill or project workflow, read
+`root/core/WORKFLOW_CONTINUITY.md`. Required stages are not omitted for small
+steps under rules/auto/force; existing solo and explicit skip priority remains.
+A plan-only request runs plan preparation, actual plan review and adjudication,
+then stops before implementation. Review completion grants no implementation authority.
+On later explicit implementation authorization, read original artifacts and verify
+review/adjudication and the baseline gates above. Reuse a still-valid plan/review
+and resume at implementation; do not repeat investigation or review unconditionally.
+Material changes follow R6. A workflow record describes state, never authorization.
+Primary independent acceptance remains required; another external review is optional.
+
 ## Review and adjudicate
 
 When the plan relies on shared method text that the reviewer needs to inspect,

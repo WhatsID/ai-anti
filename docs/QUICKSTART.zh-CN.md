@@ -69,6 +69,8 @@ cd ~/ai-anti
 `adapters/claude-code/CLAUDE.global.md` 或 `adapters/codex/AGENTS.global.md`，
 以及 `core/WORKFLOW_ENTRY.md`。这一步只检查入口发现，不等于完整接力验收。
 
+可信 skill / 项目规则已激活的同任务流程按阶段延续，rules/auto 不因后续一步很小而省略必需门禁，见 [Bug 三句用法](BUG_REVIEW.md)。
+
 ## 4. 完成第一个小任务
 
 选择非生产项目中的一处明确文案错误，例如：

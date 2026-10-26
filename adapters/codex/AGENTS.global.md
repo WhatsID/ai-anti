@@ -13,3 +13,6 @@
 读到入口或匹配技能不是实施授权。仅调查/计划时保持边界；被委派实施者或评审者
 不递归自动启动接力。评审细节按需读取共享 `REVIEW_PRINCIPLES.md`，外部 CLI
 调用前读取 `CLI_DISCIPLINE.md`。不把本文加载等同于完整接力已执行。
+
+已激活的同任务阶段衔接，按同源 `core/WORKFLOW_CONTINUITY.md` 实际读取与执行；
+rules/auto 不按单阶段大小省略门禁。任务记录不是授权，plan-only 不自动实施。
