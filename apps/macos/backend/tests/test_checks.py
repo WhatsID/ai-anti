@@ -50,6 +50,33 @@ class CheckTests(unittest.TestCase):
             with patch('checks.discover', return_value='/usr/bin/true'):
                 self.assertEqual(checks.local(store, str(ROOT))['state'], 'passed')
 
+    def test_qoder_implementation_checks_version_without_token_plan_or_model_call(self):
+        store = self.api_store()
+        snap = store.read(); values = snap['values']; values['implementation_provider'] = 'qoder'
+        store.save(values, snap['fingerprints'])
+        def fake_run(argv, cwd, log, **kwargs):
+            self.assertEqual(argv[1:], ['--version'])
+            Path(log).write_text('1.1.77\n')
+            return 0
+        with patch('checks.discover', side_effect=lambda name: '/fake/' + name) as discover, patch('checks.run', side_effect=fake_run):
+            reply = checks.local(store, str(ROOT))
+        self.assertEqual({c.args[0] for c in discover.call_args_list}, {'codex', 'qodercli'})
+        self.assertIn('Qoder 订阅 · GLM-5.3', reply['message'])
+        def wrong_run(argv, cwd, log, **kwargs):
+            Path(log).write_text('1.1.78\n'); return 0
+        with patch('checks.discover', return_value='/fake/cli'), patch('checks.run', side_effect=wrong_run):
+            with self.assertRaisesRegex(checks.CheckError, '1.1.77'): checks.local(store, str(ROOT))
+        snap = store.read(); values = snap['values']; values['mode'] = 'solo'; store.save(values, snap['fingerprints'])
+        with patch('checks.discover', return_value='/usr/bin/true') as discover:
+            self.assertEqual(checks.local(store, str(ROOT))['state'], 'passed')
+        self.assertEqual({c.args[0] for c in discover.call_args_list}, {'codex'})
+
+    def test_qoder_local_bin_discovery(self):
+        local = self.root / '.local/bin/qodercli'; local.parent.mkdir(parents=True)
+        local.write_text('#!/bin/sh\nexit 0\n'); local.chmod(0o700)
+        with patch('checks.shutil.which', return_value=None), patch('checks.Path.home', return_value=self.root), patch('checks.os.path.isfile', side_effect=lambda value: value == str(local)):
+            self.assertEqual(checks.discover('qodercli'), str(local))
+
     def test_local_effective_executor_dependencies(self):
         store = self.api_store()
         with patch('checks.discover', return_value='/usr/bin/true') as discover:

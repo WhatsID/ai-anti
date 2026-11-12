@@ -15,6 +15,7 @@ import sys
 import time
 
 from implementation_config import ConfigError, MODEL, public, resolve
+import implementation_qoder
 from ai_anti_config import load, review_limits
 from review_channels import child_environment
 from review_codex import capability
@@ -81,7 +82,7 @@ def run(args):
     route = resolve(config, workspace, args.provider, args.model)
     limits = review_limits(config, args.timeout, args.idle_timeout)
     # Native model dispatch remains a host tool operation, never a CLI fallback.
-    if route['provider'] != 'token_plan' and not args.prepare_only:
+    if route['provider'] == 'codex' and not args.prepare_only:
         raise ConfigError('Codex native implementation must use host spawn_agent, not this CLI')
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
     instructions = out / 'instructions.txt'
@@ -98,6 +99,8 @@ def run(args):
                     isolation=dict(sandbox='workspace-write', network_access=False,
                                    shell_environment='none; fixed PATH', hard_credential_file_isolation=False),
                     warnings=[], duration_seconds=0)
+    if route['provider'] == 'qoder':
+        evidence.update(implementation_qoder.prepare(out, INSTRUCTIONS))
     write(out / 'manifest.json', evidence)
     write(out / 'status.json', evidence)
     if args.prepare_only:
@@ -105,29 +108,32 @@ def run(args):
     started = time.monotonic()
     log = out / 'implementation.jsonl'
     try:
-        cli = args.cli or shutil.which('codex')
-        if not cli:
-            raise RunError('Codex CLI unavailable')
-        home = out / 'codex-home'
-        home.mkdir(mode=0o700)
-        # Reuse credential-key resolution, then pass only a small explicit env.
-        authenticated = child_environment(route)
-        allowed = ('HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
-                   'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
-                   'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE')
-        env = {key: authenticated[key] for key in allowed if key in authenticated}
-        env.update(PATH=PATH, CODEX_HOME=str(home), AI_ANTI_QWEN_TOKEN=authenticated['AI_ANTI_QWEN_TOKEN'])
-        cap = capability(cli, out, env=env)
-        evidence.update(cli_version=cap['cli_version'], capability=cap)
-        argv = [cli, '--no-daemon', 'exec', '--ignore-user-config', '--ignore-rules',
-                '--ephemeral', '--skip-git-repo-check', '--sandbox', 'workspace-write',
-                '--json', '-C', str(workspace)]
-        for key, value in options.items():
-            argv += ['-c', key + '=' + json.dumps(value)]
-        argv += [payload]
-        code = execute(argv, workspace, log, *limits, CAP, env=env)
-        evidence['exit_code'] = code
-        evidence.update(validate(log, code), status='completed', completed=True)
+        if route['provider'] == 'qoder':
+            evidence.update(implementation_qoder.run(args.cli, workspace, out, payload, INSTRUCTIONS, limits, CAP, evidence), status='completed', completed=True)
+        else:
+            cli = args.cli or shutil.which('codex')
+            if not cli:
+                raise RunError('Codex CLI unavailable')
+            home = out / 'codex-home'
+            home.mkdir(mode=0o700)
+            # Reuse credential-key resolution, then pass only a small explicit env.
+            authenticated = child_environment(route)
+            allowed = ('HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
+                       'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
+                       'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE')
+            env = {key: authenticated[key] for key in allowed if key in authenticated}
+            env.update(PATH=PATH, CODEX_HOME=str(home), AI_ANTI_QWEN_TOKEN=authenticated['AI_ANTI_QWEN_TOKEN'])
+            cap = capability(cli, out, env=env)
+            evidence.update(cli_version=cap['cli_version'], capability=cap)
+            argv = [cli, '--no-daemon', 'exec', '--ignore-user-config', '--ignore-rules',
+                    '--ephemeral', '--skip-git-repo-check', '--sandbox', 'workspace-write',
+                    '--json', '-C', str(workspace)]
+            for key, value in options.items():
+                argv += ['-c', key + '=' + json.dumps(value)]
+            argv += [payload]
+            code = execute(argv, workspace, log, *limits, CAP, env=env)
+            evidence['exit_code'] = code
+            evidence.update(validate(log, code), status='completed', completed=True)
     except (RunError, ConfigError, OSError, UnicodeError, KeyboardInterrupt) as exc:
         # Raw provider output stays on disk; never echo credentials from errors.
         evidence.update(status='failed', error_kind=getattr(exc, 'kind', 'execution_failed'),
@@ -150,10 +156,10 @@ def main():
     parser.add_argument('--prompt', required=True, type=Path)
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--config', type=Path)
-    parser.add_argument('--provider', choices=('codex', 'token_plan'))
+    parser.add_argument('--provider', choices=('codex', 'token_plan', 'qoder'))
     parser.add_argument('--model')
     parser.add_argument('--prepare-only', action='store_true')
-    parser.add_argument('--cli', help='explicit Codex executable (also supports offline fake fixtures)')
+    parser.add_argument('--cli', help='explicit provider executable (also supports offline fake fixtures)')
     parser.add_argument('--timeout', type=int)
     parser.add_argument('--idle-timeout', type=int)
     args = parser.parse_args()

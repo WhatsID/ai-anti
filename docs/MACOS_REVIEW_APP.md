@@ -6,7 +6,7 @@
 ## 首期功能
 
 - 组合 Claude→Codex、Claude→API、Codex→API/Qoder；已有 Codex→Claude 能力保留，不增加到首期新选列表。
-- 主模型默认值、独立 Codex 评审模型、独立实施服务/模型（Codex 原生或 Token Plan 固定 glm-5.3）、评审通道、协作默认模式、Qwen 模型/地址/凭证状态。
+- 主模型默认值、独立 Codex 评审模型、独立实施服务/模型（Codex 原生、Token Plan 或 Qoder 订阅固定 glm-5.3）、评审通道、协作默认模式、Qwen 模型/地址/凭证状态。
 - 中文菜单快捷选择、设置草稿保存/放弃、免费检查、手动真实合成检测、刷新与恢复上次保存。
 - 首次启动只读；不自动检测，不读取或展示密钥正文。窗口开着时监控配置指纹/凭证 stat，使旧检测失效。
 - 检测最多一个，后台运行、有界超时/输出、耗时与取消，退出清理模型进程；原始错误与日志不交给界面。
@@ -100,3 +100,9 @@ review_services（version=1、active_api、固定 token_plan/custom_api profiles
 “测试评审模型”只验证评审，不证明实施可用。实施调用须按 skill 取得材料外发授权、
 提供隔离树和冻结材料，调用完成也需主模型独立验收。本轮只离线 fake 验证与构建，
 不自动安装、替换或启动 App，不额外调用真实 GLM。
+
+Qoder 实施选择保存为 `implementation_provider=qoder`，固定显示逻辑 glm-5.3（CLI
+GLM-5.3），不显示地址/密钥输入，使用已有 Qoder 订阅登录，要求 qodercli 1.1.77。
+保留原生 secondary_model，独立于评审服务及 Kimi 模型；不要求 Token Plan URL/密钥。
+检查配置只验证 CLI 存在及版本，不发付费模型请求、不验证登录或实施。solo 停用独立
+实施，Claude 仍使用自身代理。CLI 身份不证明后端路由；工具限制不提供文件/网络硬隔离。

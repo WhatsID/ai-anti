@@ -39,7 +39,10 @@
 | Field | Value |
 | --- | --- |
 | Agent ID and creation-tool receipt | [evidence] |
+| Implementation provider / executor / CLI version | [provider: codex/token_plan/qoder; executor and version evidence] |
 | Requested model | [value or n/a] |
+| CLI-reported model / evidence type | [value; requested_only / cli_reported / native receipt] |
+| Provider backend model | [unknown unless independently observable] |
 | Observable runtime model | [runtime metadata or `unknown`] |
 | Worktree / exact base / dispatched fingerprints | [evidence] |
 | Delivered files and fingerprints | [evidence] |

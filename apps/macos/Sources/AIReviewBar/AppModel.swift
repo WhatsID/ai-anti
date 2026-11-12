@@ -38,7 +38,7 @@ struct Draft: Equatable {
     var secondaryModel = ""
     var implementationEnabled: Bool { host == "codex" && mode != "solo" }
     var implementationModel: String {
-        get { implementationProvider == "token_plan" ? ModelCatalog.implementationGLM : secondaryModel }
+        get { implementationProvider != "codex" ? ModelCatalog.implementationGLM : secondaryModel }
         set { if implementationProvider == "codex" { secondaryModel = newValue } }
     }
     var implementationURL: String {
@@ -145,7 +145,7 @@ struct Draft: Equatable {
     var savedReviewFamily: String { saved.service }
     var title: String { "\(saved.host == "claude" ? "Claude" : "Codex") → \(ReviewService.title(savedReviewFamily) + " · " + (saved.channel == "codex" ? (saved.reviewerModel.isEmpty ? "CLI 默认" : saved.reviewerModel) : saved.channel == "qoder" ? "Kimi-K3.1-Pro" : saved.qwenModel))" }
     var primaryOptions: [ModelOption] { ModelCatalog.options(draft.host, preserving: [defaults[draft.host] ?? "", draft.host == saved.host ? saved.primaryModel : "", draft.primaryModel], emptyLabel: "保留当前默认值") }
-    var secondaryOptions: [ModelOption] { if draft.implementationProvider == "token_plan" { return [ModelOption(id: ModelCatalog.implementationGLM, label: ModelCatalog.implementationGLM)] }; return ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定") }
+    var secondaryOptions: [ModelOption] { if draft.implementationProvider != "codex" { return [ModelOption(id: ModelCatalog.implementationGLM, label: draft.implementationProvider == "qoder" ? "GLM-5.3" : ModelCatalog.implementationGLM)] }; return ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定") }
     var reviewerOptions: [ModelOption] {
         if draft.channel == "qoder" { return [ModelOption(id: "kmodel_latest", label: "Kimi-K3.1-Pro")] }
         if draft.channel == "codex" { return ModelCatalog.options("codex", preserving: [saved.reviewerModel, draft.reviewerModel], emptyLabel: "CLI 默认") }

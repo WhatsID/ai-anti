@@ -437,10 +437,38 @@ independent 完整读取8块，291.137秒；review 完整读取10块，166.598�
 
 ## 独立实施来源配置
 
-仅 Codex 主导支持 `codex_relay.implementation_provider=codex/token_plan`（缺失/null 为
+仅 Codex 主导支持 `codex_relay.implementation_provider=codex/token_plan/qoder`（缺失/null 为
 codex），native 仍走显式 spawn_agent 模型和 runtime 证据；Token Plan 固定请求 glm-5.3，
 使用 Codex CLI Responses 与共享 Token Plan profile，不依赖当前评审服务。新入口复用既有
 精确 CLI 能力版本门禁；此配置支持不扩大 compat.json 已测路径或 actual model 证据。
-本轮新增验证仅离线 fake/配置/UI 状态测试及 App 构建，未再次执行业务 GLM 试跑。
-GLM manifest 保留 actual_model=null、requested_only；completed 不是候选验收通过。
+Token Plan 引入时的验证仅离线 fake/配置/UI 状态测试及 App 构建，未再次执行业务 GLM 试跑。
+Token Plan manifest 保留 actual_model=null、requested_only；completed 不是候选验收通过。
 Claude Code 保持现有实施代理，solo 不派实施者；原生模型目录不代表全部完成验证。
+
+### Qoder GLM implementation compatibility
+
+Qoder subscription implementation independently pins qodercli **1.1.77**, public
+logical `glm-5.3` to exact CLI `GLM-5.3`. The existing 1.1.74/1.1.77 Kimi reviewer
+compatibility list is unchanged and does not grant implementation support. Subscription
+HOME is retained; no Token Plan profiles/credentials are consulted. Synthetic Write and
+Bash scratch streams from 1.1.77 establish `accept_edits` / `acceptEdits` and per-run
+six-tool permissions. Offline fixture/protocol tests do not establish real subscription
+login or whole-project implementation. Desktop configuration check invokes only version,
+while review model testing continues through the selected review channel.
+
+The bounded entry records CLI-reported identity and backend `unknown`, disables external
+extensions/config sources and request retries, retains partial work on failure, and
+requires independent primary acceptance. It offers no filesystem/network hard sandbox;
+host network permission is separate. Earlier clients that reject `qoder` require the
+matching source update; the default stays `codex`, with no migration/reset needed.
+
+Primary acceptance additionally ran the formal implementation entry with qodercli 1.1.77
+against a separate synthetic calculator workspace: Read/Edit/Write/Bash completed,
+two local tests passed, no permission denials, status `completed`, CLI-reported
+`GLM-5.3`, duration 12.572 seconds. Raw log SHA-256:
+`7e2761bdef11f2c495909656102cc54d532fad5a0ec0f9968534dbf3807326c3`.
+Two earlier synthetic runs wrote correct candidates but were retained as failed because
+the initial validator rejected legitimate segmented tool messages; both raw streams now
+pass replay and regression tests cover their interleaved/parallel call ordering. This is
+synthetic tool-chain evidence, not proof of whole-project GLM implementation or backend
+identity. No user settings, login state, installation or reviewer compatibility changed.

@@ -344,6 +344,11 @@ import Combine
         assert(implementationDraft.responsesBaseURL == "https://implementation.fixture.invalid/v1")
         implementationDraft.apiKeyInput = "updated-shared-key"
         assert(implementationDraft.implementationKeyInput == "updated-shared-key")
+        implementationDraft.implementationProvider = "qoder"
+        assert(implementationDraft.implementationModel == "glm-5.3")
+        implementationDraft.implementationModel = "must-not-overwrite-native"
+        assert(implementationDraft.secondaryModel == "historical-native")
+        assert(implementationDraft.dictionary["implementation_provider"] as? String == "qoder")
         implementationDraft.implementationProvider = "codex"
         assert(implementationDraft.implementationModel == "historical-native")
         implementationDraft.host = "claude"; assert(!implementationDraft.implementationEnabled)
@@ -359,6 +364,11 @@ import Combine
         addressModel.save()
         let implementationValues = addressFront.requests.last?["values"] as! [String: Any]
         assert(implementationValues["implementation_provider"] as? String == "token_plan")
+        addressFront.complete(.success(missingAddressSnapshot))
+        addressModel.draft.implementationProvider = "qoder"
+        addressModel.save()
+        let qoderValues = addressFront.requests.last?["values"] as! [String: Any]
+        assert(qoderValues["implementation_provider"] as? String == "qoder")
         addressFront.complete(.success(missingAddressSnapshot))
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
     }

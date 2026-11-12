@@ -34,7 +34,8 @@ def stop(signum=None, frame=None):
             pass
 
 def discover(name):
-    for candidate in ('/opt/homebrew/bin/' + name, '/usr/local/bin/' + name, shutil.which(name)):
+    local = str(Path.home() / '.local/bin/qodercli') if name == 'qodercli' else None
+    for candidate in ('/opt/homebrew/bin/' + name, '/usr/local/bin/' + name, shutil.which(name), local):
         if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
     raise CheckError('未找到 ' + name + ' CLI；请安装或设置启动环境')
@@ -137,17 +138,24 @@ def local(store, source=None):
             raise CheckError('实施 Token Plan Responses 地址未配置')
         if not store.credential_status(profile['credential_paths'], profile['credential_key'])[0]:
             raise CheckError('实施 Token Plan 凭证未配置或不可解析')
+    qoder_implementation = v['host'] == 'codex' and v['mode'] != 'solo' and v['implementation_provider'] == 'qoder'
     names = {v['host'], effective_executor(v) if v['channel'] == 'qwen' else 'qodercli' if v['channel'] == 'qoder' else 'codex'}
+    if qoder_implementation:
+        names.add('qodercli')
     with tempfile.TemporaryDirectory(prefix='ai-anti-local-') as temp:
         for name in names:
             cli = discover(name)
             if run([cli, '--version'], temp, Path(temp) / (name + '.log')) != 0:
                 raise CheckError(name + ' --version 失败；原始输出已隐藏')
+            if name == 'qodercli' and qoder_implementation:
+                version = (Path(temp) / (name + '.log')).read_text('utf-8').strip()
+                if version != '1.1.77':
+                    raise CheckError('Qoder 实施要求 qodercli 1.1.77')
     if v['channel'] == 'qwen' and not store.credential_status(v['credential_paths'], v.get('credential_key', 'tokenplan.value'))[0]:
         raise CheckError('没有找到可解析的 Qwen 凭证')
     if store.read()['signature'] != snapshot['signature']:
         raise CheckError('检测中配置或凭证发生变化，结果作废')
-    route = ('停用独立实施' if v['mode'] == 'solo' else 'Claude Code 实施代理' if v['host'] == 'claude' else 'Token Plan · glm-5.3 · Responses' if implementation else 'Codex 原生 · ' + (v['secondary_model'] or '未指定'))
+    route = ('停用独立实施' if v['mode'] == 'solo' else 'Claude Code 实施代理' if v['host'] == 'claude' else 'Qoder 订阅 · GLM-5.3 · qodercli 1.1.77' if qoder_implementation else 'Token Plan · glm-5.3 · Responses' if implementation else 'Codex 原生 · ' + (v['secondary_model'] or '未指定'))
     return result('local', 'passed', '本地检查通过；实施：' + route + '；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
 
 def codex_events(path, marker):

@@ -55,7 +55,7 @@ DNS 错误、超时或诊断失败本身不能确认沙箱原因，连通成功�
 重启或额外套 shell 重试。显式获批的新完整运行保留 [MODEL_RETRY.md](MODEL_RETRY.md)
 的正常有限预算，不继承旧失败计数，也不强制 `--max-retries 0`。
 
-## 独立 Token Plan 实施入口适用说明
+## 独立 Token Plan / Qoder 实施入口适用说明
 
 Codex 主导的 `codex-relay/scripts/implementation.py` 同样遵守上述事故纪律，使用共享
 `review_limits` 与 `review_runner.execute`：stdin DEVNULL、文件提示词与日志、总时长/空闲
@@ -64,3 +64,12 @@ Codex 主导的 `codex-relay/scripts/implementation.py` 同样遵守上述事故
 固定请求 Token Plan `glm-5.3` 经 Codex Responses，实际服务端模型仍未知。配置选择不授予
 业务材料外发许可；宿主权限不得绕过。workspace-write 与 shell env none 不能硬隔离同用户
 凭证文件，不能把提示词约束说成文件访问安全边界。历史四条正文及事故记录保持不变。
+
+Qoder 订阅实施同入口使用 `--provider qoder --model glm-5.3`，内部映射 `GLM-5.3`，
+独立固定 qodercli 1.1.77；Kimi 评审准入不证明实施能力。沿用订阅 HOME，环境白名单
+剔除注入 API 凭证，禁用配置来源、MCP、hooks、skills、memory 与会话持久化；每次运行
+仅授予 Read/Write/Edit/Bash/Glob/Grep，accept_edits 的 init 必须报告 acceptEdits。
+这不是文件/网络硬沙箱；Bash 仍能访问同用户文件及产生副作用。仍需上述 Qoder 宿主联网
+权限，不得把 CLI 权限模式当作宿主授权。Write/Bash 合成探针证明有限工具链，CLI 报告的
+GLM-5.3 与供应方后端路由（未知）须分开记录。单次写运行不重试/降级，失败与 SIGTERM
+保留日志、哈希、时长及部分候选；完成不代表主模型验收通过。

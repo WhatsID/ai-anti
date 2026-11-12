@@ -45,8 +45,8 @@ def endpoint(value):
 
 def implementation_provider(value):
     value = 'codex' if value is None else value
-    if not isinstance(value, str) or value not in ('codex', 'token_plan'):
-        raise StoreError('实施服务无效；合法值：codex/token_plan')
+    if not isinstance(value, str) or value not in ('codex', 'token_plan', 'qoder'):
+        raise StoreError('实施服务无效；合法值：codex/token_plan/qoder')
     return value
 
 def effective_executor(values):

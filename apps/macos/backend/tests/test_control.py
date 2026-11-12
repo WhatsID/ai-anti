@@ -54,6 +54,14 @@ class StoreTests(unittest.TestCase):
         with self.assertRaises(StoreError): self.store.restore(saved['fingerprints'])
         self.assertEqual(self.store.raw('ai'), before)
 
+    def test_qoder_implementation_roundtrip_and_restore(self):
+        saved = self.save(implementation_provider='qoder', secondary_model='native-history')
+        self.assertEqual(saved['values']['implementation_provider'], 'qoder')
+        switched = self.save(implementation_provider='codex')
+        restored = self.store.restore(switched['fingerprints'])
+        self.assertEqual(restored['values']['implementation_provider'], 'qoder')
+        self.assertEqual(restored['values']['secondary_model'], 'native-history')
+
     def test_batch_hosts_dispatch_restore_and_unchanged_bytes(self):
         self.write('claude', b'{ "model": "claude-old", "custom": 1 }\n')
         self.write('codex', b'# keep comment\nmodel = "codex-old"\n')

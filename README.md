@@ -304,7 +304,7 @@ silently falling back.
 | `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
 | `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
 | `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
-| `codex_relay.implementation_provider` | Codex-led implementation: native `codex` or Token Plan fixed `glm-5.3` | missing/null → `codex` |
+| `codex_relay.implementation_provider` | Codex-led implementation: native `codex`, Token Plan or Qoder subscription fixed logical `glm-5.3` | missing/null → `codex` |
 | `codex_relay.secondary_model` | Native Codex implementer model; retained when switching to GLM | unset → specify per task |
 | `codex_relay.qwen_executor` | CLI executor for Qwen review | `claude` |
 | `plugins.qwen.responses_base_url` | Separate Responses URL for the Codex executor | none |
@@ -378,7 +378,14 @@ Codex-led relays can choose implementation separately from review. Claude Code's
 implementer stays unchanged; solo disables independent implementation. Token Plan uses
 the shared `review_services.profiles.token_plan` Responses URL and credentials, independently
 of active review, and never borrows custom API credentials. The App edits that shared draft.
-Choosing a provider does not authorize business-material transmission. This new entry has
-no additional live GLM verification in this change: offline fake checks and App builds only.
+Choosing a provider does not authorize business-material transmission. The
+Token Plan introduction used offline fake checks and App builds without an additional live GLM run.
 Invocation completion still requires independent primary acceptance; server model identity
 remains unknown. See the codex-relay skill for bounded execution and evidence.
+
+Qoder implementation: set `codex_relay.implementation_provider` to `qoder`; logical
+`glm-5.3` maps to CLI `GLM-5.3`. Requires existing subscription login and qodercli
+1.1.77. It does not use Token Plan credentials or change Kimi review routing. The
+bounded implementation entry has no write retries or filesystem/network hard sandbox;
+CLI model identity is reported, provider backend identity unknown. See the
+[codex-relay contract](adapters/codex/skills/codex-relay/SKILL.md#qoder-subscription-implementation).

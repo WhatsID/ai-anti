@@ -16,13 +16,13 @@ from ai_anti_config import ConfigError, lookup
 from review_channels import resolve as review_channel
 
 MODEL = 'glm-5.3'
-PROVIDERS = ('codex', 'token_plan')
+PROVIDERS = ('codex', 'token_plan', 'qoder')
 
 
 def provider(value):
     value = 'codex' if value is None else value
     if not isinstance(value, str) or value not in PROVIDERS:
-        raise ConfigError('codex_relay.implementation_provider must be codex or token_plan')
+        raise ConfigError('codex_relay.implementation_provider must be codex, token_plan or qoder')
     return value
 
 
@@ -59,13 +59,17 @@ def resolve(config, workspace, explicit_provider=None, explicit_model=None):
     secondary = lookup(config, 'codex_relay.secondary_model')
     if secondary is not None:
         model(secondary)
-    chosen = explicit_model if explicit_model is not None else MODEL if selected == 'token_plan' else secondary
+    chosen = explicit_model if explicit_model is not None else MODEL if selected in ('token_plan', 'qoder') else secondary
     if selected == 'codex':
         if chosen is not None:
             model(chosen)
-        if chosen == MODEL:
-            raise ConfigError('glm-5.3 requires implementation provider token_plan')
+        if chosen in (MODEL, 'GLM-5.3'):
+            raise ConfigError('glm-5.3 requires implementation provider token_plan or qoder')
         return dict(provider=selected, requested_model=chosen, executor='native', secondary_model=secondary)
+    if selected == 'qoder':
+        if chosen != MODEL:
+            raise ConfigError('Qoder implementation supports only logical glm-5.3')
+        return dict(provider=selected, requested_model=MODEL, executor='qoder', wire_api='qoder-cli', secondary_model=secondary)
     if chosen != MODEL:
         raise ConfigError('Token Plan implementation supports only glm-5.3')
     qwen = lookup(config, 'plugins.qwen')

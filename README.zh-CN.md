@@ -242,7 +242,7 @@ AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API
 | `defaults.deployment_scale` | 项目未声明时传给评审方的部署规模 | 未设置 → 评审提示写明「未声明部署规模」 |
 | `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
 | `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
-| `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理或 Token Plan 固定 `glm-5.3` | 缺失/null → `codex` |
+| `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理、Token Plan 或 Qoder 订阅固定逻辑 `glm-5.3` | 缺失/null → `codex` |
 | `codex_relay.secondary_model` | 原生 Codex 实施模型；切换 GLM 时保留 | 未设置 → 每次任务指定 |
 | `codex_relay.qwen_executor` | Qwen 评审的 CLI 执行器 | `claude` |
 | `plugins.qwen.responses_base_url` | Codex 执行器独立的 Responses 地址 | 无 |
@@ -317,5 +317,10 @@ Codex 使用 `bug-review` skill，Claude Code 使用 `/bug-review`，以独立�
 Codex 主模型可独立选择实施服务，Claude Code 实施代理保持原状，solo 停用独立实施。
 Token Plan 实施读取共享 `review_services.profiles.token_plan` 的 Responses 地址与凭证，
 与当前评审服务/模型无关，不使用自定义 API 凭证。App 可编辑该共享草稿。配置选择不代表
-业务材料外发授权。新入口本轮仅通过离线 fake 与 App 构建，未新增真实 GLM 运行验证；
+业务材料外发授权。Token Plan 引入时仅通过离线 fake 与 App 构建，未新增真实 GLM 运行验证；
 调用 completed 仍需主模型独立验收，实际服务端模型未知。详见 codex-relay skill。
+
+Qoder 实施可设 `codex_relay.implementation_provider=qoder`，逻辑 `glm-5.3` 映射 CLI
+`GLM-5.3`，要求既有订阅登录及 qodercli 1.1.77，不读取 Token Plan 凭证、不改变 Kimi
+评审路由。单次有界写任务不重试；工具限制不是文件/网络硬隔离，CLI 报告身份与未知
+后端路由分开记录。详见 [codex-relay 契约](adapters/codex/skills/codex-relay/SKILL.md#qoder-subscription-implementation)。

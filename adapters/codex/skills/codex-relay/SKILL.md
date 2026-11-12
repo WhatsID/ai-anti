@@ -154,11 +154,11 @@ the exact recorded input and fingerprint are present; a clean worktree must not
 silently omit it. Resolve overlapping dirty work before dispatch.
 
 Resolve `codex_relay.implementation_provider` from the user config: missing/null means
-`codex`; only `codex` and `token_plan` are accepted, including when reading or restoring
+`codex`; only `codex`, `token_plan` and `qoder` are accepted, including when reading or restoring
 configuration. Keep `codex_relay.secondary_model` as the native Codex model; selecting
-Token Plan never overwrites it. An explicit per-task provider/model instruction takes
-priority as a coherent pair: GLM requires `token_plan` and exactly `glm-5.3`; never
-combine that model with native Codex or a different model with Token Plan. Resolve any
+Token Plan or Qoder never overwrites it. An explicit per-task provider/model instruction takes
+priority as a coherent pair: GLM requires `token_plan` or `qoder` and exactly logical `glm-5.3`; never
+combine that model with native Codex or a different model with either GLM provider. Public uppercase `GLM-5.3` is rejected. Resolve any
 ambiguous explicit request before dispatch. `solo` disables independent implementation;
 Claude Code's implementer workflow is unchanged. Configuration selection is not permission
 to send business materials externally: require the session's applicable authorization.
@@ -241,7 +241,45 @@ server identity. This is an explicit exception to native runtime-model evidence,
 proof of cross-model identity. `completed` means the invocation completed, never that
 implementation passed primary acceptance. A review test is not implementation evidence.
 
-### Landing gates (both implementation providers)
+### Qoder subscription implementation
+
+Use the same bounded `scripts/implementation.py` entry and workspace/prompt/output
+preparation contract above with `--provider qoder --model glm-5.3`. Public model IDs
+are logical; the executor maps this one to CLI `GLM-5.3`. Preparation never discovers
+a CLI, reads login or Token Plan credentials, or launches processes. The Qoder path
+never loads Token Plan profiles. Keep native `secondary_model` unchanged.
+
+The separate implementation executor pins **qodercli 1.1.77** with a bounded version
+preflight and retained raw version log/hash. The Kimi reviewer capability gate is
+not implementation evidence. Preserve subscription HOME and necessary PATH/proxy/cert
+environment, strip injected API credentials/config, use disabled setting sources,
+empty strict MCP config, disabled hooks/skills/memory, no session persistence and
+zero request retries. Explicit per-run settings grant only Read/Write/Edit/Bash/Glob/Grep
+under `accept_edits` (reported as `acceptEdits`). The settled prompt names the sole
+worker, scope and prohibited actions. Native agent/slash metadata remains visible.
+This is **not filesystem or network sandboxing**: Bash can read same-user credential
+files or cause side effects. Follow the Qoder host networking permission rule in
+`core/CLI_DISCIPLINE.md`; `accept_edits` does not authorize host network access.
+
+Require exactly one safe init with matching CLI version/workspace/model, every assistant
+model `GLM-5.3`, only the six tools with unique paired IDs and no pending calls, then
+one nonempty success/end_turn terminal and final assistant text, exit 0. Unknown events,
+hooks, denial (even with success), malformed/truncated streams and post-terminal data
+fail closed; only proven empty artifacts updates, thinking segments and segmented tool messages with
+null stop_reason (still requiring unique calls and matched results) are tolerated.
+Ordinary tool command errors may be repaired within the same run. Retain raw logs/hashes,
+version evidence, duration, partial writes and failed status on timeout, output cap or
+SIGTERM. No write retry, fallback, commit or landing occurs. Confirm the previous writer
+stopped and inspect partial work/side effects before any newly authorized run.
+
+Completed evidence uses executor `qoder`, wire API `qoder-cli`, requested `glm-5.3`,
+actual_model `GLM-5.3`, model_evidence `cli_reported`, backend_model `unknown`.
+This only attests what the subscription CLI reports. Scratch Write/Bash probes establish
+those tool paths on 1.1.77; they do not prove whole-project implementation or primary
+acceptance. The primary independently checks candidate bytes, tests, scope and identity
+before landing. The review test remains Kimi review and cannot validate GLM implementation.
+
+### Landing gates (all three implementation providers)
 
 Before landing, recheck the business repository/root, HEAD SHA, and full attached
 branch reference or detached state against the dispatched baseline using the
@@ -272,4 +310,4 @@ the template.
 
 The primary model is selected by the user/runtime, never dynamically switched by this
 Skill. `codex_relay.secondary_model` selects only the native Codex independent implementer;
-`implementation_provider=token_plan` fixes implementation to glm-5.3. Neither selects the reviewer. Both review channels retain the same evidence and scope gates.
+`implementation_provider=token_plan` or `qoder` fixes implementation to logical glm-5.3. None selects the reviewer. Both review channels retain the same evidence and scope gates.
