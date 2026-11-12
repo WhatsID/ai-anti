@@ -20,7 +20,8 @@
   "codex_relay": {
     "review_channel": "claude",
     "secondary_model": null,
-    "qwen_executor": "claude"
+    "qwen_executor": "claude",
+    "implementation_provider": "codex"
   },
   "plugins": {
     "qwen": {

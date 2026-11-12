@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Codex 主导新增独立实施服务选择：原生 Codex 或 Token Plan 固定 glm-5.3，保留原生实施模型 ID；Claude Code 及 solo 行为保持原约定。
+- App 共享 Token Plan 地址/凭证草稿，后台严格验证实施来源并检查当前实施路径；新增 prepare-only、有界写任务入口与离线协议/配置/UI 回归验证。
+- GLM 证据仅确认请求模型，调用完成仍须主模型独立验收；本轮未追加真实 GLM 业务试跑，未升级版本或自动安装。
+
 ## 0.2.4 — 2026-10-23
 
 - 外部 CLI 评审统一使用用户配置 `review.timeout` / `review.idle_timeout`，默认1800/900秒，上限3600/900秒；idle可先终止，输出上限保持各通道原值。

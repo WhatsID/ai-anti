@@ -71,19 +71,75 @@ class DesktopContract(unittest.TestCase):
         self.assertLess(view.index('Picker("主模型"'), view.index('modelPicker("主模型 ID"'))
         self.assertLess(view.index('modelPicker("主模型 ID"'), view.index('Picker("协作模式"'))
         self.assertLess(view.index('Picker("协作模式"'), view.index('solo 同时停用'))
-        self.assertLess(view.index('modelPicker("实施模型 ID"'), view.index('Picker("协作模式"'))
+        self.assertLess(view.index('Picker("评审模型ID"'), view.index('Picker("实施服务"'))
+        self.assertLess(view.index('Picker("实施服务"'), view.index('modelPicker("实施模型 ID"'))
         self.assertIn('Picker("评审服务"', view)
-        self.assertIn('SecureField("API 密钥"', view)
+        self.assertIn('SecureField("评审服务API密钥"', view)
         self.assertIn('text: $model.draft.apiKeyInput', view)
         self.assertIn('if model.draft.channel == "qwen"', view)
         self.assertIn('Picker("评审执行器"', view)
-        self.assertIn('Picker("模型 ID"', view)
+        self.assertIn('Picker("评审模型ID"', view)
         self.assertIn('登录状态未检测', view)
         self.assertNotIn('.disabled(model.dirty)', view)
         self.assertIn('Codex 评审失败即停止', view)
         app = (ROOT/'apps/macos/Sources/AIReviewBar/App.swift').read_text()
         self.assertIn('Menu("协作模式："', app)
         self.assertNotIn('评审模式', app)
+    def test_ui_independent_service_groups(self):
+        view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
+        review = 'ServiceSettingsGroup("评审服务", summary: SettingsSummary.review(model.draft), isExpanded: $reviewExpanded)'
+        implementation = 'ServiceSettingsGroup("实施服务", summary: SettingsSummary.implementation(model.draft), isExpanded: $implementationExpanded)'
+        self.assertIn('@State private var reviewExpanded = true', view)
+        self.assertIn('@State private var implementationExpanded = true', view)
+        self.assertIn('accessibilityReduceMotion', view)
+        self.assertIn('.easeInOut(duration: 0.2)', view)
+        self.assertIn('$0.disablesAnimations = true', view)
+        self.assertLess(view.index('Picker("协作模式"'), view.index(review))
+        self.assertLess(view.index('空主模型表示保留已有默认值'), view.index(review))
+        scroll = view.split('ScrollView {', 1)[1].split('            Divider()', 1)[0]
+        self.assertIn('.frame(width: geometry.size.width - 8, alignment: .leading)', scroll)
+        self.assertNotIn('Form {', view)
+        self.assertNotIn('.background(', view)
+        self.assertNotIn('.overlay(', view)
+        self.assertIn('Spacer(minLength: 0)', view)
+        self.assertIn('Text(title).accessibilityHidden(true)', view)
+        self.assertIn('withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.2)) { isExpanded.toggle() }', view)
+        self.assertIn('.accessibilityValue(isExpanded ? "展开" : "收起")', view)
+        self.assertIn('Text(title).frame(width: SettingsColumns.labelWidth, alignment: .trailing)', view)
+        self.assertIn('content().labelsHidden()', view)
+        self.assertIn('spacing: SettingsColumns.spacing', view)
+        self.assertIn('.padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)', view)
+        self.assertIn('selection.labelsHidden().opacity(isExpanded ? 1 : 0)', view)
+        self.assertIn('.allowsHitTesting(isExpanded).accessibilityHidden(!isExpanded)', view)
+        self.assertIn('.opacity(isExpanded ? 0 : 1).accessibilityHidden(isExpanded)', view)
+        self.assertIn('.rotationEffect(.degrees(isExpanded ? 90 : 0))', view)
+        self.assertIn('}.frame(height: 26)', view)
+        self.assertIn('.transition(.opacity)', view)
+        for title in ('主模型', '协作模式', '评审模型 ID', '评审服务地址', '评审服务API密钥', '评审执行器', '评审模型ID', '实施服务地址', '实施服务API密钥'):
+            self.assertIn('field("' + title + '") {', view)
+        self.assertNotIn('field("评审服务")', view)
+        self.assertNotIn('field("实施服务")', view)
+        picker = view.split('private func modelPicker', 1)[1].split('var body:', 1)[0]
+        self.assertIn('field(title)', picker)
+        review_body = view.split(review, 1)[1].split(implementation, 1)[0]
+        implementation_body = view.split(implementation, 1)[1].split('            Divider()', 1)[0]
+        for item in ('Picker("评审服务"', 'SecureField("评审服务API密钥"', 'Picker("评审执行器"', 'Picker("评审模型ID"', 'executorMigrationPending', 'selectedCredentialMessage', 'claudeFallbacks'):
+            self.assertIn(item, review_body)
+            self.assertNotIn(item, implementation_body)
+        for item in ('Picker("实施服务"', 'modelPicker("实施模型 ID"', 'TextField("实施服务地址"', 'SecureField("实施服务API密钥"'):
+            self.assertIn(item, implementation_body)
+            self.assertNotIn(item, review_body)
+        self.assertGreater(view.index('Button("检查配置"'), view.index(implementation))
+        summary = view.split('enum SettingsSummary {', 1)[1].split('private struct ServiceSettingsGroup', 1)[0]
+        self.assertIn('ReviewService.title(draft.service)', summary)
+        self.assertIn('ModelCatalog.implementationGLM', summary)
+        self.assertIn('Claude Code 实施代理', summary)
+        self.assertIn('CLI 默认', summary)
+        self.assertIn('未指定', summary)
+        self.assertIn('solo 已停用', summary)
+        for private_field in ('secret', 'apiKeyInput', 'baseURL', 'credential', 'implementationURL'):
+            self.assertNotIn('draft.' + private_field, summary)
+
     def test_project_git_root_from_subdir(self):
         subprocess.run(['/usr/bin/git','init'],cwd=self.repo,capture_output=True,check=True)
         (self.repo/'.claude').mkdir(); (self.repo/'.claude/relay-mode.local').write_text('auto\n')
@@ -194,6 +250,30 @@ class DesktopContract(unittest.TestCase):
         env = dict(self.env,QWEN_CREDENTIAL_KEY='review_services.custom_api.value',QWEN_PATHS=str(store.paths['secrets']))
         token = subprocess.run([sys.executable,'-c',blocks[1]],env=env,capture_output=True,text=True)
         self.assertNotEqual(token.returncode,0); self.assertEqual(token.stdout,'')
+
+    def test_implementation_provider_backend_runner_and_ui_contract(self):
+        import importlib.util
+        path = ROOT/'adapters/codex/skills/codex-relay/scripts/implementation_config.py'
+        spec = importlib.util.spec_from_file_location('desktop_implementation_config', path)
+        module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
+        from config_store import implementation_provider, StoreError
+        for value in (None, 'codex', 'token_plan'):
+            self.assertEqual(implementation_provider(value), module.provider(value))
+        for value in ('glm-5.3', [], {}, True, 3):
+            with self.assertRaises(StoreError): implementation_provider(value)
+            with self.assertRaises(ValueError): module.provider(value)
+        self.assertEqual(module.MODEL, 'glm-5.3')
+        model = (ROOT/'apps/macos/Sources/AIReviewBar/ModelCatalog.swift').read_text()
+        self.assertIn('static let implementationGLM = "glm-5.3"', model)
+        view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
+        self.assertIn('.disabled(!model.draft.implementationEnabled)', view)
+        self.assertIn('model.draft.host == "claude" ? .constant("claude-agent") : $model.draft.implementationProvider', view)
+        self.assertIn('$model.draft.implementationKeyInput', view)
+        # Existing package includes the single shared pure migration dependency.
+        self.assertIn('backend/review_services.py', (ROOT/'apps/macos/build-app.sh').read_text())
+        skill = (ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()
+        for requirement in ('--prepare-only', 'requested_only', 'never `active_api`', 'primary acceptance'):
+            self.assertIn(requirement, skill)
 
     def test_mode_skill_scope_and_incident_notes(self):
         skill=(ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()

@@ -434,3 +434,13 @@ independent 完整读取8块，291.137秒；review 完整读取10块，166.598�
 没有用最小OK请求替代；可信暂态重试仍仅由故障注入证明，不声称真实调用触发上游恢复，
 也不把协议完成视为业务根因已确认。主模型另完成156项完整适配器检查及最新6项聚焦检查
 （合计157项不同测试），根级45项和后端61项通过；实施者最终完整适配器157项通过。
+
+## 独立实施来源配置
+
+仅 Codex 主导支持 `codex_relay.implementation_provider=codex/token_plan`（缺失/null 为
+codex），native 仍走显式 spawn_agent 模型和 runtime 证据；Token Plan 固定请求 glm-5.3，
+使用 Codex CLI Responses 与共享 Token Plan profile，不依赖当前评审服务。新入口复用既有
+精确 CLI 能力版本门禁；此配置支持不扩大 compat.json 已测路径或 actual model 证据。
+本轮新增验证仅离线 fake/配置/UI 状态测试及 App 构建，未再次执行业务 GLM 试跑。
+GLM manifest 保留 actual_model=null、requested_only；completed 不是候选验收通过。
+Claude Code 保持现有实施代理，solo 不派实施者；原生模型目录不代表全部完成验证。

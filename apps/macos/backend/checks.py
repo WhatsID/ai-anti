@@ -130,6 +130,13 @@ def local(store, source=None):
     # Validation builds bytes but never writes them.
     store.outputs(v, '')
     review_budgets(store, source_root(store, source))
+    implementation = v['host'] == 'codex' and v['mode'] != 'solo' and v['implementation_provider'] == 'token_plan'
+    if implementation:
+        profile = v['review_services']['profiles']['token_plan']
+        if not profile['responses_base_url']:
+            raise CheckError('实施 Token Plan Responses 地址未配置')
+        if not store.credential_status(profile['credential_paths'], profile['credential_key'])[0]:
+            raise CheckError('实施 Token Plan 凭证未配置或不可解析')
     names = {v['host'], effective_executor(v) if v['channel'] == 'qwen' else 'qodercli' if v['channel'] == 'qoder' else 'codex'}
     with tempfile.TemporaryDirectory(prefix='ai-anti-local-') as temp:
         for name in names:
@@ -140,7 +147,8 @@ def local(store, source=None):
         raise CheckError('没有找到可解析的 Qwen 凭证')
     if store.read()['signature'] != snapshot['signature']:
         raise CheckError('检测中配置或凭证发生变化，结果作废')
-    return result('local', 'passed', '本地检查通过；未验证登录、额度或模型可调用', snapshot)
+    route = ('停用独立实施' if v['mode'] == 'solo' else 'Claude Code 实施代理' if v['host'] == 'claude' else 'Token Plan · glm-5.3 · Responses' if implementation else 'Codex 原生 · ' + (v['secondary_model'] or '未指定'))
+    return result('local', 'passed', '本地检查通过；实施：' + route + '；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
 
 def codex_events(path, marker):
     finished, errors, response, actual = False, False, [], '未知'

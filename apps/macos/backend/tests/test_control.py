@@ -27,6 +27,33 @@ class StoreTests(unittest.TestCase):
     def save(self, **changes):
         snap = self.snapshot(); v = snap['values']; v.update(changes)
         return self.store.save(v, snap['fingerprints'])
+    def test_implementation_provider_roundtrip_and_restore_validation(self):
+        self.assertEqual(self.snapshot()['values']['implementation_provider'], 'codex')
+        for bad in ('custom_api', '', [], {}, 1, True):
+            with self.subTest(provider=bad):
+                with self.assertRaises(StoreError): self.save(implementation_provider=bad)
+                self.assertFalse(self.store.paths['ai'].exists())
+        saved = self.save(implementation_provider='token_plan', secondary_model='historical-native-id')
+        self.assertEqual(saved['values']['secondary_model'], 'historical-native-id')
+        saved = self.save(implementation_provider='codex')
+        restored = self.store.restore(saved['fingerprints'])
+        self.assertEqual(restored['values']['implementation_provider'], 'token_plan')
+        self.assertEqual(restored['values']['secondary_model'], 'historical-native-id')
+        # Damaged stored values fail on load, before save and before restore writes.
+        for bad in ('custom_api', [], {}, True):
+            self.write('ai', {'codex_relay': {'implementation_provider': bad}})
+            with self.assertRaises(StoreError): self.snapshot()
+        self.write('ai', {'codex_relay': {'implementation_provider': None}})
+        self.assertEqual(self.snapshot()['values']['implementation_provider'], 'codex')
+        saved = self.save(implementation_provider='token_plan')
+        backup = self.store.desktop / 'last-save.json'
+        record = json.loads(backup.read_text())
+        record['before']['ai'] = json.dumps({'codex_relay': {'implementation_provider': 'broken'}}).encode().hex()
+        backup.write_text(json.dumps(record))
+        before = self.store.raw('ai')
+        with self.assertRaises(StoreError): self.store.restore(saved['fingerprints'])
+        self.assertEqual(self.store.raw('ai'), before)
+
     def test_batch_hosts_dispatch_restore_and_unchanged_bytes(self):
         self.write('claude', b'{ "model": "claude-old", "custom": 1 }\n')
         self.write('codex', b'# keep comment\nmodel = "codex-old"\n')

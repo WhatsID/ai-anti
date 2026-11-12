@@ -29,6 +29,27 @@ class CheckTests(unittest.TestCase):
         store.save(v, snap['fingerprints'], 'fixture-token')
         return store
 
+    def test_implementation_checks_independent_token_profile(self):
+        store = self.api_store()
+        snap = store.read(); v = snap['values']
+        v['implementation_provider'] = 'token_plan'
+        store.save(v, snap['fingerprints'])
+        # Legacy custom API credentials cannot fulfill implementation Token Plan.
+        with patch('checks.discover', return_value='/usr/bin/true'):
+            with self.assertRaisesRegex(checks.CheckError, '实施 Token Plan 凭证'):
+                checks.local(store, str(ROOT))
+        snap = store.read(); v = snap['values']
+        store.save(v, snap['fingerprints'], secret_actions={'token_plan': {'action': 'replace', 'value': 'fixture-implementation-key'}})
+        with patch('checks.discover', return_value='/usr/bin/true'):
+            result = checks.local(store, str(ROOT))
+        self.assertIn('Token Plan · glm-5.3 · Responses', result['message'])
+        self.assertIn('评审检测不能替代实施证据', result['message'])
+        for host, mode in (('claude', 'rules'), ('codex', 'solo')):
+            snap = store.read(); v = snap['values']; v.update(host=host, mode=mode)
+            store.save(v, snap['fingerprints'], secret_actions={'token_plan': {'action': 'clear'}})
+            with patch('checks.discover', return_value='/usr/bin/true'):
+                self.assertEqual(checks.local(store, str(ROOT))['state'], 'passed')
+
     def test_local_effective_executor_dependencies(self):
         store = self.api_store()
         with patch('checks.discover', return_value='/usr/bin/true') as discover:

@@ -242,7 +242,8 @@ AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API
 | `defaults.deployment_scale` | 项目未声明时传给评审方的部署规模 | 未设置 → 评审提示写明「未声明部署规模」 |
 | `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
 | `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
-| `codex_relay.secondary_model` | `$codex-relay` 为实施者请求的模型 | 未设置 → 每次任务指定 |
+| `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理或 Token Plan 固定 `glm-5.3` | 缺失/null → `codex` |
+| `codex_relay.secondary_model` | 原生 Codex 实施模型；切换 GLM 时保留 | 未设置 → 每次任务指定 |
 | `codex_relay.qwen_executor` | Qwen 评审的 CLI 执行器 | `claude` |
 | `plugins.qwen.responses_base_url` | Codex 执行器独立的 Responses 地址 | 无 |
 | `plugins.<name>` | 插件配置，如 qwen 的 `model`、`base_url`、`credential_paths` | 无 |
@@ -312,3 +313,9 @@ Qwen Responses 精确限定 0.160.0 或 0.163.0，两版本均登记通用集合
 Codex 使用 `bug-review` skill，Claude Code 使用 `/bug-review`，以独立分析→结论复核
 两阶段审查已有问题分析，不要求 Git。两种入口都复用 `codex_relay.review_channel`。
 采集、补证、逐项裁决和人工确认修复由调用方负责。见[材料协议与接入示例](docs/BUG_REVIEW.md)。
+
+Codex 主模型可独立选择实施服务，Claude Code 实施代理保持原状，solo 停用独立实施。
+Token Plan 实施读取共享 `review_services.profiles.token_plan` 的 Responses 地址与凭证，
+与当前评审服务/模型无关，不使用自定义 API 凭证。App 可编辑该共享草稿。配置选择不代表
+业务材料外发授权。新入口本轮仅通过离线 fake 与 App 构建，未新增真实 GLM 运行验证；
+调用 completed 仍需主模型独立验收，实际服务端模型未知。详见 codex-relay skill。

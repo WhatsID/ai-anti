@@ -140,8 +140,8 @@ conditions; unresolved mandatory items after it block implementation.
 Create an isolated worktree manually from the frozen exact HEAD commit SHA:
 `git worktree add --detach <path> <frozen-sha>`, using the business project's
 sparse-checkout pattern. Never substitute a moving branch, `main`, `master`, or
-remote default branch for that SHA. Send one native subagent
-the settled plan, request, adjudication, worktree/base, scope/baseline, allowed
+remote default branch for that SHA. Dispatch exactly one implementer through the selected
+implementation provider below. Send it the settled plan, request, adjudication, worktree/base, scope/baseline, allowed
 commands, and boundaries. Supply absolute paths from the resolved `root` for
 applicable DEBUGGING/TESTING sources and require the implementer to read them first;
 context inheritance is insufficient. Missing necessary inputs must be reported.
@@ -152,6 +152,18 @@ writes the candidate; the primary may prepare non-overlapping read-only checks.
 If implementation needs an existing dirty input, prepare the worktree so that
 the exact recorded input and fingerprint are present; a clean worktree must not
 silently omit it. Resolve overlapping dirty work before dispatch.
+
+Resolve `codex_relay.implementation_provider` from the user config: missing/null means
+`codex`; only `codex` and `token_plan` are accepted, including when reading or restoring
+configuration. Keep `codex_relay.secondary_model` as the native Codex model; selecting
+Token Plan never overwrites it. An explicit per-task provider/model instruction takes
+priority as a coherent pair: GLM requires `token_plan` and exactly `glm-5.3`; never
+combine that model with native Codex or a different model with Token Plan. Resolve any
+ambiguous explicit request before dispatch. `solo` disables independent implementation;
+Claude Code's implementer workflow is unchanged. Configuration selection is not permission
+to send business materials externally: require the session's applicable authorization.
+
+### Native Codex implementation
 
 Request the secondary model by explicit tool field when the actual tool schema
 supports it: a model the user specifies for this task, otherwise
@@ -175,6 +187,61 @@ changes stop recovery. Fixed models never authorize fallback or primary takeover
 Native reviews retain R9 empty context; do not pass primary conclusions or prior bias. Explicit request plus evidence that an
 independent agent performed the work and runtime model metadata are required for
 the specified-secondary-model full-chain claim.
+
+### Token Plan implementation
+
+Use the small `scripts/implementation.py` entry from this loaded skill, which requires
+the complete source checkout (the installer links the skill directory to it). It imports
+the existing pure `apps/macos/backend/review_services.py` migration/validation. Use
+`review_services.profiles.token_plan.responses_base_url` and its credential paths/key,
+never `active_api` or the current review model. Legacy credentials migrate only when
+existing URLs classify as Token Plan under the shared migration rules; arbitrary custom
+API credentials cannot become subscription credentials.
+
+Prepare the authorized isolated workspace and a regular prompt file carrying the complete
+request, settled plan, adjudication, frozen baseline, single-writer scope and allowed
+commands. Use a fresh output directory outside that workspace. Example (argument paths
+must be real absolute paths; do not execute placeholders):
+
+```bash
+python3 /absolute/loaded/codex-relay/scripts/implementation.py \
+  --config /absolute/config.json --provider token_plan --model glm-5.3 \
+  --workspace /absolute/isolated-worktree --prompt /absolute/run/prompt.txt \
+  --out /absolute/run/implementation-output --prepare-only
+```
+
+Preparation resolves public config and budgets but never reads credentials or runs a CLI.
+After verifying authorization and the prepared evidence, invoke without `--prepare-only`
+with a different fresh output directory. Native Codex is never executed by this CLI;
+use host `spawn_agent` and its receipt above. No arbitrary API/model is supported.
+
+The GLM entry uses Codex CLI Responses, isolated `CODEX_HOME`, ignored user config/rules,
+no daemon or persistence, workspace-write sandbox, shell env inheritance `none` with fixed
+PATH, sandbox network access false, and disabled hooks/apps/recursive agents and discovery.
+The model transport retains necessary proxy/certificate environment and injects only the
+selected Token Plan token; it never puts the token in argv/config/logs. Host permission
+restrictions remain in force. This is not hard isolation from same-user credential files:
+prompt restrictions cannot prevent arbitrary shell file reads. Dispatch only into the
+explicitly authorized workspace/materials and do not claim stronger isolation.
+
+Limits reuse `review.timeout` / `review.idle_timeout` (1800/900 seconds by default,
+3600/900 maxima), stdin DEVNULL, file logs and 8 MiB output. No automatic retry, fallback,
+landing or commit. Failures retain evidence and partial writes. Before any authorized new
+run, the primary must confirm the prior writer stopped and inspect partial changes and
+side effects; native recovery rules above do not apply to this GLM write task.
+
+Require `status.json` and `manifest.json` with `completed=true`, status `completed`,
+requested `glm-5.3`, executor `codex`, wire API `responses`, CLI capability/version, limits,
+prompt/log hashes and elapsed time. Success requires exit 0, exactly one `turn.started`
+and `turn.completed`, a final agent_message and no error/turn.failed; recoverable command
+failures may be repaired within the turn. The precise known GLM fallback-metadata warning
+is retained as a warning; other error items fail. Actual model remains null with
+`model_evidence=requested_only`, even if metadata mentions a model: do not infer actual
+server identity. This is an explicit exception to native runtime-model evidence, not
+proof of cross-model identity. `completed` means the invocation completed, never that
+implementation passed primary acceptance. A review test is not implementation evidence.
+
+### Landing gates (both implementation providers)
 
 Before landing, recheck the business repository/root, HEAD SHA, and full attached
 branch reference or detached state against the dispatched baseline using the
@@ -204,5 +271,5 @@ uncovered boundaries, landing, cleanup, and the strictly qualified conclusion in
 the template.
 
 The primary model is selected by the user/runtime, never dynamically switched by this
-Skill. `codex_relay.secondary_model` selects only the independent implementer; it does
-not select the reviewer. Both review channels retain the same evidence and scope gates.
+Skill. `codex_relay.secondary_model` selects only the native Codex independent implementer;
+`implementation_provider=token_plan` fixes implementation to glm-5.3. Neither selects the reviewer. Both review channels retain the same evidence and scope gates.

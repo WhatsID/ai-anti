@@ -304,7 +304,8 @@ silently falling back.
 | `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
 | `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
 | `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
-| `codex_relay.secondary_model` | Model requested for the implementer in `$codex-relay` | unset → specify per task |
+| `codex_relay.implementation_provider` | Codex-led implementation: native `codex` or Token Plan fixed `glm-5.3` | missing/null → `codex` |
+| `codex_relay.secondary_model` | Native Codex implementer model; retained when switching to GLM | unset → specify per task |
 | `codex_relay.qwen_executor` | CLI executor for Qwen review | `claude` |
 | `plugins.qwen.responses_base_url` | Separate Responses URL for the Codex executor | none |
 | `plugins.<name>` | Plugin settings, e.g. qwen `model`, `base_url`, `credential_paths` | none |
@@ -372,3 +373,12 @@ Use the `bug-review` Codex skill or Claude Code `/bug-review` command to
 review an existing analysis through two fresh stages, without requiring Git.
 Both use the existing `codex_relay.review_channel` configuration. Evidence collection
 and repair authorization stay with the caller. See [the bundle contract and examples](docs/BUG_REVIEW.md).
+
+Codex-led relays can choose implementation separately from review. Claude Code's
+implementer stays unchanged; solo disables independent implementation. Token Plan uses
+the shared `review_services.profiles.token_plan` Responses URL and credentials, independently
+of active review, and never borrows custom API credentials. The App edits that shared draft.
+Choosing a provider does not authorize business-material transmission. This new entry has
+no additional live GLM verification in this change: offline fake checks and App builds only.
+Invocation completion still requires independent primary acceptance; server model identity
+remains unknown. See the codex-relay skill for bounded execution and evidence.

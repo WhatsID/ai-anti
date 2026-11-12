@@ -89,3 +89,9 @@ PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m unittest discover -s t
 
 测试只使用临时 fixture 和 fake CLI，并包含正式入口 prepare-only 契约，不代表线上模型实测。
 产品范围、历史证据及后续边界见 [产品说明](../../docs/MACOS_REVIEW_APP.md)。
+
+Codex 主模型新增独立实施服务：Codex 原生或千问 Token Plan 固定 `glm-5.3`。
+原生模型 ID 切换后保留；GLM 共享 Token Plan Responses 地址和凭证草稿，但不改变当前
+评审服务/模型。Claude 与 solo 禁用新字段。允许保存未完成认证的草稿，本地检查仅对
+当前实施路由报告缺配置；评审模型测试不证明实施可用。新 GLM 入口需独立业务外发授权，
+本轮只进行离线 fake 验证和构建，不自动安装或执行真实实施。详见 codex-relay skill。

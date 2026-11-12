@@ -54,3 +54,13 @@ DNS 错误、超时或诊断失败本身不能确认沙箱原因，连通成功�
 批准只诊断不批准重启，批准拒绝或无法取得即停。不得自动包装失败入口、自动新建目录
 重启或额外套 shell 重试。显式获批的新完整运行保留 [MODEL_RETRY.md](MODEL_RETRY.md)
 的正常有限预算，不继承旧失败计数，也不强制 `--max-retries 0`。
+
+## 独立 Token Plan 实施入口适用说明
+
+Codex 主导的 `codex-relay/scripts/implementation.py` 同样遵守上述事故纪律，使用共享
+`review_limits` 与 `review_runner.execute`：stdin DEVNULL、文件提示词与日志、总时长/空闲
+上限、8 MiB 输出。它是写任务，不套用评审或原生代理重试；失败保留日志与部分候选，
+主模型确认前次写者停止并审查副作用后，才可在新授权运行中使用全新输出目录。
+固定请求 Token Plan `glm-5.3` 经 Codex Responses，实际服务端模型仍未知。配置选择不授予
+业务材料外发许可；宿主权限不得绕过。workspace-write 与 shell env none 不能硬隔离同用户
+凭证文件，不能把提示词约束说成文件访问安全边界。历史四条正文及事故记录保持不变。

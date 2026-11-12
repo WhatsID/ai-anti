@@ -330,6 +330,36 @@ import Combine
         keyDraft = untouched
         keyDraft.apiKeyInput += "replacement"
         assert(keyDraft.secret == "replacement", "The display mask must never be saved as a credential")
+        // Implementation service is independent of review, with one shared Token Plan draft.
+        var implementationDraft = Draft()
+        implementationDraft.host = "codex"; implementationDraft.secondaryModel = "historical-native"
+        implementationDraft.implementationProvider = "token_plan"
+        assert(implementationDraft.implementationModel == "glm-5.3")
+        implementationDraft.implementationModel = "must-not-overwrite-native"
+        implementationDraft.implementationURL = "https://implementation.fixture.invalid/v1"
+        implementationDraft.implementationKeyInput = "shared-fixture-key"
+        assert(implementationDraft.activeAPI == "custom_api" && implementationDraft.secondaryModel == "historical-native")
+        implementationDraft.activeAPI = "token_plan"
+        assert(implementationDraft.apiKeyInput == "shared-fixture-key")
+        assert(implementationDraft.responsesBaseURL == "https://implementation.fixture.invalid/v1")
+        implementationDraft.apiKeyInput = "updated-shared-key"
+        assert(implementationDraft.implementationKeyInput == "updated-shared-key")
+        implementationDraft.implementationProvider = "codex"
+        assert(implementationDraft.implementationModel == "historical-native")
+        implementationDraft.host = "claude"; assert(!implementationDraft.implementationEnabled)
+        implementationDraft.host = "codex"; implementationDraft.mode = "solo"; assert(!implementationDraft.implementationEnabled)
+        implementationDraft.mode = "rules"; assert(implementationDraft.implementationEnabled)
+        addressModel.draft.implementationProvider = "token_plan"
+        addressModel.draft.secondaryModel = "native-draft"
+        addressModel.switchHost("claude"); addressModel.switchHost("codex")
+        assert(addressModel.draft.implementationProvider == "token_plan" && addressModel.draft.secondaryModel == "native-draft")
+        addressModel.discard()
+        assert(addressModel.draft.implementationProvider == addressModel.saved.implementationProvider && addressModel.draft.secondaryModel == addressModel.saved.secondaryModel)
+        addressModel.draft.implementationProvider = "token_plan"
+        addressModel.save()
+        let implementationValues = addressFront.requests.last?["values"] as! [String: Any]
+        assert(implementationValues["implementation_provider"] as? String == "token_plan")
+        addressFront.complete(.success(missingAddressSnapshot))
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
     }
 }

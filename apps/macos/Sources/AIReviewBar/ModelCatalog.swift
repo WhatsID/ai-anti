@@ -6,6 +6,7 @@ struct ModelOption: Identifiable, Equatable {
 }
 
 enum ModelCatalog {
+    static let implementationGLM = "glm-5.3"
     static let claude = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
     static let codex = ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"]
     static let qwen = ["qwen3.8-max"]

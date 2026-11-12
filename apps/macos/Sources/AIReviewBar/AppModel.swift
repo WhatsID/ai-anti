@@ -34,7 +34,21 @@ struct Draft: Equatable {
     }
     var service: String { channel == "qwen" ? activeAPI : channel }
     var qwenModel: String { get { profile.model } set { profile.model = newValue } }
+    var implementationProvider = "codex"
     var secondaryModel = ""
+    var implementationEnabled: Bool { host == "codex" && mode != "solo" }
+    var implementationModel: String {
+        get { implementationProvider == "token_plan" ? ModelCatalog.implementationGLM : secondaryModel }
+        set { if implementationProvider == "codex" { secondaryModel = newValue } }
+    }
+    var implementationURL: String {
+        get { profiles["token_plan"]!.responsesBaseURL }
+        set { profiles["token_plan"]!.responsesBaseURL = newValue }
+    }
+    var implementationKeyInput: String {
+        get { var shared = self; shared.activeAPI = "token_plan"; return shared.apiKeyInput }
+        set { var shared = self; shared.activeAPI = "token_plan"; shared.apiKeyInput = newValue; profiles["token_plan"] = shared.profile }
+    }
     var mode = "rules"
     var baseURL: String { get { profile.baseURL } set { profile.baseURL = newValue } }
     var responsesBaseURL: String { get { profile.responsesBaseURL } set { profile.responsesBaseURL = newValue } }
@@ -67,7 +81,7 @@ struct Draft: Equatable {
     var secretAction: String { get { profile.action } set { profile.action = newValue; if newValue != "replace" { profile.secret = "" } } }
     var serviceDictionary: [String: Any] { ["version": 1, "active_api": activeAPI, "profiles": profiles.mapValues { $0.dictionary }] }
     var secretActions: [String: Any] { profiles.mapValues { ["action": $0.action == "replace" && $0.secret.isEmpty ? "retain" : $0.action, "value": $0.secret] } }
-    var dictionary: [String: Any] { ["review_services": serviceDictionary, "host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": qwenExecutor] }
+    var dictionary: [String: Any] { ["review_services": serviceDictionary, "host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "implementation_provider": implementationProvider, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": qwenExecutor] }
 }
 
 @MainActor final class AppModel: ObservableObject {
@@ -131,7 +145,7 @@ struct Draft: Equatable {
     var savedReviewFamily: String { saved.service }
     var title: String { "\(saved.host == "claude" ? "Claude" : "Codex") → \(ReviewService.title(savedReviewFamily) + " · " + (saved.channel == "codex" ? (saved.reviewerModel.isEmpty ? "CLI 默认" : saved.reviewerModel) : saved.channel == "qoder" ? "Kimi-K3.1-Pro" : saved.qwenModel))" }
     var primaryOptions: [ModelOption] { ModelCatalog.options(draft.host, preserving: [defaults[draft.host] ?? "", draft.host == saved.host ? saved.primaryModel : "", draft.primaryModel], emptyLabel: "保留当前默认值") }
-    var secondaryOptions: [ModelOption] { ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定") }
+    var secondaryOptions: [ModelOption] { if draft.implementationProvider == "token_plan" { return [ModelOption(id: ModelCatalog.implementationGLM, label: ModelCatalog.implementationGLM)] }; return ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定") }
     var reviewerOptions: [ModelOption] {
         if draft.channel == "qoder" { return [ModelOption(id: "kmodel_latest", label: "Kimi-K3.1-Pro")] }
         if draft.channel == "codex" { return ModelCatalog.options("codex", preserving: [saved.reviewerModel, draft.reviewerModel], emptyLabel: "CLI 默认") }
@@ -243,7 +257,7 @@ struct Draft: Equatable {
                 }
             }
         }
-        d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url"); d.qwenExecutor = v["qwen_executor"] as? String ?? "claude"
+        d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.implementationProvider = v["implementation_provider"] as? String ?? "codex"; d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url"); d.qwenExecutor = v["qwen_executor"] as? String ?? "claude"
         saved = d; draft = d; loaded = true
         // Legacy configurations may only contain the endpoint for one host.
         // Suggest missing Token Plan defaults in the draft; keep the disk snapshot intact.

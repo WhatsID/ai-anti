@@ -56,3 +56,19 @@ apps/macos/backend/tests/test_review_services.py:qwen3.8-max
 apps/macos/backend/tests/test_review_services.py:https://user:password@fixture.invalid
 docs/MACOS_REVIEW_APP.md:Qwen3.8-Max
 docs/MACOS_REVIEW_APP.md:千问 Token Plan
+
+# 独立实施来源的公开产品名称；仅放行本轮实际命中的具体文件
+README.md:Token Plan
+README.zh-CN.md:Token Plan
+adapters/codex/skills/codex-relay/SKILL.md:Token Plan
+adapters/codex/skills/codex-relay/scripts/implementation.py:Token Plan
+adapters/codex/skills/codex-relay/scripts/implementation_config.py:Token Plan
+apps/macos/README.md:Token Plan
+apps/macos/Sources/AIReviewBar/SettingsView.swift:Token Plan
+apps/macos/backend/checks.py:Token Plan
+apps/macos/backend/tests/test_checks.py:Token Plan
+core/CLI_DISCIPLINE.md:Token Plan
+docs/COMPATIBILITY.md:Token Plan
+docs/MACOS_REVIEW_APP.md:Token Plan
+# 已存在的公开模型 fixture，与 HEAD 同内容，非私人模型代号
+adapters/codex/tests/test_problem_review.py:qwen3.8-max
