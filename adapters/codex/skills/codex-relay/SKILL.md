@@ -192,8 +192,8 @@ the specified-secondary-model full-chain claim.
 
 Use the small `scripts/implementation.py` entry from this loaded skill, which requires
 the complete source checkout (the installer links the skill directory to it). It imports
-the existing pure `apps/macos/backend/review_services.py` migration/validation. Use
-`review_services.profiles.token_plan.responses_base_url` and its credential paths/key,
+the existing pure `apps/macos/backend/model_services.py` migration/validation. Use
+`model_services.profiles.token_plan.responses_base_url` and its credential paths/key,
 never `active_api` or the current review model. Legacy credentials migrate only when
 existing URLs classify as Token Plan under the shared migration rules; arbitrary custom
 API credentials cannot become subscription credentials.
@@ -328,3 +328,6 @@ metadata and a completed turn do not prove backend identity or primary acceptanc
 Prepare-only writes the same model/effort/catalog without reading credentials or launching
 CLI. For rollback, select GLM before using an older version; older runners fix Token Plan
 to GLM and cannot preserve Qwen4 execution. No installation or user-config change is implicit.
+
+
+Token Plan 双订阅例外（用户明确授权，2026-11-16）：配置双槽且启用自动切换时，仅对尚未向 CLI 发送响应的真实 HTTP429 明确额度耗尽，在同模型、同通道、同请求内切换一次凭证。本逻辑运行后续阶段/attempt 持续使用备用；下一任务重新主优先。普通限流、认证失败、SSE 内错误、断流、账户绑定响应引用均不切换。包装器最终失败才判定本档失败；本会话已耗尽槽不得因进程重跑再次尝试。此例外不改变模型/通道降级顺序，不授权写任务进程重试；已经完成的工具与文件操作不得重复执行。

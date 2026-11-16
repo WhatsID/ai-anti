@@ -18,6 +18,8 @@ def single_line(value, key):
 
 
 def resolve(config, channel, model, repo, families, executor=None, responses_url=None):
+    from token_plan_transport import contract
+    contract(config, repo)
     channel = channel if channel is not None else lookup(config, 'codex_relay.review_channel')
     channel = 'claude' if channel is None else channel
     if not isinstance(channel, str) or channel not in ('claude', 'qwen', 'qoder'):
@@ -61,16 +63,17 @@ def resolve(config, channel, model, repo, families, executor=None, responses_url
     if not isinstance(paths, list) or not paths:
         raise ConfigError('plugins.qwen.credential_paths must be a non-empty path array')
     credential_key = lookup(config, 'plugins.qwen').get('credential_key', 'tokenplan.value')
-    if credential_key not in ('tokenplan.value', 'review_services.token_plan.value', 'review_services.custom_api.value'):
+    if credential_key not in ('tokenplan.value', 'model_services.token_plan.value', 'model_services.custom_api.value', 'review_services.token_plan.value', 'review_services.custom_api.value'):
         raise ConfigError('plugins.qwen.credential_key invalid')
     resolved = []
     for value in paths:
         path = Path(single_line(value, 'plugins.qwen.credential_paths entry')).expanduser()
         resolved.append(path if path.is_absolute() else repo / path)
-    return {'channel': channel, 'requested_model': model, 'configured_model': model,
+    from token_plan_transport import attach
+    return attach(config, {'channel': channel, 'requested_model': model, 'configured_model': model,
             'executor': executor, 'wire_api': 'responses' if executor == 'codex' else 'anthropic',
             'cli_model': model if executor == 'codex' else 'sonnet', 'pattern': re.compile(re.escape(model)),
-            'base_url': url, 'credential_paths': resolved, 'credential_key': credential_key}
+            'base_url': url, 'credential_paths': resolved, 'credential_key': credential_key}, repo)
 
 
 def evidence(channel):
@@ -78,6 +81,8 @@ def evidence(channel):
     value.update(executor=channel.get('executor', 'claude'), wire_api=channel.get('wire_api', 'anthropic'))
     if value['executor'] == 'codex':
         value.update(actual_model=None, model_evidence='requested_only')
+    if channel.get('_transport') and 'token_plan_accounts' in channel:
+        value['token_plan_accounts'] = channel['_transport'].evidence()
     return value
 
 
@@ -90,8 +95,8 @@ def child_environment(channel):
             if key.startswith(('ANTHROPIC_', 'CLAUDE_', 'OPENAI_', 'CODEX_')) or key == 'AI_ANTI_QWEN_TOKEN':
                 env.pop(key)
         return env
-    token = None
-    for path in channel['credential_paths']:
+    token = channel.get('_local_token')
+    for path in ([] if token else channel['credential_paths']):
         try:
             data = json.loads(path.read_text(encoding='utf-8'))
             value = lookup(data, channel.get('credential_key', 'tokenplan.value'))
@@ -103,6 +108,12 @@ def child_environment(channel):
     if token is None:
         raise ConfigError('Qwen credential unavailable: selected credential key must be a non-empty string')
     env = dict(os.environ)
+    if channel.get('_local_token'):
+        for key in list(env):
+            if key.startswith(('OPENAI_', 'ANTHROPIC_')) or key == 'AI_ANTI_QWEN_TOKEN':
+                env.pop(key)
+        for key in ('NO_PROXY','no_proxy'):
+            env[key] = ','.join(filter(None,[env.get(key,''),'127.0.0.1','localhost']))
     if channel.get('executor') == 'codex':
         for key in list(env):
             if (key.startswith(('CODEX_', 'OPENAI_', 'ANTHROPIC_', 'CLAUDE_')) and key != 'CODEX_HOME') or key == 'AI_ANTI_QWEN_TOKEN':

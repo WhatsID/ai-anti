@@ -340,21 +340,35 @@ check has "$OUT" "顺序颠倒"
 check test "$(snapshot)" = "$before"
 
 # ---------------------------------------------------------------------------
-new_case "qwen 配置片段：credential_paths 不是数组 → 本档不可用（exit 3）"
-snippet="$BASE/case-$CASES/qwen_conf.py"
-awk 'f && $0 == "PY" { exit } f { print } index($0, "QWEN_CONF=$(python3") == 1 { f = 1 }' \
-  "$CHECKOUT/plugins/qwen/commands/qwen-review.md" > "$snippet"
-check test -s "$snippet"
-check grep -q credential_paths "$snippet"
+new_case "qwen 统一包装器：拒绝非数组凭证路径，保留旧凭证键默认值"
+snippet="$BASE/case-$CASES/qwen_resolve.py"
+check grep -q -- '--token-plan-config' "$CHECKOUT/plugins/qwen/commands/qwen-review.md"
+if grep -q 'QWEN_CONF=$(python3' "$CHECKOUT/plugins/qwen/commands/qwen-review.md"; then
+  fail "qwen 命令仍含重复配置解析器"
+fi
+cat > "$snippet" <<'PYCODE'
+import json, pathlib, sys
+root = pathlib.Path(sys.argv[1])
+sys.path.insert(0, str(root / 'adapters/codex/skills/claude-review/scripts'))
+from ai_anti_config import ConfigError, load
+from review_channels import resolve
+try:
+    config = load(pathlib.Path.home() / '.config/ai-anti/config.json')
+    route = resolve(config, 'qwen', None, pathlib.Path.cwd(), {}, executor='claude')
+except ConfigError:
+    sys.exit(3)
+print(route['credential_key'])
+print(route['credential_paths'][0])
+PYCODE
 mkdir -p "$H/.config/ai-anti"
 write_json "$H/.config/ai-anti/config.json" '{"plugins": {"qwen": {"model": "m", "base_url": "https://example.invalid", "credential_paths": "~/.config/ai-anti/secrets.json"}}}'
-HOME="$H" python3 "$snippet" < /dev/null > "$OUT" 2>&1
+HOME="$H" python3 "$snippet" "$CHECKOUT" < /dev/null > "$OUT" 2>&1
 check test "$?" = 3
 write_json "$H/.config/ai-anti/config.json" '{"plugins": {"qwen": {"model": "m", "base_url": "https://example.invalid", "credential_paths": ["~/.config/ai-anti/secrets.json"]}}}'
-HOME="$H" python3 "$snippet" < /dev/null > "$OUT" 2>&1
+HOME="$H" python3 "$snippet" "$CHECKOUT" < /dev/null > "$OUT" 2>&1
 check test "$?" = 0
-check test "$(sed -n 3p "$OUT")" = "tokenplan.value"
-check test "$(sed -n 4p "$OUT")" = "~/.config/ai-anti/secrets.json"
+check test "$(sed -n 1p "$OUT")" = "tokenplan.value"
+check test "$(sed -n 2p "$OUT")" = "$H/.config/ai-anti/secrets.json"
 
 # ---------------------------------------------------------------------------
 echo

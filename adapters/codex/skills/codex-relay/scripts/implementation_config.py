@@ -7,11 +7,11 @@ from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[5]
 REVIEW = ROOT / 'adapters/codex/skills/claude-review/scripts'
 BACKEND = ROOT / 'apps/macos/backend'
-if not (BACKEND / 'review_services.py').is_file():
+if not (BACKEND / 'model_services.py').is_file():
     raise ImportError('implementation requires the complete ai-anti source checkout')
 sys.path.insert(0, str(REVIEW))
 sys.path.insert(0, str(BACKEND))
-import review_services
+import model_services
 import implementation_models
 from ai_anti_config import ConfigError, lookup
 from review_channels import resolve as review_channel
@@ -55,6 +55,8 @@ def credential_path(value):
 
 def resolve(config, workspace, explicit_provider=None, explicit_model=None):
     """Overrides are one coherent provider/model pair; never consult active_api for GLM."""
+    from token_plan_transport import contract
+    contract(config, workspace)
     stored = provider(lookup(config, 'codex_relay.implementation_provider'))
     try:
         token_model = implementation_models.parse(lookup(config, 'codex_relay.token_plan_implementation_model'))
@@ -83,14 +85,16 @@ def resolve(config, workspace, explicit_provider=None, explicit_model=None):
     qwen = {} if qwen is None else qwen
     if not isinstance(qwen, dict):
         raise ConfigError('plugins.qwen must be an object')
-    profiles = review_services.load(config, qwen, endpoint, model, credential_path, ConfigError)
+    profiles = model_services.load(config, qwen, endpoint, model, credential_path, ConfigError)
     profile = copy.deepcopy(profiles['profiles']['token_plan'])
     profile['model'] = chosen
-    routed = {'plugins': {'qwen': profile}}
+    routed = {'plugins': {'qwen': profile}, 'token_plan_accounts': config.get('token_plan_accounts')}
     channel = review_channel(routed, 'qwen', None, Path(workspace), {}, executor='codex')
+    from token_plan_transport import attach
+    attach(config, channel, workspace, force=True)
     channel.update(provider=selected, secondary_model=secondary)
     return channel
 
 
 def public(route):
-    return {k: v for k, v in route.items() if k not in ('pattern', 'credential_paths', 'credential_key')}
+    return {k: v for k, v in route.items() if k not in ('pattern', 'credential_paths', 'credential_key', 'token_plan_backup_paths', 'token_plan_accounts') and not k.startswith('_')}

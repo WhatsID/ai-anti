@@ -15,6 +15,7 @@ from problem_result import validate_result, previous_round, reserve_previous, re
 from review_material import MaterialError, no_symlink, sha
 from review import write_json, snapshot_hashes, require_full_reads, make_prompt, compat_warning
 from review_channels import resolve, evidence, child_environment
+from token_plan_transport import Transport
 from review_chunks import chunk_file, required_files, source_labels
 from review_materials import build_registry, mcp_config
 from review_runner import MODEL_FAMILIES, RunError, capability, run_stage
@@ -100,6 +101,7 @@ def main():
     args = parser().parse_args()
     output = manifest = channel = None
     warnings = []
+    transport = None
     try:
         config = load_config()
         families = model_families(config, MODEL_FAMILIES)
@@ -141,6 +143,12 @@ def main():
             print(output)
             return 0
         reserve_previous(previous, output)
+        transport = Transport(channel, args.timeout * 2 + 60, args.idle_timeout)
+        transport.__enter__()
+        channel['_transport'] = transport
+        if channel.get('executor') == 'codex':
+            from review_codex import write_config
+            write_config(channel, initial_registry, logs / 'independent.codex-config.json')
         env = child_environment(channel)  # No credential reads in prepare-only.
         runner, preflight, executor = run_stage, capability, 'claude'
         if channel['channel'] == 'qoder':
@@ -222,6 +230,19 @@ def main():
         else:
             print('bug review preparation failed: ' + str(exc), file=sys.stderr)
         return 2
+
+    finally:
+        if transport:
+            transport.__exit__(None, None, None)
+            public_accounts = transport.evidence()
+            for filename in ('manifest.json', 'status.json'):
+                path = output / filename
+                if path.is_file() and 'token_plan_accounts' in channel:
+                    data = json.loads(path.read_text(encoding='utf-8'))
+                    data['token_plan_accounts'] = public_accounts
+                    if filename == 'status.json' and 'manifest_sha256' in data:
+                        data['manifest_sha256'] = sha((output / 'manifest.json').read_bytes())
+                    write_json(path, data)
 
 
 if __name__ == '__main__':

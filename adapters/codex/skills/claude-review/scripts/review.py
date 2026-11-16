@@ -18,6 +18,7 @@ from review_runner import MODEL_FAMILIES, RunError, capability, run_stage
 from review_retry import stage_runner, attempt_summary
 from ai_anti_config import ConfigError, load as load_config, model_families, review_limits
 from review_channels import resolve, evidence, child_environment
+from token_plan_transport import Transport
 from review_chunks import chunk_stage, chunk_file, required_files, source_labels
 from review_materials import build_registry, mcp_config
 
@@ -227,6 +228,7 @@ def main():
     output = None
     manifest = None
     warnings = []
+    transport = None
     try:
         if not (CORE.is_file() and DISCIPLINE.is_file() and os.access(CORE, os.R_OK) and os.access(DISCIPLINE, os.R_OK)):
             raise MaterialError("core authority files unavailable")
@@ -267,6 +269,11 @@ def main():
             write_json(output / "status.json", {"status": "prepared", "completed": False, "out": str(output), "material_transport": manifest["material_transport"], **evidence(channel)})
             print(output)
             return 0
+        transport = Transport(channel, args.timeout * (2 if args.mode == 'plan' else 1) + 60, args.idle_timeout)
+        transport.__enter__()
+        channel['_transport'] = transport
+        if codex_executor:
+            write_config(channel, initial_registry_path, logs / (initial_stage.name + '.codex-config.json'))
         env = child_environment(channel)
         stage_families = {channel["cli_model"]: channel["pattern"]}
         expected = channel["configured_model"] if channel["channel"] in ("qwen", "qoder") else None
@@ -364,6 +371,19 @@ def main():
         else:
             print("review preparation failed: " + str(exc), file=sys.stderr)
         return 2
+
+    finally:
+        if transport:
+            transport.__exit__(None, None, None)
+            public_accounts = transport.evidence()
+            for filename in ('manifest.json', 'status.json'):
+                path = output / filename
+                if path.is_file() and 'token_plan_accounts' in channel:
+                    data = json.loads(path.read_text(encoding='utf-8'))
+                    data['token_plan_accounts'] = public_accounts
+                    if filename == 'status.json' and 'manifest_sha256' in data:
+                        data['manifest_sha256'] = sha((output / 'manifest.json').read_bytes())
+                    write_json(path, data)
 
 
 if __name__ == "__main__":

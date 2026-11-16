@@ -267,9 +267,28 @@ import Combine
         var serviceValues = snapshot["values"] as! [String: Any]
         var token = ServiceProfile.initial("token_plan"); token.model = "historical-unknown"
         serviceValues["qwen_model"] = token.model; serviceValues["base_url"] = token.baseURL; serviceValues["responses_base_url"] = token.responsesBaseURL
-        serviceValues["review_services"] = ["version": 1, "active_api": "token_plan", "profiles": ["token_plan": token.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
+        serviceValues["model_services"] = ["version": 1, "active_api": "token_plan", "profiles": ["token_plan": token.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
         serviceSnapshot["values"] = serviceValues
         model.refresh(); front.complete(.success(serviceSnapshot))
+        // A retained external backup must keep its declared legacy lookup key.
+        let defaultBackup = Draft().accountDictionary["backup"] as! [String: Any]
+        assert(defaultBackup["credential_key"] as? String == "model_services.token_plan_backup.value")
+        let backupFront = FakeClient()
+        let backupModel = AppModel(foreground: backupFront, background: FakeClient(), automatic: false)
+        var oldBackupSnapshot = serviceSnapshot
+        var oldBackupValues = serviceValues
+        oldBackupValues["token_plan_accounts"] = ["version": 1, "auto_failover": false, "backup": ["credential_paths": ["project/legacy-secrets.json"], "credential_key": "review_services.token_plan_backup.value"]]
+        oldBackupSnapshot["values"] = oldBackupValues
+        backupModel.refresh(); backupFront.complete(.success(oldBackupSnapshot))
+        assert(backupModel.draft.backupProfile.credentialKey == "review_services.token_plan_backup.value")
+        backupModel.draft.mode = "force"
+        backupModel.save()
+        let backupSavedValues = backupFront.requests.last?["values"] as! [String: Any]
+        let backupSavedAccounts = backupSavedValues["token_plan_accounts"] as! [String: Any]
+        let backupSavedSlot = backupSavedAccounts["backup"] as! [String: Any]
+        assert(backupSavedSlot["credential_key"] as? String == "review_services.token_plan_backup.value", "Saving unrelated fields must retain an external backup key")
+        assert(backupSavedSlot["credential_paths"] as? [String] == ["project/legacy-secrets.json"])
+        backupFront.complete(.success(oldBackupSnapshot))
         model.draft.qwenModel = "deepseek-v4-pro"
         assert(model.reviewerOptions.contains { $0.id == "historical-unknown" }, "Loaded unknown service model remains selectable")
         model.draft.secretAction = "replace"; model.draft.secret = ""
@@ -289,7 +308,7 @@ import Combine
         var missingToken = ServiceProfile.initial("token_plan")
         missingToken.baseURL = ""
         missingAddressValues["base_url"] = ""
-        missingAddressValues["review_services"] = ["version": 1, "active_api": "token_plan", "profiles": ["token_plan": missingToken.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
+        missingAddressValues["model_services"] = ["version": 1, "active_api": "token_plan", "profiles": ["token_plan": missingToken.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
         missingAddressSnapshot["values"] = missingAddressValues
         addressModel.refresh(); addressFront.complete(.success(missingAddressSnapshot))
         assert(addressModel.draft.baseURL == "https://token-plan.maas.qianwenaiapi.com/apps/anthropic", "Missing Token Plan Anthropic address must receive its default")
@@ -301,7 +320,7 @@ import Combine
         missingToken.baseURL = "https://existing.invalid/anthropic"; missingToken.responsesBaseURL = ""
         missingAddressValues["base_url"] = missingToken.baseURL
         missingAddressValues["responses_base_url"] = ""
-        missingAddressValues["review_services"] = ["version": 1, "active_api": "token_plan", "profiles": ["token_plan": missingToken.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
+        missingAddressValues["model_services"] = ["version": 1, "active_api": "token_plan", "profiles": ["token_plan": missingToken.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
         missingAddressSnapshot["values"] = missingAddressValues
         addressModel.refresh(); addressFront.complete(.success(missingAddressSnapshot))
         assert(addressModel.draft.baseURL == "https://existing.invalid/anthropic")
@@ -380,6 +399,20 @@ import Combine
         let qoderValues = addressFront.requests.last?["values"] as! [String: Any]
         assert(qoderValues["implementation_provider"] as? String == "qoder")
         addressFront.complete(.success(missingAddressSnapshot))
+        var dual = Draft()
+        dual.activeAPI = "token_plan"; dual.apiKeyInput = "primary-fixture"
+        dual.backupKeyInput = "backup-fixture"; dual.autoFailover = true
+        dual.activeAPI = "custom_api"; dual.apiKeyInput = "custom-fixture"
+        dual.host = "codex"; dual.implementationProvider = "token_plan"
+        assert(dual.implementationKeyInput == "primary-fixture" && dual.backupKeyInput == "backup-fixture")
+        assert(dual.autoFailover)
+        let dualActions = dual.secretActions
+        assert((dualActions["token_plan_backup"] as! [String: String])["value"] == "backup-fixture")
+        assert((dual.dictionary["token_plan_accounts"] as! [String: Any])["auto_failover"] as? Bool == true)
+        dual.backupProfile.secret = ""; dual.backupProfile.action = "retain"; dual.backupProfile.credentialPaths = ["~/fixture.json"]
+        assert(dual.backupKeyInput == Draft.credentialMask)
+        assert((dual.secretActions["token_plan_backup"] as! [String: String])["value"] == "")
+        dual.backupKeyInput = ""; assert(dual.backupProfile.action == "clear")
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
     }
 }

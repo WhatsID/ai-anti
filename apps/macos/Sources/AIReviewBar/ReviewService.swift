@@ -10,7 +10,7 @@ struct ServiceProfile: Equatable {
     var action = "retain"
     var dictionary: [String: Any] { ["model": model, "base_url": baseURL, "responses_base_url": responsesBaseURL, "credential_paths": credentialPaths, "credential_key": credentialKey] }
     static func initial(_ id: String) -> ServiceProfile {
-        var p = ServiceProfile(); p.credentialKey = "review_services.\(id).value"
+        var p = ServiceProfile(); p.credentialKey = "model_services.\(id).value"
         if id == "token_plan" {
             p.model = "qwen3.8-max"
             p.baseURL = "https://token-plan.maas.qianwenaiapi.com/apps/anthropic"

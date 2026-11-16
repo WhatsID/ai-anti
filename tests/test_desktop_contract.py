@@ -74,7 +74,7 @@ class DesktopContract(unittest.TestCase):
         self.assertLess(view.index('Picker("评审模型ID"'), view.index('Picker("实施服务"'))
         self.assertLess(view.index('Picker("实施服务"'), view.index('modelPicker("实施模型 ID"'))
         self.assertIn('Picker("评审服务"', view)
-        self.assertIn('SecureField("评审服务API密钥"', view)
+        self.assertIn('SecureField("API密钥"', view)
         self.assertIn('text: $model.draft.apiKeyInput', view)
         self.assertIn('if model.draft.channel == "qwen"', view)
         self.assertIn('Picker("评审执行器"', view)
@@ -115,7 +115,7 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('.rotationEffect(.degrees(isExpanded ? 90 : 0))', view)
         self.assertIn('}.frame(height: 26)', view)
         self.assertIn('.transition(.opacity)', view)
-        for title in ('主模型', '协作模式', '评审模型 ID', '评审服务地址', '评审服务API密钥', '评审执行器', '评审模型ID', '实施服务地址', '实施服务API密钥'):
+        for title in ('主模型', '协作模式', '评审模型 ID', '评审服务地址', '主账号API密钥', '备用账号API密钥', '评审执行器', '评审模型ID', '实施服务地址'):
             self.assertIn('field("' + title + '") {', view)
         self.assertNotIn('field("评审服务")', view)
         self.assertNotIn('field("实施服务")', view)
@@ -123,10 +123,10 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('field(title)', picker)
         review_body = view.split(review, 1)[1].split(implementation, 1)[0]
         implementation_body = view.split(implementation, 1)[1].split('            Divider()', 1)[0]
-        for item in ('Picker("评审服务"', 'SecureField("评审服务API密钥"', 'Picker("评审执行器"', 'Picker("评审模型ID"', 'executorMigrationPending', 'selectedCredentialMessage', 'claudeFallbacks'):
+        for item in ('Picker("评审服务"', 'SecureField("API密钥"', 'Picker("评审执行器"', 'Picker("评审模型ID"', 'executorMigrationPending', 'selectedCredentialMessage', 'claudeFallbacks'):
             self.assertIn(item, review_body)
             self.assertNotIn(item, implementation_body)
-        for item in ('Picker("实施服务"', 'modelPicker("实施模型 ID"', 'TextField("实施服务地址"', 'SecureField("实施服务API密钥"'):
+        for item in ('Picker("实施服务"', 'modelPicker("实施模型 ID"', 'TextField("实施服务地址"', 'SecureField("主账号API密钥", text: $model.draft.implementationKeyInput)'):
             self.assertIn(item, implementation_body)
             self.assertNotIn(item, review_body)
         self.assertGreater(view.index('Button("检查配置"'), view.index(implementation))
@@ -193,10 +193,10 @@ class DesktopContract(unittest.TestCase):
         manifest=json.loads((out/'manifest.json').read_text()); self.assertEqual(manifest['mode'],'diff')
         self.assertNotIn('FAKE_OFFLINE_KEY',json.dumps(manifest))
         # Both service slots also pass the formal parser/preflight boundary.
-        atomic(store.paths['secrets'],b'{"review_services":{"token_plan":{"value":"ONE_FIXTURE"},"custom_api":{"value":"TWO_FIXTURE"}}}')
+        atomic(store.paths['secrets'],b'{"model_services":{"token_plan":{"value":"ONE_FIXTURE"},"custom_api":{"value":"TWO_FIXTURE"}}}')
         for service in ('token_plan','custom_api'):
             config = json.loads(store.raw('ai'))
-            config['plugins']['qwen']['credential_key'] = 'review_services.'+service+'.value'
+            config['plugins']['qwen']['credential_key'] = 'model_services.'+service+'.value'
             atomic(store.paths['ai'],json.dumps(config).encode())
             chosen = list(argv); chosen[chosen.index('--out')+1] = str(self.root/('out-'+service))
             result = subprocess.run(chosen,env=self.env,capture_output=True,text=True)
@@ -217,7 +217,7 @@ class DesktopContract(unittest.TestCase):
         (commands/'qwen-review.md').symlink_to(ROOT/'plugins/qwen/commands/qwen-review.md')
         scratch=self.root/'scratch'; scratch.mkdir(); (scratch/'qwen_prompt.txt').write_text('offline prompt')
         fake=self.root/'claude'
-        fake.write_text('#!'+sys.executable+'\nimport os,sys,json\nassert sys.stdin.read()==""\nassert os.environ["ANTHROPIC_AUTH_TOKEN"]=="offline-fixture"\nassert "ANTHROPIC_API_KEY" not in os.environ\nassert os.environ["ANTHROPIC_DEFAULT_SONNET_MODEL"]=="fixture"\nprint(json.dumps({"type":"result","subtype":"success","result":"offline report","permission_denials":[],"argv":sys.argv[1:],"is_error":False}))\n')
+        fake.write_text('#!'+sys.executable+'\nimport os,sys,json\nassert sys.stdin.read()==""\nassert os.environ["ANTHROPIC_API_KEY"]=="offline-fixture"\nassert "ANTHROPIC_AUTH_TOKEN" not in os.environ\nassert os.environ["ANTHROPIC_DEFAULT_SONNET_MODEL"]=="fixture"\nprint(json.dumps({"type":"result","subtype":"success","result":"offline report","permission_denials":[],"argv":sys.argv[1:],"is_error":False}))\n')
         fake.chmod(0o700)
         env=dict(self.env,PATH=str(self.root)+':'+os.path.dirname(sys.executable)+':/usr/bin:/bin',CLAUDE_CONFIG_DIR=str(commands.parent),ANTHROPIC_API_KEY='must-remove')
         # Replace only the documented scratchpad placeholder, keeping the real template chain.
@@ -230,26 +230,21 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('timeout=12 idle_timeout=7',run.stderr)
         self.assertEqual((scratch/'qwen_report.txt').read_text(),'offline report')
 
-    def test_qwen_command_credential_key_snippets(self):
+    def test_qwen_command_shared_credential_resolver(self):
         command = (ROOT/'plugins/qwen/commands/qwen-review.md').read_text()
-        blocks = re.findall(r"python3 - <<'PY'\n(.*?)\nPY", command, re.S)
-        self.assertGreaterEqual(len(blocks),2)
-        store = Store(self.root)
-        q = dict(model='fixture',base_url='https://fixture.invalid',credential_paths=[str(store.paths['secrets'])])
-        atomic(store.paths['secrets'], b'{"tokenplan":{"value":"old"},"review_services":{"token_plan":{"value":"one"},"custom_api":{"value":"two"}}}')
-        for key, expected in [('review_services.token_plan.value','one'),('review_services.custom_api.value','two'),('tokenplan.value','old')]:
-            q['credential_key'] = key
-            atomic(store.paths['ai'], json.dumps({'plugins':{'qwen':q}}).encode())
-            config = subprocess.run([sys.executable,'-c',blocks[0]],env=self.env,capture_output=True,text=True)
-            self.assertEqual(config.returncode,0,config.stderr)
-            fields = config.stdout.splitlines(); self.assertEqual(fields[2],key)
-            env = dict(self.env,QWEN_CREDENTIAL_KEY=fields[2],QWEN_PATHS='\n'.join(fields[3:]))
-            token = subprocess.run([sys.executable,'-c',blocks[1]],env=env,capture_output=True,text=True)
-            self.assertEqual(token.stdout.strip(),expected)
+        self.assertIn('--token-plan-config',command)
+        self.assertNotIn('TOKENPLAN_KEY=',command)
+        from review_channels import resolve, child_environment
+        store=Store(self.root)
+        q=dict(model='fixture',base_url='https://fixture.invalid',credential_paths=[str(store.paths['secrets'])])
+        atomic(store.paths['secrets'],b'{"tokenplan":{"value":"old"},"model_services":{"token_plan":{"value":"one"},"custom_api":{"value":"two"}}}')
+        for key,expected in [('model_services.token_plan.value','one'),('model_services.custom_api.value','two'),('tokenplan.value','old')]:
+            q['credential_key']=key
+            route=resolve({'plugins':{'qwen':q}},'qwen',None,self.repo,{},executor='claude')
+            self.assertEqual(child_environment(route)['ANTHROPIC_API_KEY'],expected)
+        q['credential_key']='model_services.custom_api.value'
         atomic(store.paths['secrets'],b'{"tokenplan":{"value":"old"}}')
-        env = dict(self.env,QWEN_CREDENTIAL_KEY='review_services.custom_api.value',QWEN_PATHS=str(store.paths['secrets']))
-        token = subprocess.run([sys.executable,'-c',blocks[1]],env=env,capture_output=True,text=True)
-        self.assertNotEqual(token.returncode,0); self.assertEqual(token.stdout,'')
+        with self.assertRaises(ValueError): child_environment(resolve({'plugins':{'qwen':q}},'qwen',None,self.repo,{},executor='claude'))
 
     def test_implementation_provider_backend_runner_and_ui_contract(self):
         import importlib.util
@@ -275,7 +270,7 @@ class DesktopContract(unittest.TestCase):
         self.assertEqual(implementation_models.parse(None), 'glm-5.3')
         with self.assertRaises(ValueError): implementation_models.parse('')
         # Existing package includes the single shared pure migration dependency.
-        self.assertIn('backend/review_services.py', (ROOT/'apps/macos/build-app.sh').read_text())
+        self.assertIn('backend/model_services.py', (ROOT/'apps/macos/build-app.sh').read_text())
         skill = (ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()
         for requirement in ('--prepare-only', 'requested_only', 'never `active_api`', 'primary acceptance'):
             self.assertIn(requirement, skill)

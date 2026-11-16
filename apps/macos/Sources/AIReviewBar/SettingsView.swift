@@ -183,8 +183,13 @@ struct SettingsView: View {
                             field("评审服务地址") {
                                 TextField("评审服务地址", text: $model.draft.activeBaseURL).disabled(isSolo)
                             }
-                            field("评审服务API密钥") {
-                                SecureField("评审服务API密钥", text: $model.draft.apiKeyInput).disabled(isSolo)
+                            field(model.draft.activeAPI == "token_plan" ? "主账号API密钥" : "评审服务API密钥") {
+                                SecureField("API密钥", text: $model.draft.apiKeyInput).disabled(isSolo)
+                            }
+                            if model.draft.activeAPI == "token_plan" {
+                                field("备用账号API密钥") { SecureField("备用账号API密钥", text: $model.draft.backupKeyInput).disabled(isSolo) }
+                                Toggle("主账号额度用尽时自动切换", isOn: $model.draft.autoFailover).disabled(isSolo)
+                                note("每次新任务优先主账号；明确额度耗尽后当次任务持续使用备用。两个槽与实施共享，关闭开关保留备用密钥；不显示实时余额。")
                             }
                             note("Claude 与 Codex 共享当前 API 服务、模型及凭证；两个协议地址独立保存。切换服务保留各自草稿，未保存不写入磁盘。")
                         } else {
@@ -229,9 +234,12 @@ struct SettingsView: View {
                             field("实施服务地址") {
                                 TextField("实施服务地址", text: $model.draft.implementationURL).disabled(isSolo)
                             }
-                            field("实施服务API密钥") {
-                                SecureField("实施服务API密钥", text: $model.draft.implementationKeyInput).disabled(isSolo)
+                            field("主账号API密钥") {
+                                SecureField("主账号API密钥", text: $model.draft.implementationKeyInput).disabled(isSolo)
                             }
+                            field("备用账号API密钥") { SecureField("备用账号API密钥", text: $model.draft.backupKeyInput).disabled(isSolo) }
+                            Toggle("主账号额度用尽时自动切换", isOn: $model.draft.autoFailover).disabled(isSolo)
+                            note("与 Token Plan 评审共享双槽。每次新任务主账号优先；明确额度耗尽后当次任务持续使用备用，不显示实时余额。")
                             note("可选 glm-5.3 / qwen4-max；与 Token Plan 评审共享地址及凭证草稿，独立于当前评审服务和评审模型。评审测试不证明实施可用；业务材料外发仍需当次授权。仅确认请求模型，服务端实际模型未知。")
                         }
                         if model.draft.host == "codex" && model.draft.implementationProvider == "qoder" {

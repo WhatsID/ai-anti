@@ -133,11 +133,13 @@ def local(store, source=None):
     review_budgets(store, source_root(store, source))
     implementation = v['host'] == 'codex' and v['mode'] != 'solo' and v['implementation_provider'] == 'token_plan'
     if implementation:
-        profile = v['review_services']['profiles']['token_plan']
+        profile = v['model_services']['profiles']['token_plan']
         if not profile['responses_base_url']:
             raise CheckError('实施 Token Plan Responses 地址未配置')
         if not store.credential_status(profile['credential_paths'], profile['credential_key'])[0]:
             raise CheckError('实施 Token Plan 凭证未配置或不可解析')
+    if v['token_plan_accounts']['auto_failover'] and (implementation or (v['channel'] == 'qwen' and v['model_services']['active_api'] == 'token_plan')):
+        validate_accounts(store, v)
     qoder_implementation = v['host'] == 'codex' and v['mode'] != 'solo' and v['implementation_provider'] == 'qoder'
     names = {v['host'], effective_executor(v) if v['channel'] == 'qwen' else 'qodercli' if v['channel'] == 'qoder' else 'codex'}
     if qoder_implementation:
@@ -157,6 +159,20 @@ def local(store, source=None):
         raise CheckError('检测中配置或凭证发生变化，结果作废')
     route = ('停用独立实施' if v['mode'] == 'solo' else 'Claude Code 实施代理' if v['host'] == 'claude' else 'Qoder 订阅 · GLM-5.3 · qodercli 1.1.77' if qoder_implementation else 'Token Plan · ' + v['token_plan_implementation_model'] + ' · Responses' if implementation else 'Codex 原生 · ' + (v['secondary_model'] or '未指定'))
     return result('local', 'passed', '本地检查通过；实施：' + route + '；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
+
+def validate_accounts(store, values):
+    import model_services
+    account = values['token_plan_accounts']
+    profiles = values['model_services']['profiles']
+    tokens = []
+    for slot in (profiles['token_plan'], account['backup']):
+        found, path = store.credential_status(slot['credential_paths'], slot['credential_key'])
+        if not found: raise CheckError('自动切换需要主账号与备用账号凭证')
+        value = model_services.lookup(json.loads(path.read_text('utf-8')), slot['credential_key'])
+        if not value or any(c.isspace() for c in value) or '\x00' in value:
+            raise CheckError('Token Plan 密钥格式无效')
+        tokens.append(value)
+    if tokens[0] == tokens[1]: raise CheckError('主账号与备用账号必须使用不同凭证')
 
 def codex_events(path, marker):
     finished, errors, response, actual = False, False, [], '未知'
@@ -290,5 +306,5 @@ def real(store, source=None, timeout=None):
             raise CheckError('检测中配置或凭证发生变化，结果作废')
         reply = result('real', 'passed', '合成评审检测通过；不代表业务评审全量验证', snapshot, actual)
         if v['channel'] == 'qwen':
-            reply.update(requested_model=v['qwen_model'], model_evidence='requested_only' if effective_executor(v) == 'codex' else 'actual')
+            reply.update(token_plan_accounts=status.get('token_plan_accounts', dict(enabled=False)), requested_model=v['qwen_model'], model_evidence='requested_only' if effective_executor(v) == 'codex' else 'actual')
         return reply

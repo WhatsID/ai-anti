@@ -182,10 +182,10 @@ class CheckTests(unittest.TestCase):
             self.assertEqual(checks.review_budgets(store, ROOT), (321,45))
             self.assertEqual(checks.review_budgets(store, ROOT, 123), (123,45))
         for service in ('custom_api', 'token_plan'):
-            snap=store.read(); v=snap['values']; v['review_services']['active_api']=service
+            snap=store.read(); v=snap['values']; v['model_services']['active_api']=service
             store.save(v, snap['fingerprints'])
-            self.assertEqual(store.read()['values']['review_services']['active_api'],service)
-            self.assertEqual(json.loads(store.paths['ai'].read_text())['review_services']['active_api'],service)
+            self.assertEqual(store.read()['values']['model_services']['active_api'],service)
+            self.assertEqual(json.loads(store.paths['ai'].read_text())['model_services']['active_api'],service)
             self.assertEqual(json.loads(store.paths['ai'].read_text())['review']['timeout'],321)
             self.assertEqual(json.loads(store.paths['ai'].read_text())['review']['idle_timeout'],45)
             self.assertEqual(json.loads(store.paths['ai'].read_text())['review']['future_field'],'keep')

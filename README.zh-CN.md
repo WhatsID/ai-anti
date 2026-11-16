@@ -315,7 +315,7 @@ Codex 使用 `bug-review` skill，Claude Code 使用 `/bug-review`，以独立�
 采集、补证、逐项裁决和人工确认修复由调用方负责。见[材料协议与接入示例](docs/BUG_REVIEW.md)。
 
 Codex 主模型可独立选择实施服务，Claude Code 实施代理保持原状，solo 停用独立实施。
-Token Plan 实施读取共享 `review_services.profiles.token_plan` 的 Responses 地址与凭证，
+Token Plan 实施读取共享 `model_services.profiles.token_plan` 的 Responses 地址与凭证，
 与当前评审服务/模型无关，不使用自定义 API 凭证。App 可编辑该共享草稿。配置选择不代表
 业务材料外发授权。Token Plan 引入时仅通过离线 fake 与 App 构建，未新增真实 GLM 运行验证；
 调用 completed 仍需主模型独立验收，实际服务端模型未知。详见 codex-relay skill。
@@ -332,3 +332,16 @@ Token Plan 独立实施字段为 `codex_relay.token_plan_implementation_model`�
 Qwen4 评审和实施请求 high effort；GLM 与既有模型维持 medium。Responses 只记录请求模型，
 不证明服务端身份；目录选项和评审测试都不证明实施可用。回滚前先选择 GLM；旧版本固定 GLM。
 本次不自动启用新模型，不安装、不改真实用户配置。账号/地域与真实模型工具往返需单独验收。
+
+
+## Token Plan 双订阅槽位
+
+Token Plan 评审和实施共享主账号、备用账号及“主账号额度用尽时自动切换”开关；自定义 API、原生 Codex、Qoder 不参与。主账号仍使用 `model_services.profiles.token_plan` 的凭证接口（旧配置可继续使用 `tokenplan.value`）；备用独立保存到 `secrets.json` 的 `model_services.token_plan_backup.value`，文件权限 0600，不回传密钥到 UI。公开配置为：
+
+```json
+{"token_plan_accounts":{"version":1,"auto_failover":false,"backup":{"credential_paths":[],"credential_key":"model_services.token_plan_backup.value"}}}
+```
+
+启用前两个槽必须配置有效且不同的密钥。每次新任务主账号优先；真实 HTTP429 的明确额度耗尽 JSON 才允许同一模型、同一 URL、同一请求字节换备用认证重发一次，当次任务的后续阶段与有限暂态重试持续使用备用。CLI 会话及已完成工具操作不重启，备用耗尽不循环。普通429限流、401/403、500、超时、断流、已开始的 SSE、账户绑定的 `previous_response_id` / `conversation` 均不跨账号重放。SSE 内错误暂不切换。
+
+启用时只在本次运行内启动有本地认证的 loopback 转发器，真实密钥只保留于父进程内存；上游要求 HTTPS 并验证证书，保留代理及证书环境。CLI 到 localhost 绕过代理。请求及成功响应各上限8MiB，错误 JSON 上限64KiB，最多4个连接；不支持压缩请求与未知传输编码。超限明确失败，不扩大上下文或另起进程。关闭开关保留备用密钥；回滚旧版前先关闭开关，旧版不提供自动切换。manifest/status 的账号槽与切换原因只是此次运行证据，不是实时余额。prepare-only仅验证公开配置，不读取密钥或联网。

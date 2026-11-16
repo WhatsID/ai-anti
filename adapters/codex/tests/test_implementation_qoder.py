@@ -39,8 +39,8 @@ class QoderTests(unittest.TestCase):
         path=self.root/'events'; path.write_text('\n'.join(json.dumps(e) for e in events)+'\n')
         return validate(path,code,self.work)
     def test_routing_without_token_profile_or_credentials(self):
-        config={'codex_relay':dict(implementation_provider='qoder', secondary_model='native'), 'plugins':{'qwen':False},'review_services':False}
-        with patch('implementation_config.review_services.load',side_effect=AssertionError('profile accessed')):
+        config={'codex_relay':dict(implementation_provider='qoder', secondary_model='native'), 'plugins':{'qwen':False},'model_services':False}
+        with patch('implementation_config.model_services.load',side_effect=AssertionError('profile accessed')):
             route=resolve(config,self.work)
         self.assertEqual(route['requested_model'],'glm-5.3'); self.assertNotIn('credential_key',route)
         for provider, model in [('qoder','GLM-5.3'),('qoder','other'),('codex','glm-5.3'),('codex','GLM-5.3')]:

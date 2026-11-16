@@ -32,6 +32,24 @@ struct Draft: Equatable {
         get { profiles[activeAPI] ?? ServiceProfile.initial(activeAPI) }
         set { profiles[activeAPI] = newValue }
     }
+    var autoFailover = false
+    var backupProfile = ServiceProfile.initial("token_plan_backup")
+    var backupKeyInput: String {
+        get {
+            if backupProfile.action == "replace" { return backupProfile.secret }
+            if backupProfile.action == "clear" { return "" }
+            return backupProfile.credentialPaths.isEmpty ? "" : Self.credentialMask
+        }
+        set {
+            guard newValue != backupKeyInput else { return }
+            if newValue == Self.credentialMask { backupProfile.action = "retain"; backupProfile.secret = "" }
+            else {
+                backupProfile.secret = newValue.replacingOccurrences(of: "•", with: "")
+                backupProfile.action = backupProfile.secret.isEmpty ? "clear" : "replace"
+            }
+        }
+    }
+    var accountDictionary: [String: Any] { ["version": 1, "auto_failover": autoFailover, "backup": ["credential_paths": backupProfile.credentialPaths, "credential_key": backupProfile.credentialKey]] }
     var service: String { channel == "qwen" ? activeAPI : channel }
     var qwenModel: String { get { profile.model } set { profile.model = newValue } }
     var implementationProvider = "codex"
@@ -81,8 +99,12 @@ struct Draft: Equatable {
     }
     var secretAction: String { get { profile.action } set { profile.action = newValue; if newValue != "replace" { profile.secret = "" } } }
     var serviceDictionary: [String: Any] { ["version": 1, "active_api": activeAPI, "profiles": profiles.mapValues { $0.dictionary }] }
-    var secretActions: [String: Any] { profiles.mapValues { ["action": $0.action == "replace" && $0.secret.isEmpty ? "retain" : $0.action, "value": $0.secret] } }
-    var dictionary: [String: Any] { ["review_services": serviceDictionary, "host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "token_plan_implementation_model": tokenPlanImplementationModel, "implementation_provider": implementationProvider, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": qwenExecutor] }
+    var secretActions: [String: Any] {
+        var result: [String: Any] = profiles.mapValues { ["action": $0.action == "replace" && $0.secret.isEmpty ? "retain" : $0.action, "value": $0.secret] }
+        result["token_plan_backup"] = ["action": backupProfile.action == "replace" && backupProfile.secret.isEmpty ? "retain" : backupProfile.action, "value": backupProfile.secret]
+        return result
+    }
+    var dictionary: [String: Any] { ["token_plan_accounts": accountDictionary, "model_services": serviceDictionary, "host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "token_plan_implementation_model": tokenPlanImplementationModel, "implementation_provider": implementationProvider, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": qwenExecutor] }
 }
 
 @MainActor final class AppModel: ObservableObject {
@@ -247,7 +269,14 @@ struct Draft: Equatable {
         guard let v = data["values"] as? [String: Any] else { message = "配置响应无效"; return }
         func text(_ key: String) -> String { v[key] as? String ?? "" }
         var d = Draft(); d.host = text("host"); d.primaryModel = text("primary_model"); d.channel = text("channel")
-        if let services = v["review_services"] as? [String: Any], let profiles = services["profiles"] as? [String: [String: Any]] {
+        if let accounts = v["token_plan_accounts"] as? [String: Any] {
+            d.autoFailover = accounts["auto_failover"] as? Bool ?? false
+            if let backup = accounts["backup"] as? [String: Any] {
+                d.backupProfile.credentialPaths = backup["credential_paths"] as? [String] ?? []
+                d.backupProfile.credentialKey = backup["credential_key"] as? String ?? "model_services.token_plan_backup.value"
+            }
+        }
+        if let services = v["model_services"] as? [String: Any], let profiles = services["profiles"] as? [String: [String: Any]] {
             d.activeAPI = services["active_api"] as? String ?? "custom_api"
             for id in ReviewService.api {
                 if let p = profiles[id] {

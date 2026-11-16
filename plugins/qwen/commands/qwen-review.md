@@ -25,72 +25,12 @@ description: qwen 插件评审通道:经 anthropic 兼容端点让用户配置�
 600000仅为工具等待/转后台阈值；由受限包装器按统一预算终止，不能在600秒自行终止）：
 
 ```bash
-QWEN_CONF=$(python3 - <<'PY'
-import json, pathlib, sys
-path = pathlib.Path.home() / ".config" / "ai-anti" / "config.json"
-try:
-    data = json.loads(path.read_text(encoding="utf-8"))
-except FileNotFoundError:
-    sys.exit(3)
-except ValueError as exc:
-    print("ai-anti 配置损坏：%s：%s" % (path, exc), file=sys.stderr)
-    sys.exit(4)
-try:
-    qwen = data["plugins"]["qwen"]
-    if not isinstance(qwen["credential_paths"], list):
-        sys.exit(3)
-    key = qwen.get("credential_key", "tokenplan.value")
-    if key not in ("tokenplan.value", "review_services.token_plan.value", "review_services.custom_api.value"):
-        sys.exit(3)
-    fields = [qwen["model"], qwen["base_url"], key] + list(qwen["credential_paths"])
-except (KeyError, TypeError):
-    sys.exit(3)
-if len(fields) < 4 or not all(isinstance(x, str) and x and "\n" not in x for x in fields):
-    sys.exit(3)
-print("\n".join(fields))
-PY
-)
-case $? in
-  0) ;;
-  4) echo "ai-anti 配置损坏：停止并报告用户，不静默降档"; exit 4 ;;
-  *) echo "qwen 档不可用：plugins.qwen 配置缺失，报告主模型"; exit 3 ;;
-esac
-QWEN_MODEL=$(printf '%s\n' "$QWEN_CONF" | sed -n 1p)
-QWEN_EFFORT=medium
-if [ "$QWEN_MODEL" = qwen4-max ]; then QWEN_EFFORT=high; fi
-QWEN_BASE_URL=$(printf '%s\n' "$QWEN_CONF" | sed -n 2p)
-QWEN_CREDENTIAL_KEY=$(printf '%s\n' "$QWEN_CONF" | sed -n 3p)
-QWEN_PATHS=$(printf '%s\n' "$QWEN_CONF" | sed -n '4,$p')
-
-TOKENPLAN_KEY=$(QWEN_CREDENTIAL_KEY="$QWEN_CREDENTIAL_KEY" QWEN_PATHS="$QWEN_PATHS" python3 - <<'PY'
-import json, os, pathlib, sys
-for raw in os.environ["QWEN_PATHS"].split("\n"):
-    if not raw:
-        continue
-    try:
-        value = json.loads(pathlib.Path(raw).expanduser().read_text(encoding="utf-8"))
-        for part in os.environ["QWEN_CREDENTIAL_KEY"].split("."):
-            value = value.get(part) if isinstance(value, dict) else None
-    except Exception:
-        continue
-    if isinstance(value, str) and value.strip() and not any(c in value for c in "\r\n\x00"):
-        print(value)
-        sys.exit(0)
-sys.exit(3)
-PY
-) || { echo "qwen 档不可用：凭证按查找顺序均缺失，报告主模型"; exit 3; }
-
 # 安装的命令是 symlink；从其源码解析共享包装器，不能按业务 cwd 猜路径。
 BOUNDED_REVIEW=$(python3 -c 'import os,pathlib; p=(pathlib.Path(os.environ.get("CLAUDE_CONFIG_DIR") or "~/.claude").expanduser()/"commands/qwen-review.md").resolve(); print(p.parents[3]/"adapters/codex/skills/claude-review/scripts/bounded_review.py")')
-env -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL \
-  ANTHROPIC_BASE_URL="$QWEN_BASE_URL" \
-  ANTHROPIC_AUTH_TOKEN="$TOKENPLAN_KEY" \
-  ANTHROPIC_DEFAULT_SONNET_MODEL="$QWEN_MODEL" \
-  ANTHROPIC_DEFAULT_OPUS_MODEL="$QWEN_MODEL" \
-  ANTHROPIC_DEFAULT_HAIKU_MODEL="$QWEN_MODEL" \
-  python3 "$BOUNDED_REVIEW" --log <scratchpad>/qwen_review.json --retry-protocol claude-json --report <scratchpad>/qwen_report.txt \
+python3 "$BOUNDED_REVIEW" --token-plan-config "$HOME/.config/ai-anti/config.json" \
+  --log <scratchpad>/qwen_review.json --retry-protocol claude-json --report <scratchpad>/qwen_report.txt \
   --input <scratchpad>/qwen_prompt.txt --input <declared-input-path> --max-output-bytes 2097152 -- \
-  claude -p "$(cat <scratchpad>/qwen_prompt.txt)" --model sonnet --effort "$QWEN_EFFORT" \
+  claude -p "$(cat <scratchpad>/qwen_prompt.txt)" --model sonnet --effort __AIANTI_EFFORT__ \
   --allowedTools "Read,Grep,Glob,Bash(git show *),Bash(git -C * show *),Bash(git diff *),Bash(git -C * diff *),Bash(git log *),Bash(git -C * log *),Bash(git status*),Bash(git branch*)" \
   --output-format json < /dev/null
 ```
@@ -105,7 +45,7 @@ env -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL \
   （2026-08-18 实测，claude CLI 2.1.234）。直传会被 CLI **客户端侧**的模型注册表拦下、
   请求根本发不出去；而只设 `ANTHROPIC_DEFAULT_*` 却不传 `--model sonnet` 的话，CLI 会
   改发 `~/.claude/settings.json` 里的 `model` 值，端点回 `Model not exist`。两者都要有。
-- **`env -u` 那三个变量都要剥**：`ANTHROPIC_API_KEY` 会抢占 `ANTHROPIC_AUTH_TOKEN`
+- **包装器必须清除冲突环境变量**：`ANTHROPIC_API_KEY` 会抢占 `ANTHROPIC_AUTH_TOKEN`
   （CLI 会打「另一个 auth source 优先」的警告）；`ANTHROPIC_MODEL` /
   `ANTHROPIC_SMALL_FAST_MODEL` 是防父环境继承——子进程继承父环境，而本模板从前自己就
   示范过 `export ANTHROPIC_MODEL=…`，某台机器的 shell rc 导出它的概率不为零，一旦继承
@@ -125,10 +65,10 @@ env -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL \
   **唯一判据是：能否解析出 JSON 对象，以及其中的 `is_error`。**
 - **端点可用模型**：以端点服务商公布的清单为准，换模型时先查清单并用一次最小调用确认
   `is_error=false`，不要猜；2026-08-18 实测这类 anthropic 兼容端点对 `claude-*` 系列一律回
-  `Model not exist`。换模型时若有 `review_services`，使用 App 或同时更新活动 profile 与 `plugins.qwen.model` 投影；旧配置才只改 `plugins.qwen.model`。
+  `Model not exist`。换模型时若有 `model_services`，使用 App 或同时更新活动 profile 与 `plugins.qwen.model` 投影；旧配置才只改 `plugins.qwen.model`。
 - 提示词经 `<scratchpad>/qwen_prompt.txt` 传入、命令末尾 `< /dev/null`、输出直写不接管道——
   三条都来自 `core/CLI_DISCIPLINE.md` 那条纪律，缺一条就可能空转或丢结论。
-- 密钥运行时通过上面的查找接口按配置的 `credential_key` 逐级读取，只存活在本次 shell 变量里，
+- 密钥由统一包装器按配置的 `credential_key` 逐级读取，只存活于父进程内存，
   **不写进任何文件或历史**，也不回显。
 - allowedTools 是只读白名单（含 `git -C` 形态——qwen 习惯带 `-C` 跑 git，漏了会 denial 空转烧额度）。
 - `--output-format json` 的 `usage` 字段留作额度消耗记录；`result` 字段是评审文本。
@@ -173,3 +113,5 @@ if not core.is_file() or not os.access(core, os.R_OK):
 
 Codex 侧的 `claude-review` skill 的源码入口 `review.py --channel qwen` 直接复用相同配置，使用 `--repo`
 作为相对凭证路径基准；不经过本插件的 `review.channels` 路由。
+
+启用 `token_plan_accounts.auto_failover` 时统一包装器在同一 HTTP 请求内最多切换一次凭证；本次任务保持备用账号，下一任务重新主优先。普通429、流开始后错误与账户绑定响应引用不重放。包装器最终失败后才判定本档失败，不能重跑整个会话规避额度。

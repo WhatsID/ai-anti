@@ -376,7 +376,7 @@ and repair authorization stay with the caller. See [the bundle contract and exam
 
 Codex-led relays can choose implementation separately from review. Claude Code's
 implementer stays unchanged; solo disables independent implementation. Token Plan uses
-the shared `review_services.profiles.token_plan` Responses URL and credentials, independently
+the shared `model_services.profiles.token_plan` Responses URL and credentials, independently
 of active review, and never borrows custom API credentials. The App edits that shared draft.
 Choosing a provider does not authorize business-material transmission. The
 Token Plan introduction used offline fake checks and App builds without an additional live GLM run.
@@ -396,3 +396,12 @@ when inactive. Review and native models remain independent. Qwen4 requests high 
 with a local text-only catalog; GLM retains medium. Account availability and real tool
 round trips require separate validation; Responses proves requested model only. Older
 versions use GLM: select GLM before rollback. This change does not activate or install it.
+
+
+## Token Plan primary and backup accounts
+
+Token Plan review and implementation share two credential slots and an opt-in quota failover switch. The primary retains its existing profile credential source; the backup uses `model_services.token_plan_backup.value` in the local 0600 secrets file. Set `token_plan_accounts` as in `config.example.json`; both credentials must exist and differ before enabling. Disabling preserves the backup.
+
+Each logical run starts on primary. Only a real HTTP 429 quota JSON rejection before downstream output permits one identical-request replay with backup authentication. The run stays on backup across stages and bounded transient attempts, without restarting the CLI or completed tools. Generic rate limits, authentication errors, server errors, timeouts, partial streams, SSE errors and account-bound response references never trigger replay. Custom API, native Codex and Qoder keep their routes.
+
+Enabled runs use a temporary authenticated loopback transport, HTTPS upstream certificate validation and inherited upstream proxy settings. Requests and successful responses are limited to 8 MiB; error JSON to 64 KiB; concurrent connections to four. Compressed requests are unsupported. Manifests report the used slot and normalized switch reason, never keys or balances. Prepare-only validates public configuration without credential reads or network. Turn failover off before rolling back to an older release.

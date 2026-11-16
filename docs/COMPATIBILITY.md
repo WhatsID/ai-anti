@@ -519,3 +519,22 @@ Claude Code 2.1.322 / Anthropic 同次真实调用返回模型结果，但正式
 新增 init 前的 `system/ui_invalidate`（`event=ui.render`）与 `system/thinking_tokens`
 不在现有事件协议内，报 `unknown system event`；第二阶段未执行。实际 init 的四个内置
 插件条目符合新允许列表。该缺口与额度无关，未删除事件或放宽协议来宣称成功。
+
+
+## Token Plan 双订阅槽位
+
+Token Plan 评审和实施共享主账号、备用账号及“主账号额度用尽时自动切换”开关；自定义 API、原生 Codex、Qoder 不参与。主账号仍使用 `model_services.profiles.token_plan` 的凭证接口（旧配置可继续使用 `tokenplan.value`）；备用独立保存到 `secrets.json` 的 `model_services.token_plan_backup.value`，文件权限 0600，不回传密钥到 UI。公开配置为：
+
+```json
+{"token_plan_accounts":{"version":1,"auto_failover":false,"backup":{"credential_paths":[],"credential_key":"model_services.token_plan_backup.value"}}}
+```
+
+启用前两个槽必须配置有效且不同的密钥。每次新任务主账号优先；真实 HTTP429 的明确额度耗尽 JSON 才允许同一模型、同一 URL、同一请求字节换备用认证重发一次，当次任务的后续阶段与有限暂态重试持续使用备用。CLI 会话及已完成工具操作不重启，备用耗尽不循环。普通429限流、401/403、500、超时、断流、已开始的 SSE、账户绑定的 `previous_response_id` / `conversation` 均不跨账号重放。SSE 内错误暂不切换。
+
+启用时只在本次运行内启动有本地认证的 loopback 转发器，真实密钥只保留于父进程内存；上游要求 HTTPS 并验证证书，保留代理及证书环境。CLI 到 localhost 绕过代理。请求及成功响应各上限8MiB，错误 JSON 上限64KiB，最多4个连接；不支持压缩请求与未知传输编码。超限明确失败，不扩大上下文或另起进程。关闭开关保留备用密钥；回滚旧版前先关闭开关，旧版不提供自动切换。manifest/status 的账号槽与切换原因只是此次运行证据，不是实时余额。prepare-only仅验证公开配置，不读取密钥或联网。
+
+### model_services 配置迁移
+
+公开配置与本机密钥的新写入使用 `model_services`；`review_services` 仍可读取，旧 Python 模块保留兼容导入。新旧服务节并存时必须一致；已知主、备用、自定义密钥槽的新旧值冲突会拒绝保存。普通保存会在同一事务内迁移自有 secrets 的槽与所有相关引用，保留未知字段。含外部或项目相对凭证路径的 profile 保留原 key，避免改变凭证查找来源；替换凭证后使用新槽。
+
+旧桌面安装包与旧独立导出 CLI 不支持新密钥名。使用迁移后的配置前应更新相应产物；回滚时必须先配对恢复 config 与 secrets，再运行旧版代码。只回滚源码不足以恢复旧版兼容性。

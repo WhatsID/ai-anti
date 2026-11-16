@@ -18,6 +18,7 @@ from implementation_config import ConfigError, MODEL, public, resolve
 import implementation_qoder
 from ai_anti_config import load, review_limits
 from review_channels import child_environment
+from token_plan_transport import Transport
 from review_codex import capability
 from model_metadata import effort, write_catalog
 from review_runner import RunError, execute
@@ -111,6 +112,7 @@ def run(args):
         return evidence
     started = time.monotonic()
     log = out / 'implementation.jsonl'
+    transport = None
     try:
         if route['provider'] == 'qoder':
             evidence.update(implementation_qoder.run(args.cli, workspace, out, payload, INSTRUCTIONS, limits, CAP, evidence), status='completed', completed=True)
@@ -121,6 +123,11 @@ def run(args):
             home = out / 'codex-home'
             home.mkdir(mode=0o700)
             # Reuse credential-key resolution, then pass only a small explicit env.
+            transport = Transport(route, limits[0] + 60, limits[1])
+            transport.__enter__()
+            options = configuration(route, instructions)
+            if catalog: options['model_catalog_json'] = catalog
+            write(out / 'codex-config.json', options)
             authenticated = child_environment(route)
             allowed = ('HOME', 'TMPDIR', 'LANG', 'LC_ALL', 'HTTP_PROXY', 'HTTPS_PROXY', 'ALL_PROXY', 'NO_PROXY',
                        'http_proxy', 'https_proxy', 'all_proxy', 'no_proxy', 'SSL_CERT_FILE', 'SSL_CERT_DIR',
@@ -143,6 +150,9 @@ def run(args):
         evidence.update(status='failed', error_kind=getattr(exc, 'kind', 'execution_failed'),
                         error='Implementation failed; inspect retained local logs and partial workspace before any new run')
     finally:
+        if transport:
+            transport.__exit__(None, None, None)
+            evidence['token_plan_accounts'] = transport.evidence()
         evidence.update(duration_seconds=round(time.monotonic() - started, 3), log_sha256=digest(log))
         write(out / 'manifest.json', evidence)
         write(out / 'status.json', evidence)

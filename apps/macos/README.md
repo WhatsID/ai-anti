@@ -50,11 +50,11 @@ API 服务显示服务地址和“认证 / API 密钥”，CLI 服务隐藏这�
 
 两个主导工具共享当前 API 服务及其模型、凭证；两种协议地址独立。每个服务独立保留模型、地址、未保存输入及认证动作，切回恢复；同服务换模型不会改密钥。千问新草稿预填官方两种协议地址，自定义留空。取消放弃全部服务与主导工具草稿，保存失败保留草稿，保存仅影响下次调用。菜单显示服务与模型，未完成配置时引导设置，不保存空地址。
 
-认证动作默认为保留；更换后输入非空新密钥，空输入仍保留；清除须显式选择并保存。密钥按服务写入 secrets.json 的 review_services.token_plan.value / review_services.custom_api.value，0600受限明文。清除删除该服务应用管理槽的值、清空其凭证路径并切换为独立键，防止外部旧密钥复活；不删除外部文件，也不删除 legacy tokenplan.value。首次加载只查文件 stat，不读取密钥正文，因此“发现凭证文件”不表示已配置或已登录。动作通过独立 secret_actions 请求传递，不写入公共 values、argv 或日志。
+认证动作默认为保留；更换后输入非空新密钥，空输入仍保留；清除须显式选择并保存。密钥按服务写入 secrets.json 的 model_services.token_plan.value / model_services.custom_api.value，0600受限明文。清除删除该服务应用管理槽的值、清空其凭证路径并切换为独立键，防止外部旧密钥复活；不删除外部文件，也不删除 legacy tokenplan.value。首次加载只查文件 stat，不读取密钥正文，因此“发现凭证文件”不表示已配置或已登录。动作通过独立 secret_actions 请求传递，不写入公共 values、argv 或日志。
 
-review_services（version=1、active_api、固定 token_plan/custom_api profiles）是 API 配置真源，plugins.qwen 为同次事务更新的兼容投影；入口仍为 channel=qwen。每个 profile 包含 model/base_url/responses_base_url/credential_paths/credential_key，不存明文 token。credential_key 仅允许 tokenplan.value、review_services.token_plan.value、review_services.custom_api.value；指定键缺失不回退，只有旧配置缺字段时使用 legacy。旧客户端不懂新槽，请使用配套源码；不承诺新配置兼容旧 runner，新密钥不复制到 legacy。
+model_services（version=1、active_api、固定 token_plan/custom_api profiles）是 API 配置真源，plugins.qwen 为同次事务更新的兼容投影；入口仍为 channel=qwen。每个 profile 包含 model/base_url/responses_base_url/credential_paths/credential_key，不存明文 token。credential_key 仅允许 tokenplan.value、model_services.token_plan.value、model_services.custom_api.value；指定键缺失不回退，只有旧配置缺字段时使用 legacy。旧客户端不懂新槽，请使用配套源码；不承诺新配置兼容旧 runner，新密钥不复制到 legacy。
 
-旧配置首次加载只在内存迁移：所有非空端点必须精确等于已知千问默认地址才归千问，否则（包括空端点、混合地址、尾斜杠）归自定义 API 并保留模型/地址/路径顺序。只有迁移到的一个 profile 继承旧凭证键及路径；另一个没有 legacy 凭证。首次保存才持久化。未知版本、字段错误或 profile/投影冲突拒绝写入。冲突错误只列字段名；修复时备份配置，然后按 review_services.active_api 对应 profile 将 model、base_url、responses_base_url、credential_paths、credential_key 同步到 plugins.qwen，保留其他配置和密钥，再重新读取；不要删除配置或密钥来绕过错误。
+旧配置首次加载只在内存迁移：所有非空端点必须精确等于已知千问默认地址才归千问，否则（包括空端点、混合地址、尾斜杠）归自定义 API 并保留模型/地址/路径顺序。只有迁移到的一个 profile 继承旧凭证键及路径；另一个没有 legacy 凭证。首次保存才持久化。未知版本、字段错误或 profile/投影冲突拒绝写入。冲突错误只列字段名；修复时备份配置，然后按 model_services.active_api 对应 profile 将 model、base_url、responses_base_url、credential_paths、credential_key 同步到 plugins.qwen，保留其他配置和密钥，再重新读取；不要删除配置或密钥来绕过错误。
 
 主模型选项决定编辑哪组默认配置；两组主模型 ID 和评审通道保留独立草稿，一次保存统一写入实际修改。空主模型表示保留已有默认值，空 Codex 评审模型表示 CLI 默认（真实检测需明确 ID）。协作模式仅接受 solo、auto、rules、force，旧 required 无效。用户当次指令 > 项目 .claude/relay-mode.local > 全局默认 > rules；solo 停用交叉评审及独立实施。菜单与检测要求先保存或取消草稿。
 
@@ -109,3 +109,16 @@ Token Plan 独立实施字段为 `codex_relay.token_plan_implementation_model`�
 Qwen4 评审和实施请求 high effort；GLM 与既有模型维持 medium。Responses 只记录请求模型，
 不证明服务端身份；目录选项和评审测试都不证明实施可用。回滚前先选择 GLM；旧版本固定 GLM。
 本次不自动启用新模型，不安装、不改真实用户配置。账号/地域与真实模型工具往返需单独验收。
+
+
+## Token Plan 双订阅槽位
+
+Token Plan 评审和实施共享主账号、备用账号及“主账号额度用尽时自动切换”开关；自定义 API、原生 Codex、Qoder 不参与。主账号仍使用 `model_services.profiles.token_plan` 的凭证接口（旧配置可继续使用 `tokenplan.value`）；备用独立保存到 `secrets.json` 的 `model_services.token_plan_backup.value`，文件权限 0600，不回传密钥到 UI。公开配置为：
+
+```json
+{"token_plan_accounts":{"version":1,"auto_failover":false,"backup":{"credential_paths":[],"credential_key":"model_services.token_plan_backup.value"}}}
+```
+
+启用前两个槽必须配置有效且不同的密钥。每次新任务主账号优先；真实 HTTP429 的明确额度耗尽 JSON 才允许同一模型、同一 URL、同一请求字节换备用认证重发一次，当次任务的后续阶段与有限暂态重试持续使用备用。CLI 会话及已完成工具操作不重启，备用耗尽不循环。普通429限流、401/403、500、超时、断流、已开始的 SSE、账户绑定的 `previous_response_id` / `conversation` 均不跨账号重放。SSE 内错误暂不切换。
+
+启用时只在本次运行内启动有本地认证的 loopback 转发器，真实密钥只保留于父进程内存；上游要求 HTTPS 并验证证书，保留代理及证书环境。CLI 到 localhost 绕过代理。请求及成功响应各上限8MiB，错误 JSON 上限64KiB，最多4个连接；不支持压缩请求与未知传输编码。超限明确失败，不扩大上下文或另起进程。关闭开关保留备用密钥；回滚旧版前先关闭开关，旧版不提供自动切换。manifest/status 的账号槽与切换原因只是此次运行证据，不是实时余额。prepare-only仅验证公开配置，不读取密钥或联网。

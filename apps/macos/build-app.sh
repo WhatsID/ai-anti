@@ -12,7 +12,7 @@ bin=$(swift build --cache-path "$output/cache/swiftpm" --config-path "$output/ca
 app="$output/AIAnti.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/backend"
 cp "$bin/AIAnti" "$app/Contents/MacOS/AIAnti"
-cp "$source_dir/backend/control.py" "$source_dir/backend/config_store.py" "$source_dir/backend/checks.py" "$source_dir/backend/review_services.py" "$source_dir/backend/implementation_models.py" "$app/Contents/Resources/backend/"
+cp "$source_dir/backend/control.py" "$source_dir/backend/config_store.py" "$source_dir/backend/checks.py" "$source_dir/backend/model_services.py" "$source_dir/backend/review_services.py" "$source_dir/backend/implementation_models.py" "$source_dir/backend/token_plan_accounts.py" "$app/Contents/Resources/backend/"
 cp "$source_dir/Resources/MenuBarTemplate.png" "$app/Contents/Resources/"
 iconset="$output/build/AppIcon.iconset"
 mkdir -p "$iconset"
@@ -31,8 +31,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>AIAnti</string>
 <key>CFBundleDisplayName</key><string>AIAnti</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleVersion</key><string>7</string>
-<key>CFBundleShortVersionString</key><string>0.2.9</string>
+<key>CFBundleVersion</key><string>8</string>
+<key>CFBundleShortVersionString</key><string>0.3.0</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

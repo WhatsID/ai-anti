@@ -17,7 +17,7 @@ from implementation_config import ConfigError, MODEL, provider, resolve
 import implementation
 from implementation_protocol import validate
 from review_runner import RunError
-import review_services
+import model_services
 
 FAKE = ROOT / 'adapters/codex/tests/fake_implementation.py'
 
@@ -27,12 +27,12 @@ class ImplementationTests(unittest.TestCase):
         self.root = Path(self.temp.name).resolve()
         self.workspace = self.root / 'workspace'; self.workspace.mkdir()
         self.secret = self.root / 'fixture-secret.json'
-        self.secret.write_text(json.dumps({'review_services': {'token_plan': {'value': 'OFFLINE_FAKE_TOKEN'}, 'custom_api': {'value': 'WRONG_CUSTOM_TOKEN'}}}))
-        profiles = {key: review_services.blank(key) for key in review_services.IDS}
+        self.secret.write_text(json.dumps({'model_services': {'token_plan': {'value': 'OFFLINE_FAKE_TOKEN'}, 'custom_api': {'value': 'WRONG_CUSTOM_TOKEN'}}}))
+        profiles = {key: model_services.blank(key) for key in model_services.IDS}
         profiles['token_plan']['credential_paths'] = [str(self.secret)]
         profiles['custom_api'].update(model='custom-model', responses_base_url='https://custom.invalid/v1', base_url='https://custom.invalid/anthropic', credential_paths=[str(self.secret)])
         self.config = dict(codex_relay=dict(implementation_provider='token_plan', secondary_model='old-native'),
-                           review_services=dict(version=1, active_api='custom_api', profiles=profiles),
+                           model_services=dict(version=1, active_api='custom_api', profiles=profiles),
                            plugins=dict(qwen=copy.deepcopy(profiles['custom_api'])))
         self.path = self.root / 'config.json'; self.path.write_text(json.dumps(self.config))
         self.prompt = self.root / 'prompt.txt'; self.prompt.write_text('Implement authorized offline fixture scope.')
@@ -42,6 +42,11 @@ class ImplementationTests(unittest.TestCase):
                       provider=None, model=None, timeout=None, idle_timeout=None, prepare_only=False, cli=str(FAKE))
         values.update(changes)
         return argparse.Namespace(**values)
+    def test_invalid_accounts_rejected_on_native_and_qoder_prepare(self):
+        for selected in ('codex','qoder'):
+            config=copy.deepcopy(self.config);config['token_plan_accounts']={'version':2}
+            with self.assertRaises(ConfigError): resolve(config,self.workspace,selected)
+
     def test_provider_and_native_model(self):
         for value in (None, 'codex'): self.assertEqual(provider(value), 'codex')
         for value in ('', [], {}, True, 1, 'custom_api'):
@@ -56,12 +61,12 @@ class ImplementationTests(unittest.TestCase):
     def test_active_review_is_not_implementation_source(self):
         route = resolve(self.config, self.workspace)
         self.assertEqual(route['requested_model'], 'glm-5.3')
-        self.assertEqual(route['credential_key'], 'review_services.token_plan.value')
-        self.assertEqual(route['base_url'], review_services.DEFAULTS['responses_base_url'])
+        self.assertEqual(route['credential_key'], 'model_services.token_plan.value')
+        self.assertEqual(route['base_url'], model_services.DEFAULTS['responses_base_url'])
         self.assertEqual(self.config['plugins']['qwen']['model'], 'custom-model')
         self.assertEqual(route['secondary_model'], 'old-native')
     def test_legacy_migration_key_is_not_stolen_from_custom_api(self):
-        legacy = dict(codex_relay={'implementation_provider': 'token_plan'}, plugins={'qwen': dict(model='old', **review_services.DEFAULTS, credential_paths=[str(self.secret)])})
+        legacy = dict(codex_relay={'implementation_provider': 'token_plan'}, plugins={'qwen': dict(model='old', **model_services.DEFAULTS, credential_paths=[str(self.secret)])})
         self.assertEqual(resolve(legacy, self.workspace)['credential_key'], 'tokenplan.value')
         legacy['plugins']['qwen']['responses_base_url'] = 'https://custom.invalid/v1'
         with self.assertRaises(ConfigError): resolve(legacy, self.workspace)
@@ -114,7 +119,7 @@ class ImplementationTests(unittest.TestCase):
         self.config['review']['idle_timeout'] = 901; self.path.write_text(json.dumps(self.config))
         with self.assertRaises(ConfigError): implementation.run(self.args(name='bad', prepare_only=True))
     def test_wrong_credential_slot_fails_without_cli(self):
-        self.secret.write_text(json.dumps({'review_services': {'custom_api': {'value': 'WRONG_CUSTOM_TOKEN'}}}))
+        self.secret.write_text(json.dumps({'model_services': {'custom_api': {'value': 'WRONG_CUSTOM_TOKEN'}}}))
         result = implementation.run(self.args())
         self.assertFalse(result['completed']); self.assertFalse((self.workspace/'fake-count.txt').exists())
     def test_observed_metadata_prefix_and_error_items(self):
@@ -164,7 +169,7 @@ class ImplementationTests(unittest.TestCase):
         self.path.write_text(json.dumps(self.config))
         route = resolve(self.config, self.workspace)
         self.assertEqual((route['requested_model'], route['cli_model']), ('qwen4-max', 'qwen4-max'))
-        self.assertEqual(route['credential_key'], 'review_services.token_plan.value')
+        self.assertEqual(route['credential_key'], 'model_services.token_plan.value')
         result = implementation.run(self.args())
         self.assertTrue(result['completed'])
         self.assertEqual(result['requested_effort'], 'high')
@@ -195,7 +200,7 @@ class ImplementationTests(unittest.TestCase):
         self.assertEqual(config['model'], result['cli_model'])
         self.assertTrue(Path(config['model_catalog_json']).is_file())
         for mode in ('failed', 'no-final', 'no-terminal', 'duplicate-terminal', 'multi-turn', 'nonzero'):
-            self.secret.write_text(json.dumps({'review_services': {'token_plan': {'value': 'OFFLINE_FAKE_TOKEN'}}}))
+            self.secret.write_text(json.dumps({'model_services': {'token_plan': {'value': 'OFFLINE_FAKE_TOKEN'}}}))
             (self.workspace/'fake-mode.txt').write_text(mode)
             failed = implementation.run(self.args(name='qwen4-' + mode))
             self.assertEqual(failed['status'], 'failed')
