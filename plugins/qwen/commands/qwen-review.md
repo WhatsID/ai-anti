@@ -56,6 +56,8 @@ case $? in
   *) echo "qwen 档不可用：plugins.qwen 配置缺失，报告主模型"; exit 3 ;;
 esac
 QWEN_MODEL=$(printf '%s\n' "$QWEN_CONF" | sed -n 1p)
+QWEN_EFFORT=medium
+if [ "$QWEN_MODEL" = qwen4-max ]; then QWEN_EFFORT=high; fi
 QWEN_BASE_URL=$(printf '%s\n' "$QWEN_CONF" | sed -n 2p)
 QWEN_CREDENTIAL_KEY=$(printf '%s\n' "$QWEN_CONF" | sed -n 3p)
 QWEN_PATHS=$(printf '%s\n' "$QWEN_CONF" | sed -n '4,$p')
@@ -88,7 +90,7 @@ env -u ANTHROPIC_API_KEY -u ANTHROPIC_MODEL -u ANTHROPIC_SMALL_FAST_MODEL \
   ANTHROPIC_DEFAULT_HAIKU_MODEL="$QWEN_MODEL" \
   python3 "$BOUNDED_REVIEW" --log <scratchpad>/qwen_review.json --retry-protocol claude-json --report <scratchpad>/qwen_report.txt \
   --input <scratchpad>/qwen_prompt.txt --input <declared-input-path> --max-output-bytes 2097152 -- \
-  claude -p "$(cat <scratchpad>/qwen_prompt.txt)" --model sonnet \
+  claude -p "$(cat <scratchpad>/qwen_prompt.txt)" --model sonnet --effort "$QWEN_EFFORT" \
   --allowedTools "Read,Grep,Glob,Bash(git show *),Bash(git -C * show *),Bash(git diff *),Bash(git -C * diff *),Bash(git log *),Bash(git -C * log *),Bash(git status*),Bash(git branch*)" \
   --output-format json < /dev/null
 ```

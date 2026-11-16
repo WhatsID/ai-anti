@@ -358,4 +358,35 @@ class StoreTests(unittest.TestCase):
         for raw in (b'model = """multi\nline"""\n', b'model = 1\n', b'model = "bad\n'):
             with self.assertRaises(StoreError): edit_toml(raw,'new')
 
+    def test_token_plan_implementation_model_persistence(self):
+        self.assertEqual(self.snapshot()['values'].get('token_plan_implementation_model'), 'glm-5.3')
+        # Old UI opens an old configuration, changes only review URL and saves.
+        snap = self.snapshot(); values = snap['values']; values.pop('token_plan_implementation_model')
+        values['base_url'] = 'https://fixture.invalid/anthropic'
+        saved = self.store.save(values, snap['fingerprints'])
+        self.assertEqual(saved['values']['token_plan_implementation_model'], 'glm-5.3')
+        saved = self.save(token_plan_implementation_model='qwen4-max')
+        self.assertEqual(saved['values']['token_plan_implementation_model'], 'qwen4-max')
+        old = saved['values'].copy(); old.pop('token_plan_implementation_model')
+        saved = self.store.save(old, saved['fingerprints'])
+        self.assertEqual(saved['values']['token_plan_implementation_model'], 'qwen4-max')
+        switched = self.save(implementation_provider='qoder', token_plan_implementation_model='glm-5.3')
+        restored = self.store.restore(switched['fingerprints'])
+        self.assertEqual(restored['values']['token_plan_implementation_model'], 'qwen4-max')
+        for bad in ('', 'Qwen4-Max', 'qwen4-max-preview', [], {}, True):
+            before = self.store.raw('ai')
+            with self.assertRaises(StoreError): self.save(token_plan_implementation_model=bad)
+            self.assertEqual(self.store.raw('ai'), before)
+            self.write('ai', {'codex_relay': {'token_plan_implementation_model': bad}})
+            with self.assertRaises(StoreError): self.snapshot()
+            self.write('ai', json.loads(before))
+        saved = self.save(token_plan_implementation_model='glm-5.3')
+        backup = self.store.desktop/'last-save.json'
+        record = json.loads(backup.read_text())
+        record['before']['ai'] = json.dumps({'codex_relay': {'token_plan_implementation_model': 'bad'}}).encode().hex()
+        backup.write_text(json.dumps(record))
+        before = self.store.raw('ai')
+        with self.assertRaises(StoreError): self.store.restore(saved['fingerprints'])
+        self.assertEqual(self.store.raw('ai'), before)
+
 if __name__ == '__main__': unittest.main()

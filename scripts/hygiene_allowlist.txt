@@ -72,3 +72,11 @@ docs/COMPATIBILITY.md:Token Plan
 docs/MACOS_REVIEW_APP.md:Token Plan
 # 已存在的公开模型 fixture，与 HEAD 同内容，非私人模型代号
 adapters/codex/tests/test_problem_review.py:qwen3.8-max
+
+# Qwen4 接入保留的正式旧模型和服务名，仅新增实际命中路径
+adapters/codex/skills/claude-review/SKILL.md:Token Plan
+adapters/codex/skills/claude-review/SKILL.md:Qwen3.8
+adapters/codex/skills/claude-review/scripts/model_metadata.py:qwen3.8-max
+adapters/codex/tests/test_codex_qwen.py:qwen3.8-max
+apps/macos/backend/implementation_models.py:Token Plan
+docs/FEATURE_TODOS.md:Qwen3.8-Max

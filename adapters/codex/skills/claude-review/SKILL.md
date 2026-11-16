@@ -74,8 +74,11 @@ that family with ASCII digit version segments. A missing file or key uses the bu
 table; an unparseable config or wrong type fails before any call.
 The manifest records `cli_version`; a version outside `compat.json` adds a warning to
 `status.json`, the manifest and the report but does not block (see `docs/COMPATIBILITY.md`).
-For the Claude executor, the init capability gate admits no plugins except the CLI's built-in `agents-md` and
-`telemetry` (exact `builtin` path and `<name>@builtin` source); any other plugin fails closed.
+For the Claude executor, the init capability gate admits only four logical built-in plugins:
+`agents-md`, `telemetry`, `privacy`, `plugin-authoring`, each with its exact old name or exact
+`cc-plugin-` prefixed name (eight strings). Path must be `builtin`; source must match the full
+reported `<name>@builtin`. Duplicate logical plugins, including mixed old/new aliases, fail closed.
+Claude Code 2.1.322's four prefixed entries have offline validator coverage; this is not full-chain certification.
 
 The project governance document supplies `--scale`. A plan review performs two
 serial calls per round: an inventory call without the plan, then a fresh review
@@ -271,3 +274,15 @@ then KILL remaining descendants even if the leader exited. An EPERM race is
 retried only if polling newly reaps the leader; real permission failures remain
 failures. Independent formal plan/diff acceptance passed on 1.1.74 with Kimi-K3;
 see `docs/COMPATIBILITY.md` for the measured evidence and its boundaries.
+
+### Qwen4-Max selection
+
+Token Plan review may select formal `qwen4-max` independently of implementation.
+Codex Responses and the bounded Claude executor request high effort for that model;
+Qwen3.8 and other existing routes retain medium. Codex writes known Qwen metadata into
+the run output, text-only with no parallel tools/images/reasoning summaries; the review
+65536-byte truncation and 32768-token tool output limits remain. Qwen4 fallback metadata
+warnings fail closed. Other model behavior and CLI version pins remain unchanged.
+Responses records requested effort and requested-only model evidence, never server identity.
+Selecting an option does not prove account/region availability; perform authorized real
+material/tool round trips separately. No default selection changes.

@@ -26,7 +26,12 @@ MODEL_FAMILIES = {
 }
 # Built-in plugins the CLI reports even under --safe-mode (2.1.280: "built-in tools and
 # plugins ... work normally"). Only these exact builtin entries are tolerated; anything else fails closed.
-ALLOWED_BUILTIN_PLUGINS = frozenset({'agents-md', 'telemetry'})
+ALLOWED_BUILTIN_PLUGINS = {
+    'agents-md': 'agents-md', 'cc-plugin-agents-md': 'agents-md',
+    'telemetry': 'telemetry', 'cc-plugin-telemetry': 'telemetry',
+    'privacy': 'privacy', 'cc-plugin-privacy': 'privacy',
+    'plugin-authoring': 'plugin-authoring', 'cc-plugin-plugin-authoring': 'plugin-authoring',
+}
 FLAGS = [
     '--effort', 'medium', '--safe-mode', '--restricted',
     '--tools', 'Read,Glob,Grep', '--allowedTools', 'Read,Glob,Grep',
@@ -77,7 +82,7 @@ def builtin_plugins_only(plugins):
         if (not isinstance(name, str) or name not in ALLOWED_BUILTIN_PLUGINS or item.get('path') != 'builtin'
                 or item.get('source') != f'{name}@builtin'):
             return False
-        names.append(name)
+        names.append(ALLOWED_BUILTIN_PLUGINS[name])
     return len(names) == len(set(names))
 
 
@@ -166,11 +171,15 @@ def run_stage(claude, cwd, prompt, logfile, model, timeout, idle, cap, families=
     from review_materials import load_registry, mcp_config
     registry = load_registry(registry_path) if registry_path is not None else None
     flags = material_flags(mcp_config(registry_path)) if registry is not None else FLAGS
+    flags = list(flags)
+    if registry is not None and expected_model == 'qwen4-max':
+        flags[flags.index('--effort') + 1] = 'high'
     args = [claude, '-p', prompt_file.read_text(encoding='utf-8'), '--model', model] + flags
     print(logfile.stem + ': started', file=sys.stderr)
     started = time.time()
     code = execute(args, cwd, logfile, timeout, idle, cap, env=env)
     result = validate(logfile, code, model, cwd, families, expected_model=expected_model, required=required, registry=registry)
+    result['requested_effort'] = flags[flags.index('--effort') + 1]
     result['started_at'] = started
     result['finished_at'] = time.time()
     result['log_sha256'] = hashlib.sha256(logfile.read_bytes()).hexdigest()

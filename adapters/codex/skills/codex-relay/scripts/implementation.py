@@ -19,6 +19,7 @@ import implementation_qoder
 from ai_anti_config import load, review_limits
 from review_channels import child_environment
 from review_codex import capability
+from model_metadata import effort, write_catalog
 from review_runner import RunError, execute
 from implementation_protocol import validate
 
@@ -38,8 +39,8 @@ independent acceptance. Do not retry this task in another process or model.'''
 
 def configuration(route, instructions):
     options = {
-        'model_provider': 'ai_anti_implementation', 'model': MODEL,
-        'model_reasoning_effort': 'medium',
+        'model_provider': 'ai_anti_implementation', 'model': route['cli_model'],
+        'model_reasoning_effort': effort(route['cli_model']),
         'model_providers.ai_anti_implementation.name': 'Token Plan implementation',
         'model_providers.ai_anti_implementation.base_url': route['base_url'],
         'model_providers.ai_anti_implementation.wire_api': 'responses',
@@ -91,9 +92,12 @@ def run(args):
     (out / 'prompt.txt').write_text(payload, encoding='utf-8')
     options = configuration(route, instructions) if route['provider'] == 'token_plan' else None
     if options is not None:
+        catalog = write_catalog(route['cli_model'], out / 'models.json')
+        if catalog:
+            options['model_catalog_json'] = catalog
         write(out / 'codex-config.json', options)
     evidence = dict(public(route), actual_model=None, model_evidence='requested_only' if options else 'native_receipt_required',
-                    status='prepared', completed=False, accepted=False, workspace=str(workspace),
+                    requested_effort=options['model_reasoning_effort'] if options else None, status='prepared', completed=False, accepted=False, workspace=str(workspace),
                     prompt_sha256=digest(out / 'prompt.txt'), cli_version=None,
                     limits=dict(timeout=limits[0], idle_timeout=limits[1], max_output_bytes=CAP),
                     isolation=dict(sandbox='workspace-write', network_access=False,
@@ -133,7 +137,7 @@ def run(args):
             argv += [payload]
             code = execute(argv, workspace, log, *limits, CAP, env=env)
             evidence['exit_code'] = code
-            evidence.update(validate(log, code), status='completed', completed=True)
+            evidence.update(validate(log, code, route['requested_model']), status='completed', completed=True)
     except (RunError, ConfigError, OSError, UnicodeError, KeyboardInterrupt) as exc:
         # Raw provider output stays on disk; never echo credentials from errors.
         evidence.update(status='failed', error_kind=getattr(exc, 'kind', 'execution_failed'),

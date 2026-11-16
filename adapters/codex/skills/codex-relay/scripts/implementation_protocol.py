@@ -6,7 +6,7 @@ from review_runner import RunError
 METADATA_WARNING = 'Model metadata for `glm-5.3` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.'
 
 
-def validate(logfile, code):
+def validate(logfile, code, requested_model='glm-5.3'):
     completed = started = 0
     final = None
     pending = set()
@@ -41,7 +41,7 @@ def validate(logfile, code):
             if item.get('permission_denials') or item.get('type') == 'permission_denied':
                 raise RunError('implementation permission denial')
             if item.get('type') == 'error':
-                if kind == 'item.completed' and started == 0 and item.get('message') == METADATA_WARNING and METADATA_WARNING not in warnings:
+                if requested_model == 'glm-5.3' and kind == 'item.completed' and started == 0 and item.get('message') == METADATA_WARNING and METADATA_WARNING not in warnings:
                     warnings.append(METADATA_WARNING)
                     continue
                 raise RunError('implementation error item')

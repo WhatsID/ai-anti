@@ -12,6 +12,7 @@ if not (BACKEND / 'review_services.py').is_file():
 sys.path.insert(0, str(REVIEW))
 sys.path.insert(0, str(BACKEND))
 import review_services
+import implementation_models
 from ai_anti_config import ConfigError, lookup
 from review_channels import resolve as review_channel
 
@@ -55,30 +56,36 @@ def credential_path(value):
 def resolve(config, workspace, explicit_provider=None, explicit_model=None):
     """Overrides are one coherent provider/model pair; never consult active_api for GLM."""
     stored = provider(lookup(config, 'codex_relay.implementation_provider'))
+    try:
+        token_model = implementation_models.parse(lookup(config, 'codex_relay.token_plan_implementation_model'))
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
     selected = stored if explicit_provider is None else provider(explicit_provider)
     secondary = lookup(config, 'codex_relay.secondary_model')
     if secondary is not None:
         model(secondary)
-    chosen = explicit_model if explicit_model is not None else MODEL if selected in ('token_plan', 'qoder') else secondary
+    chosen = explicit_model if explicit_model is not None else token_model if selected == 'token_plan' else MODEL if selected == 'qoder' else secondary
     if selected == 'codex':
         if chosen is not None:
             model(chosen)
-        if chosen in (MODEL, 'GLM-5.3'):
-            raise ConfigError('glm-5.3 requires implementation provider token_plan or qoder')
+        if chosen in (MODEL, 'GLM-5.3', 'qwen4-max'):
+            raise ConfigError('external implementation model requires its matching provider')
         return dict(provider=selected, requested_model=chosen, executor='native', secondary_model=secondary)
     if selected == 'qoder':
         if chosen != MODEL:
             raise ConfigError('Qoder implementation supports only logical glm-5.3')
         return dict(provider=selected, requested_model=MODEL, executor='qoder', wire_api='qoder-cli', secondary_model=secondary)
-    if chosen != MODEL:
-        raise ConfigError('Token Plan implementation supports only glm-5.3')
+    try:
+        chosen = implementation_models.parse(chosen)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
     qwen = lookup(config, 'plugins.qwen')
     qwen = {} if qwen is None else qwen
     if not isinstance(qwen, dict):
         raise ConfigError('plugins.qwen must be an object')
     profiles = review_services.load(config, qwen, endpoint, model, credential_path, ConfigError)
     profile = copy.deepcopy(profiles['profiles']['token_plan'])
-    profile['model'] = MODEL
+    profile['model'] = chosen
     routed = {'plugins': {'qwen': profile}}
     channel = review_channel(routed, 'qwen', None, Path(workspace), {}, executor='codex')
     channel.update(provider=selected, secondary_model=secondary)

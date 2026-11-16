@@ -132,7 +132,7 @@ class DesktopContract(unittest.TestCase):
         self.assertGreater(view.index('Button("检查配置"'), view.index(implementation))
         summary = view.split('enum SettingsSummary {', 1)[1].split('private struct ServiceSettingsGroup', 1)[0]
         self.assertIn('ReviewService.title(draft.service)', summary)
-        self.assertIn('ModelCatalog.implementationGLM', summary)
+        self.assertIn('draft.tokenPlanImplementationModel', summary)
         self.assertIn('Claude Code 实施代理', summary)
         self.assertIn('CLI 默认', summary)
         self.assertIn('未指定', summary)
@@ -269,6 +269,11 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('.disabled(!model.draft.implementationEnabled)', view)
         self.assertIn('model.draft.host == "claude" ? .constant("claude-agent") : $model.draft.implementationProvider', view)
         self.assertIn('$model.draft.implementationKeyInput', view)
+        self.assertIn('backend/implementation_models.py', (ROOT/'apps/macos/build-app.sh').read_text())
+        import implementation_models
+        self.assertEqual(implementation_models.parse('qwen4-max'), 'qwen4-max')
+        self.assertEqual(implementation_models.parse(None), 'glm-5.3')
+        with self.assertRaises(ValueError): implementation_models.parse('')
         # Existing package includes the single shared pure migration dependency.
         self.assertIn('backend/review_services.py', (ROOT/'apps/macos/build-app.sh').read_text())
         skill = (ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()

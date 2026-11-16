@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 import time
 from review_runner import RunError, execute
+from model_metadata import effort, write_catalog
 from review_materials import load_registry
 from review_codex_protocol import validate
 
@@ -49,7 +50,7 @@ def configuration(channel, registry_path, instructions):
     clears['AI_ANTI_QWEN_TOKEN'] = ''
     options = {
         'model_provider': 'ai_anti_qwen', 'model': channel['cli_model'],
-        'model_reasoning_effort': 'medium',
+        'model_reasoning_effort': effort(channel['cli_model']),
         'model_providers.ai_anti_qwen.name': 'Qwen Responses',
         'model_providers.ai_anti_qwen.base_url': channel['base_url'],
         'model_providers.ai_anti_qwen.wire_api': 'responses',
@@ -77,21 +78,9 @@ def write_config(channel, registry_path, path):
     instructions = path.with_suffix('.instructions.txt')
     instructions.write_text(INSTRUCTIONS, encoding='utf-8')
     options = configuration(channel, registry_path, instructions)
-    if channel['cli_model'] == 'qwen3.8-max':
-        # Official Model Studio Codex catalog, narrowed to text review input.
-        catalog = path.with_suffix('.models.json')
-        model = {'slug': 'qwen3.8-max', 'display_name': 'qwen3.8-max',
-                 'description': 'Qwen text review', 'default_reasoning_level': 'xhigh',
-                 'supported_reasoning_levels': [{'effort': x, 'description': x} for x in ('low', 'medium', 'xhigh')],
-                 'shell_type': 'default', 'visibility': 'list', 'supported_in_api': True,
-                 'priority': 1, 'base_instructions': '', 'supports_reasoning_summaries': False,
-                 'support_verbosity': False, 'supports_parallel_tool_calls': False,
-                 'context_window': 983616, 'effective_context_window_percent': 95,
-                 'input_modalities': ['text'], 'supports_image_detail_original': False,
-                 'experimental_supported_tools': [],
-                 'truncation_policy': {'mode': 'bytes', 'limit': 65536}}
-        catalog.write_text(json.dumps({'models': [model]}) + '\n', encoding='utf-8')
-        options['model_catalog_json'] = str(catalog)
+    catalog = write_catalog(channel['cli_model'], path.with_suffix('.models.json'))
+    if catalog:
+        options['model_catalog_json'] = catalog
     path.write_text(json.dumps(options, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
     os.chmod(path, 0o600)
     return options
@@ -133,7 +122,7 @@ def run_stage(cli, cwd, prompt, logfile, model, timeout, idle, cap, families=Non
     started = time.time()
     code = execute(args, cwd, logfile, timeout, idle, cap, env)
     result = validate(logfile, code, model, cwd, required, registry)
-    result.update(started_at=started, finished_at=time.time(),
+    result.update(requested_effort=options['model_reasoning_effort'], started_at=started, finished_at=time.time(),
                   duration_seconds=time.time() - started,
                   log_sha256=hashlib.sha256(logfile.read_bytes()).hexdigest())
     return result

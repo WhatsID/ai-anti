@@ -51,9 +51,9 @@ Claude 也有 capability / 协议门禁，但并非 Responses 执行器的精确
 ## 已知不兼容
 
 - **Claude Code 2.1.280 的内置插件**：`--safe-mode` 下 init 事件仍上报 `agents-md@builtin`、
-  `telemetry@builtin`，旧门禁要求插件列表为空，于是在该版本上一律失败。现门禁只放行名字、
-  路径、来源三项都精确对上的这两个内置插件；CLI 以后新增或改名内置插件仍会 fail closed，
-  需要人工判断后再放行。
+  `telemetry@builtin`，旧门禁要求插件列表为空，于是在该版本上一律失败。当时补充了这两项
+  名字、路径、来源的精确准入；当前四项逻辑插件及旧新别名范围见文末 2026-11-16 补充。
+  此范围以外新增或改名的插件仍会 fail closed，需要人工判断后再放行。
 - **`claude -p` 的模型直传**（2026-08-18 实测）：用 `ANTHROPIC_MODEL` 直传非 Claude 模型名会被
   CLI 客户端侧的模型注册表拦下，插件通道必须走「档位别名 + 档位默认模型映射」，见
   `plugins/qwen/commands/qwen-review.md`。
@@ -438,7 +438,7 @@ independent 完整读取8块，291.137秒；review 完整读取10块，166.598�
 ## 独立实施来源配置
 
 仅 Codex 主导支持 `codex_relay.implementation_provider=codex/token_plan/qoder`（缺失/null 为
-codex），native 仍走显式 spawn_agent 模型和 runtime 证据；Token Plan 固定请求 glm-5.3，
+codex），native 仍走显式 spawn_agent 模型和 runtime 证据；Token Plan 默认请求 glm-5.3，可独立选择 qwen4-max，
 使用 Codex CLI Responses 与共享 Token Plan profile，不依赖当前评审服务。新入口复用既有
 精确 CLI 能力版本门禁；此配置支持不扩大 compat.json 已测路径或 actual model 证据。
 Token Plan 引入时的验证仅离线 fake/配置/UI 状态测试及 App 构建，未再次执行业务 GLM 试跑。
@@ -472,3 +472,50 @@ the initial validator rejected legitimate segmented tool messages; both raw stre
 pass replay and regression tests cover their interleaved/parallel call ordering. This is
 synthetic tool-chain evidence, not proof of whole-project GLM implementation or backend
 identity. No user settings, login state, installation or reviewer compatibility changed.
+
+## Qwen4-Max 接入边界
+
+正式 `qwen4-max` 可用于 Token Plan 评审（Claude / Codex）和独立实施（Codex Responses）。
+实施字段 `codex_relay.token_plan_implementation_model` 只准入 GLM / Qwen4，缺失/null
+保持 GLM，坏值在读取、保存、恢复和 prepare-only 中拒绝。评审 profile、原生模型与
+Qoder 路由独立。Qwen4 请求 high effort，per-run catalog 为 text-only，关闭并行工具、图片
+和推理摘要，保持既有材料限制；其 metadata fallback warning 不获准。GLM 精确 warning
+例外仅属于 GLM 请求。CLI 版本钉仍为 0.160.0 / 0.163.0，不因新模型放宽。
+
+本段描述实现契约，不宣称真实 Qwen4 链路、所有账号/地域或两版 CLI 已通过验收。
+本地合成 wire 工具往返与隔离 GUI 已通过独立验收；更换有额度的订阅后，真实 Responses
+两阶段评审和独立实施合成探针通过，Claude 评审仍有协议兼容缺口，边界见下文。
+Responses 始终 actual_model=null / requested_only；catalog 不是服务端身份凭证。
+回滚前选回 GLM，旧版不能继续 Qwen4；不重置用户其他模型或凭证。
+
+2026-11-16 独立验收：Codex CLI 0.163.0 对本地合成 SSE 的 wire/tool 探针已通过，
+实际请求为 qwen4-max / high，完整 12KiB 材料往返。真实服务 Responses 返回 429，
+Anthropic 返回 Token Plan 月额度已用尽；真实 Qwen4 评审集成未通过，独立实施真实调用
+因相同额度阻断未执行，不重试或降级。Claude Code 2.1.322 同时带来未准入的 builtin
+privacy / plugin-authoring init 项，当时由既有协议拒绝（下述补充不追认该次全链路通过）。0.160.0 无真实二进制
+实测；离线 fake 不证明该版本实际兼容。上述结果不证明供应商后端模型身份。
+
+同日独立实施 wire 探针通过：真实 Codex CLI 0.163.0 对本地合成 SSE 请求
+qwen4-max / high，完成临时 probe.txt 写入与算术断言并回传结果；限定变更仅该文件，
+actual_model=null。这证明本地实施请求和工具链，不代表真实 Qwen4 模型实施成功。
+候选 app 副本使用隔离 config-root，GUI 核验评审和实施两个下拉选项，分别保存后
+重新读取均保持 qwen4-max，折叠摘要显示两处 qwen4-max。验收 app 已退出，真实用户
+配置未改变；GUI 结果也不证明真实模型可调用。
+
+2026-11-16 内置插件兼容补充：用户准入 privacy / plugin-authoring，连同 agents-md /
+telemetry 仅接受四项精确旧名及对应 cc-plugin- 完整名，共八个字符串；path 必须为 builtin，
+source 必须为完整上报名@builtin，同逻辑插件重复（含旧新别名混用）仍拒绝。
+离线回放 2.1.322 实际 init 的四个插件条目及旧条目，材料验证与 thin review 合成测试通过；
+未知名、前缀近似名、伪造来源/路径及重复项均拒绝。工具、MCP、技能和权限门禁不变。
+此证据不涉及真实 API 或完整链路，也不更改兼容版本认证；上述额度失败历史仍有效。
+
+同日更换有额度的订阅后复验：Codex CLI 0.163.0 请求 qwen4-max / high，正式 plan 的
+inventory / review 分别约 42.54 / 138.53 秒完成，完整材料与工具协议校验通过，均无重试。
+独立实施入口约 20.76 秒完成合成 calculator 的 subtract 实现及 unittest，主模型核对
+限定两文件变更并独立复跑 3 项测试通过。这证明该账号下的真实请求与工具链可用，不证明
+服务端内部模型身份、完整业务项目实施质量或其他账号/地域可用性。
+
+Claude Code 2.1.322 / Anthropic 同次真实调用返回模型结果，但正式第一阶段仍失败：
+新增 init 前的 `system/ui_invalidate`（`event=ui.render`）与 `system/thinking_tokens`
+不在现有事件协议内，报 `unknown system event`；第二阶段未执行。实际 init 的四个内置
+插件条目符合新允许列表。该缺口与额度无关，未删除事件或放宽协议来宣称成功。

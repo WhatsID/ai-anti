@@ -242,7 +242,7 @@ AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API
 | `defaults.deployment_scale` | 项目未声明时传给评审方的部署规模 | 未设置 → 评审提示写明「未声明部署规模」 |
 | `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
 | `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
-| `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理、Token Plan 或 Qoder 订阅固定逻辑 `glm-5.3` | 缺失/null → `codex` |
+| `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅固定逻辑 `glm-5.3` | 缺失/null → `codex` |
 | `codex_relay.secondary_model` | 原生 Codex 实施模型；切换 GLM 时保留 | 未设置 → 每次任务指定 |
 | `codex_relay.qwen_executor` | Qwen 评审的 CLI 执行器 | `claude` |
 | `plugins.qwen.responses_base_url` | Codex 执行器独立的 Responses 地址 | 无 |
@@ -324,3 +324,11 @@ Qoder 实施可设 `codex_relay.implementation_provider=qoder`，逻辑 `glm-5.3
 `GLM-5.3`，要求既有订阅登录及 qodercli 1.1.77，不读取 Token Plan 凭证、不改变 Kimi
 评审路由。单次有界写任务不重试；工具限制不是文件/网络硬隔离，CLI 报告身份与未知
 后端路由分开记录。详见 [codex-relay 契约](adapters/codex/skills/codex-relay/SKILL.md#qoder-subscription-implementation)。
+
+Token Plan 独立实施字段为 `codex_relay.token_plan_implementation_model`，仅允许
+`glm-5.3` / `qwen4-max`；缺失或 null 默认 GLM，空串、大小写变体、preview 和未知值拒绝，
+非当前服务也校验。桌面保存/刷新/恢复保留该选择，旧客户端省略字段时保留既有值。
+它不改变评审模型或 native `secondary_model`，仍共享 Token Plan profile 的地址与凭证。
+Qwen4 评审和实施请求 high effort；GLM 与既有模型维持 medium。Responses 只记录请求模型，
+不证明服务端身份；目录选项和评审测试都不证明实施可用。回滚前先选择 GLM；旧版本固定 GLM。
+本次不自动启用新模型，不安装、不改真实用户配置。账号/地域与真实模型工具往返需单独验收。

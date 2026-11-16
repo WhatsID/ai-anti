@@ -44,7 +44,7 @@ enum SettingsSummary {
         let detail: String
         if draft.host == "claude" { detail = "Claude Code 实施代理" }
         else if draft.implementationProvider == "qoder" { detail = "Qoder 订阅 / GLM-5.3" }
-        else if draft.implementationProvider == "token_plan" { detail = "千问 Token Plan / " + ModelCatalog.implementationGLM }
+        else if draft.implementationProvider == "token_plan" { detail = "千问 Token Plan / " + draft.tokenPlanImplementationModel }
         else { detail = "Codex / " + (draft.secondaryModel.isEmpty ? "未指定" : draft.secondaryModel) }
         return "实施服务：" + detail + (draft.mode == "solo" ? "（solo 已停用）" : "")
     }
@@ -232,7 +232,7 @@ struct SettingsView: View {
                             field("实施服务API密钥") {
                                 SecureField("实施服务API密钥", text: $model.draft.implementationKeyInput).disabled(isSolo)
                             }
-                            note("固定 glm-5.3；与 Token Plan 评审共享地址及凭证草稿，独立于当前评审服务和评审模型。评审测试不证明实施可用；业务材料外发仍需当次授权。仅确认请求模型，服务端实际模型未知。")
+                            note("可选 glm-5.3 / qwen4-max；与 Token Plan 评审共享地址及凭证草稿，独立于当前评审服务和评审模型。评审测试不证明实施可用；业务材料外发仍需当次授权。仅确认请求模型，服务端实际模型未知。")
                         }
                         if model.draft.host == "codex" && model.draft.implementationProvider == "qoder" {
                             note("固定 GLM-5.3；使用已有 Qoder 订阅登录，要求 qodercli 1.1.77。检查配置仅检查版本，不验证登录或实施；评审检测仍走所选评审服务。CLI 报告模型，后端路由未知。工具限制不提供文件或网络硬隔离。")

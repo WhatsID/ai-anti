@@ -41,7 +41,7 @@ def validate(logfile, code, requested, cwd, required, registry):
                     raise RunError('invalid item id')
                 if typ == 'error':
                     expected = 'Model metadata for `' + requested + '` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.'
-                    if turn or kind != 'item.completed' or item.get('message') != expected or uid in seen:
+                    if requested == 'qwen4-max' or turn or kind != 'item.completed' or item.get('message') != expected or uid in seen:
                         raise RunError('Codex error item')
                     if any(x['kind'] == 'fallback_metadata' for x in warnings):
                         raise RunError('duplicate metadata warning')

@@ -157,6 +157,32 @@ class MaterialIds(unittest.TestCase):
         return validate(self.log, 0, 'sonnet', self.stage, {'sonnet': re.compile('fixture\\.v1-max')},
                         expected_model='fixture.v1-max', required=[v['path'] for v in self.registry['materials'].values()], registry=self.registry)
 
+    def test_builtin_plugin_cli_2_1_322_aliases_and_forgeries(self):
+        # Names/path/source replay the real Claude Code 2.1.322 init tuple.
+        names = ('cc-plugin-agents-md', 'cc-plugin-telemetry',
+                 'cc-plugin-privacy', 'cc-plugin-plugin-authoring')
+        plugins = [{'name': name, 'path': 'builtin', 'source': name + '@builtin'} for name in names]
+        old = [{'name': name, 'path': 'builtin', 'source': name + '@builtin'}
+               for name in ('agents-md', 'telemetry', 'privacy', 'plugin-authoring')]
+        for accepted in ([], plugins, old, [old[0], *plugins[1:]]):
+            with self.subTest(accepted=accepted):
+                events = self.events(); events[0]['plugins'] = accepted
+                self.assertEqual(len(self.check(events)['complete_reads']), 2)
+        rejected = [plugins + [plugins[0]], plugins + [old[0]], old + [old[2]]]
+        for name in ('cc-plugin-unknown', 'cc-plugin-privacy-extra', 'privacy-extra',
+                     'cc-plugin-cc-plugin-privacy', 'x-privacy'):
+            rejected.append([{'name': name, 'path': 'builtin', 'source': name + '@builtin'}])
+        for plugin in plugins + old:
+            for key, value in (('path', '/tmp/builtin'), ('source', plugin['name'] + '@market'),
+                               ('source', 'privacy@builtin' if plugin['name'] != 'privacy'
+                                else 'cc-plugin-privacy@builtin')):
+                rejected.append([dict(plugin, **{key: value})])
+        for invalid in rejected:
+            with self.subTest(rejected=invalid):
+                events = self.events(); events[0]['plugins'] = invalid
+                with self.assertRaisesRegex(RunError, 'unsafe or missing init capability set'):
+                    self.check(events)
+
     def test_evidence_complete_and_repeated_material(self):
         events = self.events()
         self.assertEqual(len(self.check(events)['complete_reads']), 2)

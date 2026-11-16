@@ -204,6 +204,41 @@ class CodexQwenTests(qwen.QwenReviewTests):
         self.assert_success(r, out, 'prepared')
         self.assertEqual(self.manifest(out)['limits']['idle_timeout'], 900)
 
+    def test_qwen4_catalog_effort_and_warning_guard(self):
+        sys.path.insert(0, str(qwen.thin.ENTRY.parent))
+        from review_codex_protocol import validate
+        from review_runner import RunError
+        for model, effort in (('qwen4-max', 'high'), ('qwen3.8-max', 'medium')):
+            self.qconfig['plugins']['qwen']['model'] = model
+            self.write_config(self.qconfig)
+            prepared, prepared_out = self.run_review(extra=['--prepare-only'])
+            self.assert_success(prepared, prepared_out, 'prepared')
+            prepared_config = json.loads(next((prepared_out/'logs').glob('*.codex-config.json')).read_text())
+            self.assertEqual(prepared_config['model_reasoning_effort'], effort)
+            self.assertTrue(Path(prepared_config['model_catalog_json']).is_file())
+            r, out = self.run_review()
+            self.assert_success(r, out)
+            config = json.loads((out/'logs/review.codex-config.json').read_text())
+            self.assertEqual(config['model_reasoning_effort'], effort)
+            catalog = Path(config['model_catalog_json'])
+            self.assertTrue(catalog.is_absolute())
+            entry = json.loads(catalog.read_text())['models'][0]
+            self.assertEqual(entry['slug'], model)
+            self.assertEqual(entry['truncation_policy'], {'mode': 'bytes', 'limit': 65536})
+            self.assertEqual(config['tool_output_token_limit'], 32768)
+            self.assertEqual(entry['input_modalities'], ['text'])
+            self.assertEqual(self.manifest(out)['stages']['review']['requested_effort'], effort)
+            events = [json.loads(x) for x in (out/'logs/review.jsonl').read_text().splitlines()]
+            warning = {'type': 'item.completed', 'item': {'id': 'metadata-warning', 'type': 'error', 'message': 'Model metadata for `' + model + '` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.'}}
+            events.insert(1, warning)
+            log = self.base/(model + '-warning.jsonl'); log.write_text('\n'.join(json.dumps(e) for e in events))
+            registry = self.manifest(out)['material_registries']['review']
+            required = [x['path'] for x in registry['materials'].values()]
+            if model == 'qwen4-max':
+                with self.assertRaises(RunError): validate(log, 0, model, registry['root'], required, registry)
+            else:
+                self.assertTrue(validate(log, 0, model, registry['root'], required, registry)['transport_warnings'])
+
 for name in dir(qwen.QwenReviewTests):
     if name.startswith('test_') and name not in CodexQwenTests.__dict__:
         setattr(CodexQwenTests, name, None)

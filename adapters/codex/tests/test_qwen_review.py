@@ -154,11 +154,23 @@ class QwenReviewTests(thin.ThinReviewTests):
             self.assertNotEqual(r.returncode, 0)
 
 
+    def test_qwen4_claude_effort_is_local(self):
+        # Run Qwen4 followed by an existing model to prove FLAGS was not mutated.
+        for model, effort in (('qwen4-max', 'high'), ('fixture.v1-max', 'medium')):
+            self.qconfig['plugins']['qwen']['model'] = model
+            self.write_config(self.qconfig)
+            r, out = self.run_review(extra=['--qwen-executor', 'claude'])
+            self.assert_success(r, out)
+            args = self.calls()[-1]['argv']
+            self.assertEqual(args[args.index('--effort') + 1], effort)
+            self.assertEqual(self.manifest(out)['stages']['review']['requested_effort'], effort)
+
 # Remove inherited tests: this module owns only Qwen contracts, while the original
 # module continues to execute the full Claude regression suite.
 for name in dir(thin.ThinReviewTests):
     if name.startswith('test_') and name not in QwenReviewTests.__dict__:
         setattr(QwenReviewTests, name, None)
+
 
 if __name__ == '__main__':
     unittest.main()

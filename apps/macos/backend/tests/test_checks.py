@@ -43,6 +43,12 @@ class CheckTests(unittest.TestCase):
         with patch('checks.discover', return_value='/usr/bin/true'):
             result = checks.local(store, str(ROOT))
         self.assertIn('Token Plan · glm-5.3 · Responses', result['message'])
+        snap = store.read(); values = snap['values']; values['token_plan_implementation_model'] = 'qwen4-max'
+        store.save(values, snap['fingerprints'])
+        with patch.object(checks, 'discover', return_value='/usr/bin/true'):
+            qwen4 = checks.local(store, ROOT)
+        self.assertIn('Token Plan · qwen4-max · Responses', qwen4['message'])
+        self.assertIn('未验证', qwen4['message'])
         self.assertIn('评审检测不能替代实施证据', result['message'])
         for host, mode in (('claude', 'rules'), ('codex', 'solo')):
             snap = store.read(); v = snap['values']; v.update(host=host, mode=mode)

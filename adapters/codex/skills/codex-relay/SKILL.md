@@ -157,8 +157,8 @@ Resolve `codex_relay.implementation_provider` from the user config: missing/null
 `codex`; only `codex`, `token_plan` and `qoder` are accepted, including when reading or restoring
 configuration. Keep `codex_relay.secondary_model` as the native Codex model; selecting
 Token Plan or Qoder never overwrites it. An explicit per-task provider/model instruction takes
-priority as a coherent pair: GLM requires `token_plan` or `qoder` and exactly logical `glm-5.3`; never
-combine that model with native Codex or a different model with either GLM provider. Public uppercase `GLM-5.3` is rejected. Resolve any
+priority as a coherent pair: Token Plan permits `glm-5.3` and `qwen4-max`; Qoder permits
+only logical `glm-5.3`. Neither external model is valid with native Codex. Public uppercase `GLM-5.3` is rejected. Resolve any
 ambiguous explicit request before dispatch. `solo` disables independent implementation;
 Claude Code's implementer workflow is unchanged. Configuration selection is not permission
 to send business materials externally: require the session's applicable authorization.
@@ -231,7 +231,7 @@ run, the primary must confirm the prior writer stopped and inspect partial chang
 side effects; native recovery rules above do not apply to this GLM write task.
 
 Require `status.json` and `manifest.json` with `completed=true`, status `completed`,
-requested `glm-5.3`, executor `codex`, wire API `responses`, CLI capability/version, limits,
+requested route model, requested effort, executor `codex`, wire API `responses`, CLI capability/version, limits,
 prompt/log hashes and elapsed time. Success requires exit 0, exactly one `turn.started`
 and `turn.completed`, a final agent_message and no error/turn.failed; recoverable command
 failures may be repaired within the turn. The precise known GLM fallback-metadata warning
@@ -310,4 +310,21 @@ the template.
 
 The primary model is selected by the user/runtime, never dynamically switched by this
 Skill. `codex_relay.secondary_model` selects only the native Codex independent implementer;
-`implementation_provider=token_plan` or `qoder` fixes implementation to logical glm-5.3. None selects the reviewer. Both review channels retain the same evidence and scope gates.
+`implementation_provider=token_plan` uses the independent Token Plan model; `qoder` fixes implementation to logical glm-5.3. None selects the reviewer. Both review channels retain the same evidence and scope gates.
+
+### Independent Token Plan model
+
+`codex_relay.token_plan_implementation_model` accepts only `glm-5.3` or `qwen4-max`.
+Missing/null means `glm-5.3`; empty, preview, case variants and unknown values fail
+before credentials or CLI launch, even with another provider selected. Explicit model
+instructions override this value only with a matching provider. Token Plan always copies
+its own profile endpoint/credentials, never `active_api` or the review model. No default
+switch or automatic retry/fallback is introduced.
+
+Qwen4 uses high effort and a per-run absolute-path text-only model catalog. GLM retains
+medium effort and its exact pre-turn metadata warning exception; that warning fails a
+Qwen4 request. Responses evidence remains `actual_model=null` / `requested_only`;
+metadata and a completed turn do not prove backend identity or primary acceptance.
+Prepare-only writes the same model/effort/catalog without reading credentials or launching
+CLI. For rollback, select GLM before using an older version; older runners fix Token Plan
+to GLM and cannot preserve Qwen4 execution. No installation or user-config change is implicit.

@@ -10,6 +10,14 @@ import tempfile
 import tomllib
 from urllib.parse import urlsplit
 import review_services as services
+import implementation_models
+
+def token_plan_model(value):
+    try:
+        return implementation_models.parse(value)
+    except ValueError as exc:
+        raise StoreError(str(exc)) from exc
+
 
 MODES = ('solo', 'auto', 'rules', 'force')
 class StoreError(Exception):
@@ -164,7 +172,7 @@ class Store:
         values = dict(host=host, primary_model=primary, claude_model=claude.get('model', ''), codex_model=codex.get('model', ''),
                       channel=(channels[0] if channels else 'codex') if host == 'claude' else relay.get('review_channel', 'claude'),
                       reviewer_model=review.get('codex_model', ''), qwen_model=qwen.get('model', ''),
-                      secondary_model=relay.get('secondary_model') or '', implementation_provider=implementation_provider(relay.get('implementation_provider')), mode=mode_value, base_url=qwen.get('base_url', ''),
+                      token_plan_implementation_model=token_plan_model(relay.get('token_plan_implementation_model')), secondary_model=relay.get('secondary_model') or '', implementation_provider=implementation_provider(relay.get('implementation_provider')), mode=mode_value, base_url=qwen.get('base_url', ''),
                       responses_base_url=qwen.get('responses_base_url', ''), qwen_executor=relay.get('qwen_executor', 'claude'),
                       credential_paths=qwen.get('credential_paths', ['~/.config/ai-anti/secrets.json']), fallback_channels=channels[1:], claude_channel=(channels[0] if channels else 'codex'), codex_channel=relay.get('review_channel', 'claude'))
         for key in ('primary_model', 'claude_model', 'codex_model', 'reviewer_model', 'qwen_model', 'secondary_model', 'base_url'):
@@ -313,6 +321,8 @@ class Store:
             review.pop('codex_model', None)
         implementation_provider(relay.get('implementation_provider'))  # Reject corrupted stored routes too.
         relay['implementation_provider'] = implementation_provider(values.get('implementation_provider', relay.get('implementation_provider')))
+        token_plan_model(relay.get('token_plan_implementation_model'))
+        relay['token_plan_implementation_model'] = token_plan_model(values.get('token_plan_implementation_model', relay.get('token_plan_implementation_model')))
         relay['secondary_model'] = values['secondary_model'] or None
         section(ai, 'relay')['default_mode'] = values['mode']
         section(ai, 'desktop')['primary_host'] = host
@@ -453,6 +463,7 @@ class Store:
         if outputs.get('ai') is not None:
             restored_ai = object_json(outputs['ai'])
             implementation_provider(section(restored_ai, 'codex_relay').get('implementation_provider'))
+            token_plan_model(section(restored_ai, 'codex_relay').get('token_plan_implementation_model'))
             restored_executor = section(restored_ai, 'codex_relay').get('qwen_executor', 'claude')
             if restored_executor not in ('claude', 'codex'):
                 raise StoreError('恢复记录 API 评审执行器无效；请先完成一次新保存以刷新恢复点')

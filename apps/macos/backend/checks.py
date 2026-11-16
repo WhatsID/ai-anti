@@ -155,7 +155,7 @@ def local(store, source=None):
         raise CheckError('没有找到可解析的 Qwen 凭证')
     if store.read()['signature'] != snapshot['signature']:
         raise CheckError('检测中配置或凭证发生变化，结果作废')
-    route = ('停用独立实施' if v['mode'] == 'solo' else 'Claude Code 实施代理' if v['host'] == 'claude' else 'Qoder 订阅 · GLM-5.3 · qodercli 1.1.77' if qoder_implementation else 'Token Plan · glm-5.3 · Responses' if implementation else 'Codex 原生 · ' + (v['secondary_model'] or '未指定'))
+    route = ('停用独立实施' if v['mode'] == 'solo' else 'Claude Code 实施代理' if v['host'] == 'claude' else 'Qoder 订阅 · GLM-5.3 · qodercli 1.1.77' if qoder_implementation else 'Token Plan · ' + v['token_plan_implementation_model'] + ' · Responses' if implementation else 'Codex 原生 · ' + (v['secondary_model'] or '未指定'))
     return result('local', 'passed', '本地检查通过；实施：' + route + '；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
 
 def codex_events(path, marker):

@@ -159,4 +159,65 @@ class ImplementationTests(unittest.TestCase):
         log = self.root/'bad.jsonl'; log.write_text('{"type":"turn.completed"}\n')
         with self.assertRaises(RunError): validate(log, 0)
 
+    def test_qwen4_route_and_execution(self):
+        self.config['codex_relay']['token_plan_implementation_model'] = 'qwen4-max'
+        self.path.write_text(json.dumps(self.config))
+        route = resolve(self.config, self.workspace)
+        self.assertEqual((route['requested_model'], route['cli_model']), ('qwen4-max', 'qwen4-max'))
+        self.assertEqual(route['credential_key'], 'review_services.token_plan.value')
+        result = implementation.run(self.args())
+        self.assertTrue(result['completed'])
+        self.assertEqual(result['requested_effort'], 'high')
+        options = json.loads((self.workspace/'fake-audit.json').read_text())['options']
+        self.assertEqual(options['model'], 'qwen4-max')
+        self.assertEqual(options['model_reasoning_effort'], 'high')
+        catalog = Path(options['model_catalog_json'])
+        self.assertTrue(catalog.is_absolute())
+        entry = json.loads(catalog.read_text())['models'][0]
+        self.assertEqual(entry['slug'], 'qwen4-max')
+        self.assertEqual(entry['input_modalities'], ['text'])
+        self.assertFalse(entry['supports_parallel_tool_calls'])
+        self.assertFalse(entry['supports_reasoning_summaries'])
+        self.assertEqual(resolve(self.config, self.workspace, 'qoder')['requested_model'], MODEL)
+        self.assertEqual(resolve(self.config, self.workspace, 'token_plan', MODEL)['requested_model'], MODEL)
+        with self.assertRaises(ConfigError): resolve(self.config, self.workspace, 'codex', 'qwen4-max')
+        with self.assertRaises(ConfigError): resolve(self.config, self.workspace, 'qoder', 'qwen4-max')
+        self.assertEqual(self.config['plugins']['qwen']['model'], 'custom-model')
+
+    def test_qwen4_prepare_catalog_without_credentials(self):
+        self.config['codex_relay']['token_plan_implementation_model'] = 'qwen4-max'
+        self.path.write_text(json.dumps(self.config)); self.secret.unlink()
+        with patch.object(implementation, 'child_environment', side_effect=AssertionError('credential read')), patch.object(implementation, 'execute', side_effect=AssertionError('launch')):
+            result = implementation.run(self.args(prepare_only=True))
+        self.assertEqual(result['requested_model'], 'qwen4-max')
+        self.assertEqual(result['requested_effort'], 'high')
+        config = json.loads((self.root/'output/codex-config.json').read_text())
+        self.assertEqual(config['model'], result['cli_model'])
+        self.assertTrue(Path(config['model_catalog_json']).is_file())
+        for mode in ('failed', 'no-final', 'no-terminal', 'duplicate-terminal', 'multi-turn', 'nonzero'):
+            self.secret.write_text(json.dumps({'review_services': {'token_plan': {'value': 'OFFLINE_FAKE_TOKEN'}}}))
+            (self.workspace/'fake-mode.txt').write_text(mode)
+            failed = implementation.run(self.args(name='qwen4-' + mode))
+            self.assertEqual(failed['status'], 'failed')
+            self.assertFalse(failed['completed'])
+
+    def test_strict_token_model_even_for_inactive_provider(self):
+        for index, bad in enumerate(('', 'Qwen4-Max', 'qwen4-max-preview', [], {}, True, 4)):
+            with self.subTest(bad=bad):
+                self.config['codex_relay']['token_plan_implementation_model'] = bad
+                self.path.write_text(json.dumps(self.config))
+                with patch.object(implementation, 'child_environment', side_effect=AssertionError('credential read')), patch.object(implementation, 'execute', side_effect=AssertionError('launch')):
+                    with self.assertRaises(ConfigError): implementation.run(self.args(name='bad-' + str(index), prepare_only=True, provider='codex'))
+                self.assertFalse((self.root/('bad-' + str(index))).exists())
+        self.config['codex_relay']['token_plan_implementation_model'] = None
+        self.assertEqual(resolve(self.config, self.workspace)['requested_model'], MODEL)
+
+    def test_qwen4_rejects_glm_metadata_warning(self):
+        from implementation_protocol import METADATA_WARNING
+        events = [{'type': 'thread.started'}, {'type': 'item.completed', 'item': {'type': 'error', 'message': METADATA_WARNING}}, {'type': 'turn.started'}, {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'candidate'}}, {'type': 'turn.completed'}]
+        log = self.root/'metadata.jsonl'
+        log.write_text('\n'.join(json.dumps(e) for e in events))
+        self.assertTrue(validate(log, 0, 'glm-5.3')['result'])
+        with self.assertRaises(RunError): validate(log, 0, 'qwen4-max')
+
 if __name__ == '__main__': unittest.main()

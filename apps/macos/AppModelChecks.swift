@@ -81,7 +81,7 @@ import Combine
         assert(!model.busy && !model.checking && model.status.contains("检测已取消"))
         model.inspect(); model.stopBackground(); back.complete(.failure(BridgeFailure(message: "shutdown")))
         assert(model.status.contains("检测已取消"))
-        assert(ModelCatalog.claude.count == 4 && ModelCatalog.codex.count == 4 && ModelCatalog.qwen.count == 1 && ModelCatalog.deepseek.count == 1)
+        assert(ModelCatalog.claude.count == 4 && ModelCatalog.codex.count == 4 && ModelCatalog.qwen.count == 2 && ModelCatalog.deepseek.count == 1)
         var apiSnapshot = snapshot
         var apiValues = snapshot["values"] as! [String: Any]
         apiValues["qwen_model"] = "custom-api-id"; apiValues["secondary_model"] = "legacy-implementation"
@@ -335,7 +335,7 @@ import Combine
         implementationDraft.host = "codex"; implementationDraft.secondaryModel = "historical-native"
         implementationDraft.implementationProvider = "token_plan"
         assert(implementationDraft.implementationModel == "glm-5.3")
-        implementationDraft.implementationModel = "must-not-overwrite-native"
+        implementationDraft.implementationModel = "qwen4-max"
         implementationDraft.implementationURL = "https://implementation.fixture.invalid/v1"
         implementationDraft.implementationKeyInput = "shared-fixture-key"
         assert(implementationDraft.activeAPI == "custom_api" && implementationDraft.secondaryModel == "historical-native")
@@ -349,6 +349,9 @@ import Combine
         implementationDraft.implementationModel = "must-not-overwrite-native"
         assert(implementationDraft.secondaryModel == "historical-native")
         assert(implementationDraft.dictionary["implementation_provider"] as? String == "qoder")
+        implementationDraft.implementationProvider = "token_plan"
+        assert(implementationDraft.implementationModel == "qwen4-max")
+        assert(implementationDraft.dictionary["token_plan_implementation_model"] as? String == "qwen4-max")
         implementationDraft.implementationProvider = "codex"
         assert(implementationDraft.implementationModel == "historical-native")
         implementationDraft.host = "claude"; assert(!implementationDraft.implementationEnabled)
@@ -360,10 +363,17 @@ import Combine
         assert(addressModel.draft.implementationProvider == "token_plan" && addressModel.draft.secondaryModel == "native-draft")
         addressModel.discard()
         assert(addressModel.draft.implementationProvider == addressModel.saved.implementationProvider && addressModel.draft.secondaryModel == addressModel.saved.secondaryModel)
+        assert(addressModel.draft.tokenPlanImplementationModel == "glm-5.3", "Old snapshots must initialize a valid default")
         addressModel.draft.implementationProvider = "token_plan"
+        addressModel.draft.tokenPlanImplementationModel = "qwen4-max"
+        assert(addressModel.secondaryOptions.map { $0.id } == ["glm-5.3", "qwen4-max"])
+        addressModel.draft.activeAPI = "token_plan"
+        addressModel.draft.channel = "qwen"
+        assert(addressModel.reviewerOptions.contains { $0.id == "qwen4-max" })
         addressModel.save()
         let implementationValues = addressFront.requests.last?["values"] as! [String: Any]
         assert(implementationValues["implementation_provider"] as? String == "token_plan")
+        assert(implementationValues["token_plan_implementation_model"] as? String == "qwen4-max")
         addressFront.complete(.success(missingAddressSnapshot))
         addressModel.draft.implementationProvider = "qoder"
         addressModel.save()

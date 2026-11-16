@@ -231,7 +231,12 @@ class ThinReviewTests(unittest.TestCase):
     def test_builtin_plugins_whitelist_accepted(self):
         agents = {'name': 'agents-md', 'path': 'builtin', 'source': 'agents-md@builtin'}
         telemetry = {'name': 'telemetry', 'path': 'builtin', 'source': 'telemetry@builtin'}
-        for plugins in ([], [agents, telemetry], [agents], [telemetry]):
+        new_plugins = [{'name': name, 'path': 'builtin', 'source': name + '@builtin'}
+                       for name in ('cc-plugin-agents-md', 'cc-plugin-telemetry',
+                                    'cc-plugin-privacy', 'cc-plugin-plugin-authoring')]
+        old_plugins = [dict(item, name=item['name'][10:], source=item['name'][10:] + '@builtin')
+                       for item in new_plugins]
+        for plugins in ([], [agents, telemetry], [agents], [telemetry], new_plugins, old_plugins):
             with self.subTest(plugins=plugins):
                 r, out = self.run_review(plugins=plugins)
                 self.assert_success(r, out)

@@ -304,7 +304,7 @@ silently falling back.
 | `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
 | `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
 | `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
-| `codex_relay.implementation_provider` | Codex-led implementation: native `codex`, Token Plan or Qoder subscription fixed logical `glm-5.3` | missing/null → `codex` |
+| `codex_relay.implementation_provider` | Codex-led implementation: native `codex`, Token Plan (`glm-5.3` / `qwen4-max`) or Qoder subscription fixed logical `glm-5.3` | missing/null → `codex` |
 | `codex_relay.secondary_model` | Native Codex implementer model; retained when switching to GLM | unset → specify per task |
 | `codex_relay.qwen_executor` | CLI executor for Qwen review | `claude` |
 | `plugins.qwen.responses_base_url` | Separate Responses URL for the Codex executor | none |
@@ -389,3 +389,10 @@ Qoder implementation: set `codex_relay.implementation_provider` to `qoder`; logi
 bounded implementation entry has no write retries or filesystem/network hard sandbox;
 CLI model identity is reported, provider backend identity unknown. See the
 [codex-relay contract](adapters/codex/skills/codex-relay/SKILL.md#qoder-subscription-implementation).
+
+Token Plan implementation uses `codex_relay.token_plan_implementation_model`: only
+`glm-5.3` (missing/null default) or formal `qwen4-max`. Empty/unknown IDs fail even
+when inactive. Review and native models remain independent. Qwen4 requests high effort
+with a local text-only catalog; GLM retains medium. Account availability and real tool
+round trips require separate validation; Responses proves requested model only. Older
+versions use GLM: select GLM before rollback. This change does not activate or install it.

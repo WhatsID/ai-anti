@@ -21,7 +21,8 @@
     "review_channel": "claude",
     "secondary_model": null,
     "qwen_executor": "claude",
-    "implementation_provider": "codex"
+    "implementation_provider": "codex",
+    "token_plan_implementation_model": "glm-5.3"
   },
   "plugins": {
     "qwen": {
