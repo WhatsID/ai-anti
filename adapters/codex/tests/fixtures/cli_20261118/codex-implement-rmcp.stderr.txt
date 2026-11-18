@@ -1,0 +1,15 @@
+Reading additional input from stdin...
+2026-11-18T10:47:13.222171Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:13.228263Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:18.281725Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:18.286346Z ERROR rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://chatgpt.com/backend-api/ps/mcp)")))
+2026-11-18T10:47:18.287636Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:23.287691Z ERROR codex_models_manager::manager: failed to initialize model catalog: request timed out
+2026-11-18T10:47:26.275999Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:32.002878Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:37.550603Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:43.112705Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:48.735946Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:54.313153Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:47:59.806844Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T10:48:05.377242Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out

@@ -19,7 +19,8 @@ import implementation_qoder
 from ai_anti_config import load, review_limits
 from review_channels import child_environment
 from token_plan_transport import Transport
-from review_codex import capability
+from review_codex import IMPLEMENTATION_VERSIONS, capability
+from codex_events import stderr_path
 from model_metadata import effort, write_catalog
 from review_runner import RunError, execute
 from implementation_protocol import validate
@@ -112,6 +113,7 @@ def run(args):
         return evidence
     started = time.monotonic()
     log = out / 'implementation.jsonl'
+    stderr_log = stderr_path(log) if route['provider'] == 'token_plan' else None
     transport = None
     try:
         if route['provider'] == 'qoder':
@@ -134,7 +136,7 @@ def run(args):
                        'REQUESTS_CA_BUNDLE', 'CURL_CA_BUNDLE')
             env = {key: authenticated[key] for key in allowed if key in authenticated}
             env.update(PATH=PATH, CODEX_HOME=str(home), AI_ANTI_QWEN_TOKEN=authenticated['AI_ANTI_QWEN_TOKEN'])
-            cap = capability(cli, out, env=env)
+            cap = capability(cli, out, env=env, versions=IMPLEMENTATION_VERSIONS)
             evidence.update(cli_version=cap['cli_version'], capability=cap)
             argv = [cli, '--no-daemon', 'exec', '--ignore-user-config', '--ignore-rules',
                     '--ephemeral', '--skip-git-repo-check', '--sandbox', 'workspace-write',
@@ -142,9 +144,9 @@ def run(args):
             for key, value in options.items():
                 argv += ['-c', key + '=' + json.dumps(value)]
             argv += [payload]
-            code = execute(argv, workspace, log, *limits, CAP, env=env)
+            code = execute(argv, workspace, log, *limits, CAP, env=env, stderr_log=stderr_log)
             evidence['exit_code'] = code
-            evidence.update(validate(log, code, route['requested_model']), status='completed', completed=True)
+            evidence.update(validate(log, code, route['requested_model'], stderr_log=stderr_log), status='completed', completed=True)
     except (RunError, ConfigError, OSError, UnicodeError, KeyboardInterrupt) as exc:
         # Raw provider output stays on disk; never echo credentials from errors.
         evidence.update(status='failed', error_kind=getattr(exc, 'kind', 'execution_failed'),
@@ -154,6 +156,8 @@ def run(args):
             transport.__exit__(None, None, None)
             evidence['token_plan_accounts'] = transport.evidence()
         evidence.update(duration_seconds=round(time.monotonic() - started, 3), log_sha256=digest(log))
+        if stderr_log is not None:
+            evidence.update(stderr_log=stderr_log.name, stderr_sha256=digest(stderr_log))
         write(out / 'manifest.json', evidence)
         write(out / 'status.json', evidence)
     return evidence

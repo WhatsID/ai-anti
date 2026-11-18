@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Claude 主导的接力可配置指定 Codex 模型，在隔离工作树有界实施并保存验收证据。
+- Codex 0.169.1 的已取证事件与 stderr 噪声按精确模板识别；等候主模型探针更新实测版本清单。
+- 适配 Claude 2.1.326 的已取证事件、内置插件和连接器提示。Qwen 可显式走 Responses，Token Plan 本地代理转发 Claude CLI 的两个精确查询路径。
+- Claude 2.1.326 stream-json 按终审样本接纳 init 后、result 前的精确 `system/thinking_tokens` 事件并记录警告。Codex 0.169.1 对带 UTC 时间戳和原样 `https://chatgpt.com/backend-api/ps/mcp` 的逐字 rmcp 消息记录 `remote_mcp_unavailable` 警告。
+
 ## 0.3.0 — 2026-11-16
 
 - Token Plan 新增 Qwen4 独立评审与实施选择，实施模型不随评审模型切换；保留原生 Codex 与 Qoder 实施路径，模型证据仍按请求记录，不宣称实际服务端身份。

@@ -1,0 +1,51 @@
+{"type":"thread.started","thread_id":"fixture-thread"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Loaded only 32768 of 35120 bytes from `/fixture/project/AGENTS.md` in environment `local` under the 32768-byte project instruction budget. Trim your project instructions to fit the budget. If you need to keep them all, increase `project_doc_max_bytes`."}}
+{"type":"item.completed","item":{"id":"item_1","type":"error","message":"Combined user instructions use 33720 bytes, above the 32768-byte `project_doc_max_bytes` setting. The total includes global and thread instructions. The limit applies only to project files."}}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_2","type":"agent_message","text":"Redacted message item_2"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"fixture-command item_3","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"fixture-command item_3","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_4","type":"command_execution","command":"fixture-command item_4","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_4","type":"command_execution","command":"fixture-command item_4","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_5","type":"agent_message","text":"Redacted message item_5"}}
+{"type":"item.started","item":{"id":"item_6","type":"command_execution","command":"fixture-command item_6","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_6","type":"command_execution","command":"fixture-command item_6","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_7","type":"command_execution","command":"fixture-command item_7","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.started","item":{"id":"item_8","type":"command_execution","command":"fixture-command item_8","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_7","type":"command_execution","command":"fixture-command item_7","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_8","type":"command_execution","command":"fixture-command item_8","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_9","type":"command_execution","command":"fixture-command item_9","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.started","item":{"id":"item_10","type":"command_execution","command":"fixture-command item_10","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_9","type":"command_execution","command":"fixture-command item_9","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_10","type":"command_execution","command":"fixture-command item_10","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_11","type":"command_execution","command":"fixture-command item_11","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_11","type":"command_execution","command":"fixture-command item_11","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_12","type":"command_execution","command":"fixture-command item_12","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.started","item":{"id":"item_13","type":"command_execution","command":"fixture-command item_13","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_13","type":"command_execution","command":"fixture-command item_13","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_12","type":"command_execution","command":"fixture-command item_12","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_14","type":"command_execution","command":"fixture-command item_14","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_14","type":"command_execution","command":"fixture-command item_14","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_15","type":"command_execution","command":"fixture-command item_15","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_15","type":"command_execution","command":"fixture-command item_15","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_16","type":"command_execution","command":"fixture-command item_16","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_16","type":"command_execution","command":"fixture-command item_16","aggregated_output":"Redacted command output","exit_code":1,"status":"failed"}}
+{"type":"item.completed","item":{"id":"item_17","type":"agent_message","text":"Redacted message item_17"}}
+{"type":"item.started","item":{"id":"item_18","type":"command_execution","command":"fixture-command item_18","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_18","type":"command_execution","command":"fixture-command item_18","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_19","type":"command_execution","command":"fixture-command item_19","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_19","type":"command_execution","command":"fixture-command item_19","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_20","type":"command_execution","command":"fixture-command item_20","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_20","type":"command_execution","command":"fixture-command item_20","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_21","type":"command_execution","command":"fixture-command item_21","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_21","type":"command_execution","command":"fixture-command item_21","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_22","type":"command_execution","command":"fixture-command item_22","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_22","type":"command_execution","command":"fixture-command item_22","aggregated_output":"Redacted command output","exit_code":1,"status":"failed"}}
+{"type":"item.started","item":{"id":"item_23","type":"command_execution","command":"fixture-command item_23","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_23","type":"command_execution","command":"fixture-command item_23","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_24","type":"command_execution","command":"fixture-command item_24","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_24","type":"command_execution","command":"fixture-command item_24","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_25","type":"command_execution","command":"fixture-command item_25","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_25","type":"command_execution","command":"fixture-command item_25","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_26","type":"agent_message","text":"Redacted message item_26"}}
+{"type":"turn.completed","usage":{"input_tokens":686123,"cached_input_tokens":606720,"cache_write_input_tokens":0,"output_tokens":6430,"reasoning_output_tokens":197}}

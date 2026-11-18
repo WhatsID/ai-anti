@@ -90,3 +90,26 @@ def review_limits(data, timeout=None, idle_timeout=None):
                 raise ConfigError('invalid bounded resource limits: ai-anti config review.' + key + ' must be an integer in 1..' + str(maximum))
         values.append(value if override is None else override)
     return tuple(values)
+def claude_implementation(data):
+    """Return the explicitly selected Claude-led implementation route."""
+    key = 'claude_relay.implementation'
+    value = lookup(data, key)
+    if value is None:
+        return None
+    if not isinstance(value, dict) or value.get('provider') != 'codex':
+        raise ConfigError('ai-anti config: ' + key + ' must be an object with provider codex')
+    model = value.get('model')
+    if not isinstance(model, str) or not model or any(c.isspace() for c in model):
+        raise ConfigError('ai-anti config: ' + key + '.model must be a non-empty string without whitespace')
+    return {'provider': 'codex', 'model': model}
+
+
+def claude_qwen_executor(data):
+    """Select the Claude-led Qwen executor independently of codex_relay."""
+    key = 'plugins.qwen.claude_executor'
+    value = lookup(data, key)
+    if value is None:
+        return 'claude'
+    if value not in ('claude', 'codex'):
+        raise ConfigError('ai-anti config: ' + key + ' must be claude or codex')
+    return value

@@ -196,6 +196,30 @@ class TransportHTTP(unittest.TestCase):
                 self.assertEqual(post(p,path=p.path+'/count_tokens')[0],429)
                 self.assertEqual(len(records),1); self.assertEqual(p.evidence()['switch_count'],0)
 
+    def test_anthropic_beta_query_forwarded_exactly(self):
+        with upstream(lambda r,n:(200,b'ok',{})) as (url,records):
+            with Proxy(url+'/apps/anthropic',PRIMARY,BACKUP,'anthropic',5,_test_http=True) as proxy:
+                messages = '/apps/anthropic/v1/messages'
+                permitted = [messages+'?beta=true', messages+'/count_tokens?beta=true']
+                for path in permitted:
+                    self.assertEqual(post(proxy,path=path), (200,b'ok'))
+                for base in (messages, messages+'/count_tokens'):
+                    for suffix in ('?beta=false', '?x=1', '?beta=true&x=1', '??beta=true'):
+                        with self.subTest(base=base,suffix=suffix):
+                            self.assertEqual(post(proxy,path=base+suffix)[0],404)
+                self.assertEqual([r[0] for r in records], permitted)
+        with upstream(lambda r,n:(429,QUOTA,{}) if r[1] == PRIMARY else (200,b'ok',{})) as (url,records):
+            with Proxy(url,PRIMARY,BACKUP,'anthropic',5,_test_http=True) as proxy:
+                self.assertEqual(post(proxy,path='/v1/messages/count_tokens?beta=true')[0],429)
+                self.assertEqual(post(proxy,path='/v1/messages?beta=true'), (200,b'ok'))
+                self.assertEqual([r[0] for r in records],
+                                 ['/v1/messages/count_tokens?beta=true','/v1/messages?beta=true','/v1/messages?beta=true'])
+                self.assertEqual([r[1] for r in records], [PRIMARY,PRIMARY,BACKUP])
+        with upstream(lambda r,n:(200,b'ok',{})) as (url,records):
+            with Proxy(url,PRIMARY,BACKUP,'responses',5,_test_http=True) as proxy:
+                self.assertEqual(post(proxy,path='/responses?beta=true')[0],404)
+                self.assertEqual(records,[])
+
     def test_distinct_credentials_and_https(self):
         with self.assertRaises(ValueError): Proxy('https://example.invalid','same','same','responses',1)
         with self.assertRaises(ValueError): Proxy('http://example.invalid',PRIMARY,BACKUP,'responses',1)

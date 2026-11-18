@@ -1,4 +1,5 @@
 """Bounded CLI execution and evidence validation (Python 3.9, no shell)."""
+from contextlib import ExitStack
 import hashlib
 import json
 import os
@@ -30,6 +31,7 @@ ALLOWED_BUILTIN_PLUGINS = {
     'agents-md': 'agents-md', 'cc-plugin-agents-md': 'agents-md',
     'telemetry': 'telemetry', 'cc-plugin-telemetry': 'telemetry',
     'privacy': 'privacy', 'cc-plugin-privacy': 'privacy',
+    'cc-plugin-easel': 'easel',
     'plugin-authoring': 'plugin-authoring', 'cc-plugin-plugin-authoring': 'plugin-authoring',
 }
 FLAGS = [
@@ -86,24 +88,31 @@ def builtin_plugins_only(plugins):
     return len(names) == len(set(names))
 
 
-def execute(args, cwd, logfile, timeout, idle, cap, env=None):
+def execute(args, cwd, logfile, timeout, idle, cap, env=None, stderr_log=None):
     """Full stdout/stderr on disk; bounded monitoring, no pipe buffering."""
     started = time.monotonic()
     progress_at = last_output = started
     size = 0
     reason = None
-    with logfile.open('wb') as log:
+    def output_size():
+        return logfile.stat().st_size + (stderr_log.stat().st_size if stderr_log is not None else 0)
+
+    with ExitStack() as outputs:
+        log = outputs.enter_context(logfile.open('wb'))
+        stderr = subprocess.STDOUT
+        if stderr_log is not None:
+            stderr = outputs.enter_context(stderr_log.open('wb'))
         try:
             process = subprocess.Popen(
                 args, cwd=str(cwd), stdin=subprocess.DEVNULL,
-                stdout=log, stderr=subprocess.STDOUT, start_new_session=True, env=env,
+                stdout=log, stderr=stderr, start_new_session=True, env=env,
             )
         except OSError as exc:
             raise RunError('could not launch CLI: ' + str(exc)) from exc
         try:
             while True:
                 now = time.monotonic()
-                new_size = logfile.stat().st_size
+                new_size = output_size()
                 if new_size != size:
                     size, last_output = new_size, now
                 if size > cap:
@@ -125,7 +134,7 @@ def execute(args, cwd, logfile, timeout, idle, cap, env=None):
             reason = 'interrupted'
         finally:
             stop_group(process)
-    if logfile.stat().st_size > cap:
+    if output_size() > cap:
         reason = 'log limit'
     if reason:
         raise RunError(reason)
@@ -294,14 +303,37 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None, 
                 events.append(json.loads(line))
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise RunError('truncated or malformed stream-json') from exc
+    ui_invalidated = False
     for event in events:
+        rate_info = event.get('rate_limit_info') if isinstance(event, dict) else None
         if isinstance(event, dict) and (event.get('error') == 'rate_limit' or (
                 event.get('type') == 'rate_limit_event'
-                and event.get('rate_limit_info', {}).get('status') == 'rejected')):
+                and isinstance(rate_info, dict) and rate_info.get('status') == 'rejected')):
             raise RunError('Claude quota exhausted; no retry or fallback performed', 'quota_exhausted')
         if not isinstance(event, dict):
             raise RunError('non-object stream event')
         kind = event.get('type')
+        if kind == 'rate_limit_event':
+            if (set(event) != {'type', 'rate_limit_info', 'uuid', 'session_id'}
+                    or not isinstance(rate_info, dict) or rate_info.get('status') != 'allowed'
+                    or not inits or finals):
+                raise RunError('unknown stream event')
+            warnings.append({'kind': 'rate_limit_event', 'status': 'allowed'})
+            continue
+        if kind == 'system' and event.get('subtype') == 'ui_invalidate':
+            if (set(event) != {'type', 'subtype', 'event', 'session_id', 'uuid'}
+                    or event['event'] != 'ui.render' or inits or ui_invalidated):
+                raise RunError('unknown system event')
+            ui_invalidated = True
+            continue
+        if kind == 'system' and event.get('subtype') == 'thinking_tokens':
+            estimates = ('estimated_tokens', 'estimated_tokens_delta')
+            if (set(event) != {'type', 'subtype', 'session_id', 'uuid', *estimates}
+                    or not inits or finals
+                    or any(type(event.get(key)) is not int or event[key] < 0 for key in estimates)):
+                raise RunError('unknown system event')
+            warnings.append({'kind': 'thinking_tokens'})
+            continue
         if kind not in ('system', 'assistant', 'user', 'result'):
             raise RunError('unknown stream event')
         if kind == 'system' and event.get('subtype') != 'init':

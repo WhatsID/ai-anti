@@ -40,12 +40,13 @@ class CodexQwenTests(qwen.QwenReviewTests):
             self.assertEqual(config['approval_policy'], 'never')
             self.assertEqual(config['model_reasoning_effort'], 'medium')
             self.assertFalse(config['features.shell_tool'])
+            self.assertFalse(config['features.code_mode_host'])
             self.assertNotIn('user_instructions', config)
             self.assertTrue(config['suppress_unstable_features_warning'])
             self.assertNotIn('OFFLINE_FAKE_TOKEN', json.dumps(config))
 
     def test_exact_codex_versions(self):
-        for version in ('0.160.0', '0.163.0'):
+        for version in ('0.160.0', '0.163.0', '0.169.1'):
             with self.subTest(version=version):
                 r, out = self.run_review(env_extra={'FAKE_CODEX_VERSION': 'codex-cli ' + version})
                 self.assert_success(r, out)

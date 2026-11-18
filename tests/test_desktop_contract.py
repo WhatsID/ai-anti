@@ -176,6 +176,7 @@ class DesktopContract(unittest.TestCase):
             if output_file.name != 'review_prompt.txt': output_file.unlink()
         subprocess.run([sys.executable,'-c',harness],env=env,check=True)
         self.assertNotIn('--model',json.loads((scratch/'review_out.txt').read_text()))
+        self.assertEqual(json.loads((scratch/'review_out.txt.warnings.json').read_text()), [])
     def test_qwen_formal_entry_prepare_contract(self):
         # Real parser/preflight/snapshot gates, with fixture HOME and a new output.
         store=Store(self.root)
@@ -229,6 +230,32 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('offline prompt',output['argv']); self.assertIn('--allowedTools',output['argv'])
         self.assertIn('timeout=12 idle_timeout=7',run.stderr)
         self.assertEqual((scratch/'qwen_report.txt').read_text(),'offline report')
+
+    def test_qwen_command_responses_branch_contract(self):
+        from ai_anti_config import ConfigError, claude_qwen_executor
+        from review import parser
+        command = (ROOT/'plugins/qwen/commands/qwen-review.md').read_text()
+        self.assertIn('claude_qwen_executor(ai_anti_config.load())', command)
+        self.assertIn('审指定已提交 commit 时停止', command)
+        for executor in (None, 'claude', 'codex'):
+            config = {'plugins': {'qwen': {'claude_executor': executor}},
+                      'codex_relay': {'qwen_executor': 'codex' if executor != 'codex' else 'claude'}}
+            self.assertEqual(claude_qwen_executor(config), executor or 'claude')
+        self.assertEqual(claude_qwen_executor({}), 'claude')
+        for value in ('responses', False, {'provider': 'codex'}):
+            with self.assertRaises(ConfigError):
+                claude_qwen_executor({'plugins': {'qwen': {'claude_executor': value}}})
+        import shlex
+        block = next(b for b in re.findall(r'```bash\n(.*?)```', command, re.S)
+                     if '--qwen-executor codex' in b)
+        lines = block.replace('\\\n', '').splitlines()[1:]
+        self.assertEqual(len(lines), 2)
+        for mode, line in zip(('plan', 'diff'), lines):
+            args = parser().parse_args(shlex.split(line)[2:-2])
+            self.assertEqual((args.mode, args.channel, args.qwen_executor), (mode, 'qwen', 'codex'))
+            self.assertEqual(args.plan, '<方案相对路径>' if mode == 'plan' else None)
+            expected = '<选定源码相对路径>' if mode == 'plan' else '<本任务改动文件相对路径>'
+            self.assertEqual(args.files, [expected])
 
     def test_qwen_command_shared_credential_resolver(self):
         command = (ROOT/'plugins/qwen/commands/qwen-review.md').read_text()

@@ -6,12 +6,15 @@ import re
 from pathlib import Path
 import sys
 import time
+from codex_events import stderr_path
 from review_runner import RunError, execute
 from model_metadata import effort, write_catalog
 from review_materials import load_registry
 from review_codex_protocol import validate
 
-SUPPORTED_VERSIONS = ('codex-cli 0.160.0', 'codex-cli 0.163.0')
+IMPLEMENTATION_VERSIONS = ('codex-cli 0.160.0', 'codex-cli 0.163.0')
+
+REVIEW_VERSIONS = IMPLEMENTATION_VERSIONS + ('codex-cli 0.169.1',)
 
 PATH_ALIAS_WARNING = 'WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)'
 
@@ -33,7 +36,7 @@ def parse_version_output(text):
 
 
 FEATURES = ('apps', 'hooks', 'goals', 'view_image', 'browser_use', 'computer_use',
-            'shell_tool', 'shell_snapshot', 'multi_agent', 'js_repl', 'skill_search', 'tool_suggest')
+            'shell_tool', 'shell_snapshot', 'multi_agent', 'js_repl', 'skill_search', 'tool_suggest', 'code_mode_host')
 FLAGS = ['--no-daemon', 'exec', '--ignore-user-config', '--ignore-rules', '--ephemeral',
          '--skip-git-repo-check', '--sandbox', 'read-only', '--json']
 INSTRUCTIONS = '''You are a delegated independent read-only reviewer. Do not start a workflow,
@@ -86,7 +89,7 @@ def write_config(channel, registry_path, path):
     return options
 
 
-def capability(cli, out, env=None, material_config=None):
+def capability(cli, out, env=None, material_config=None, versions=REVIEW_VERSIONS):
     result = {}
     for label, args, needed in (
             ('version', ['--version'], []),
@@ -102,8 +105,8 @@ def capability(cli, out, env=None, material_config=None):
         if label == 'version':
             result['cli_version'], result['warnings'] = parse_version_output(text)
     # Config key semantics are version-bound, not proven merely by --help.
-    if result['cli_version'] not in SUPPORTED_VERSIONS:
-        raise RunError('Codex config semantics only verified for ' + ', '.join(SUPPORTED_VERSIONS))
+    if result['cli_version'] not in versions:
+        raise RunError('Codex config semantics only verified for ' + ', '.join(versions))
     result['isolation_limits'] = ['global AGENTS and system skill catalog may remain',
                                   'request_user_input and generic MCP resource tools may be visible; all non-material calls rejected']
     return result
@@ -120,8 +123,9 @@ def run_stage(cli, cwd, prompt, logfile, model, timeout, idle, cap, families=Non
         args += ['-c', key + '=' + json.dumps(value, ensure_ascii=False)]
     args += [prompt_file.read_text('utf-8')]
     started = time.time()
-    code = execute(args, cwd, logfile, timeout, idle, cap, env)
-    result = validate(logfile, code, model, cwd, required, registry)
+    stderr_log = stderr_path(logfile)
+    code = execute(args, cwd, logfile, timeout, idle, cap, env, stderr_log=stderr_log)
+    result = validate(logfile, code, model, cwd, required, registry, stderr_log=stderr_log)
     result.update(requested_effort=options['model_reasoning_effort'], started_at=started, finished_at=time.time(),
                   duration_seconds=time.time() - started,
                   log_sha256=hashlib.sha256(logfile.read_bytes()).hexdigest())

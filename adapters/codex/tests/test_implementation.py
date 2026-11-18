@@ -128,7 +128,9 @@ class ImplementationTests(unittest.TestCase):
         tail = '\n'.join(json.dumps(e) for e in [{'type': 'turn.started'}, {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'candidate'}}, {'type': 'turn.completed'}])
         log = self.root/'observed.jsonl'
         log.write_text(prefix + json.dumps({'type': 'item.completed', 'item': {'type': 'error', 'message': METADATA_WARNING}}) + '\n' + tail)
-        self.assertIn(METADATA_WARNING, validate(log, 0)['warnings'])
+        self.assertIn(METADATA_WARNING, validate(log, 0, 'glm-5.3')['warnings'])
+        with self.assertRaisesRegex(RunError, 'implementation error item'):
+            validate(log, 0)
         for message in ('permission denied', METADATA_WARNING + ' forged'):
             log.write_text(prefix + json.dumps({'type': 'item.completed', 'item': {'type': 'error', 'message': message}}) + '\n' + tail)
             with self.assertRaises(RunError): validate(log, 0)

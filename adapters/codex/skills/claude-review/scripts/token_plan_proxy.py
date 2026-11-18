@@ -55,8 +55,12 @@ class Proxy:
         self.wire_api = wire_api
         self.path = p.path.rstrip('/') + ('/responses' if wire_api == 'responses' else '/v1/messages')
         # Anthropic clients append /v1/messages to the configured base.
+        self.message_paths = {self.path}
         self.paths = {self.path}
-        if wire_api == 'anthropic': self.paths.add(self.path + '/count_tokens')
+        if wire_api == 'anthropic':
+            self.message_paths.add(self.path + '?beta=true')
+            self.paths.update(self.message_paths)
+            self.paths.update({self.path + '/count_tokens', self.path + '/count_tokens?beta=true'})
         self.keys = (primary, backup)
         self.token = secrets.token_urlsafe(48)
         self.deadline = time.monotonic() + budget
@@ -181,7 +185,7 @@ class Proxy:
                             if status >= 300:
                                 error_body = response.read(MAX_ERROR + 1)
                                 if len(error_body) > MAX_ERROR: return self.reject(502,'Upstream error exceeds limit')
-                            reason = quota_reason(status,error_body or b'') if self.path == owner.path else None
+                            reason = quota_reason(status,error_body or b'') if self.path in owner.message_paths else None
                             if reason and slot == 0 and attempt == 0:
                                 if replayable(body):
                                     owner.slot = 1

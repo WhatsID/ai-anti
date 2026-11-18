@@ -486,3 +486,12 @@ CLI 数字500当成可信上游错误，重复三次并等待30/90秒，不能�
 ## 2026-11-16：Token Plan 同请求双凭证
 
 实际主订阅 HTTP429 返回顶层 `Throttling.AllocationQuota` 与明确 token-plan 月额度耗尽消息，用户有同权限备用订阅并授权切换。以任务失败后换密钥重启会重复已经执行的写工具，因此使用单次逻辑运行内的有界请求级切换；只在上游明确拒绝且下游未发送响应时原字节重放一次。账户绑定 response ID 与流开始后的请求不重放，普通429不等于额度耗尽；备用粘附状态不持久化，下个任务自然主优先。
+
+## 2026-11-18 Claude 主导的 Codex 实施与 CLI 兼容
+
+- 2026-11-18 一个业务项目的 Codex 0.169.1 评审完成了 turn，非 JSON stderr 和指令预算 item 却让合流解析失败，主模型只能手动提取正文。分流保存原始证据，stderr 与预算警告逐字匹配。实施原件还记录了 TLS handshake EOF 后同一 turn 完成，只有该原因可作为 Reconnect 警告。
+- 同一评审有两条复合命令因末段搜索无匹配返回 1。用户裁决允许仅将无权限或沙箱迹象的失败记录为警告，主模型据此核对结论依赖。Responses 评审只接受登记的材料工具。
+- 用户在第 A/B 轮要求 Claude 定方案、Codex Astra 评审、Codex Sol 实施、Claude 验收，并选择先手动运行。手动实施要自行隔离工作树、指定模型和保留证据。独立有界入口固定这些步骤，固定模型失败由用户裁决。评审确认已纳入任务的未提交输入需进入实施基线，以免落回覆盖原改动。
+- Claude 2.1.326 实测流有 allowed 额度事件、init 前 `ui.render` 和内置 `cc-plugin-easel`，用户确认准入已取证形态。Token Plan 测试还确认连接器提示与代理查询串导致的本地 404，直连返回 429 额度耗尽。代理只补两个精确查询路径，JSON 失败 envelope 的取信边界保留。Responses 另由用户显式选择，防止静默套用 Codex 主导配置或审错提交。
+- 2026-11-18 终审 P3 样本在 init 后、result 前报告两次 `system/thinking_tokens`。按用户第 6 轮裁决，仅以精确六键和两个非负整数估算值接纳为警告，布尔值和该区间外事件仍拒绝。
+- 同日 P4 实施成功时，workspace-write 内配置的远程 MCP 请求失败导致入口拒绝 stderr。按第 6 轮裁决，共享校验只将带 RFC3339 UTC 时间戳、包含原样 `https://chatgpt.com/backend-api/ps/mcp` 的逐字 rmcp 消息记为 `remote_mcp_unavailable`。

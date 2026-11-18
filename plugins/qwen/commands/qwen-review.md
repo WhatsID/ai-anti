@@ -2,14 +2,30 @@
 description: qwen 插件评审通道:经 anthropic 兼容端点让用户配置指定的模型做代理式只读评审。用法:/qwen-review plan <方案文件路径> 或 /qwen-review diff
 ---
 
-用 qwen 插件（anthropic 兼容端点 + Claude Code CLI 驱动；模型、端点、凭证路径读用户配置）做交叉评审。参数: $ARGUMENTS
+用 qwen 插件（默认由 Claude Code CLI 驱动 Anthropic 兼容端点；可显式选择 Codex Responses）做交叉评审。参数: $ARGUMENTS
 
 **定位**：跨模型评审通道插件（`plugins/qwen/plugin.json`，`kind: cross-model`），评审质量为代理式（模型自主读仓库），与 codex exec 同形态。它在通道顺序中排第几由用户配置 `review.channels` 决定（见 `CLAUDE.global.md`「异常与边界」的评审通道降级阶梯）。最终汇报中必须标注「qwen 评审」。
 
 **调用形态先读 `core/CLI_DISCIPLINE.md`（外部 CLI 的调用纪律）**（四条，唯一权威）。
 `claude -p` 与 `codex exec` 同属非交互 CLI，同样适用——下面的命令已按那四条写好。
 
-**插件配置与凭证查找接口（用户级 `~/.config/ai-anti/config.json` 的 `plugins.qwen`，fail-closed）**：
+**执行器选择**：先按下文从命令 symlink 解析 `ai_anti_root`，将其 `adapters/codex/skills/claude-review/scripts` 加入 Python 导入路径，调用 `ai_anti_config.claude_qwen_executor(ai_anti_config.load())`。缺失/null/`claude` 进入下文默认 Anthropic 分支。配置错误停止并报告。`codex` 只执行本节 Responses 分支，独立于 `codex_relay.qwen_executor`。
+
+Responses 使用 `plugins.qwen.responses_base_url`，缺失则本档不可用。凭证相对路径以 `--repo` 为基准，推荐绝对路径或 `~`。审指定已提交 commit 时停止并说明：本分支仅支持相对 HEAD 的工作树增量，可选默认 Anthropic 路径或其他通道。
+
+```bash
+# 下列路径与参数占位符由编排者替换，每种模式只执行对应的一条命令。
+python3 "<机制根>/adapters/codex/skills/claude-review/scripts/review.py" plan --repo "<仓库根>" \
+  --plan "<方案相对路径>" --files "<选定源码相对路径>" --scale "<部署规模>" \
+  --out "<scratchpad>/qwen_review" --channel qwen --qwen-executor codex < /dev/null
+python3 "<机制根>/adapters/codex/skills/claude-review/scripts/review.py" diff --repo "<仓库根>" \
+  --files "<本任务改动文件相对路径>" --scale "<部署规模>" \
+  --out "<scratchpad>/qwen_review" --channel qwen --qwen-executor codex < /dev/null
+```
+
+`--files` 按文件传入独立的仓库相对路径；plan 的 `--files` 只放选定源码，request 由 review.py 从方案派生，两者都不放进 `--files`。调用器负责材料登记、两阶段 inventory 和 request 检查。检查 `<out>/status.json` 的 `completed: true` 后整份读取 `<out>/report.md`，结合 `manifest.json` 与 `logs/` 核对材料读取和工具证据。失败读取状态与日志，并按评审阶梯报告本档结果。汇报标注「qwen 评审（Responses 执行器）」与请求模型，服务端实际模型未知。
+
+**默认 Anthropic 分支的配置与凭证查找接口（用户级 `~/.config/ai-anti/config.json` 的 `plugins.qwen`，fail-closed）**：
 
 - `model`：端点上的模型名；`base_url`：anthropic 兼容端点地址；
 - `credential_paths`：凭证文件查找顺序，每个文件按 `credential_key` 逐级取值（缺字段才使用 `tokenplan.value`），按序取第一个可读到的非空值；

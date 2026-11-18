@@ -31,7 +31,7 @@ implementation.
 
 | Direction | Entry points | What happens |
 |-----------|--------------|--------------|
-| Claude → Codex | `/codex-review plan <plan.md>`, `/codex-review diff`, `/codex-implement <plan.md>` | Claude Code leads; Codex reviews in a read-only sandbox, or takes over implementation when the implementer subagent is blocked by API failures |
+| Claude → Codex | `/codex-review plan <plan.md>`, `/codex-review diff`, `/codex-implement <plan.md>` | Claude Code leads. Codex reviews in a read-only sandbox, implements with a configured model in an isolated worktree, and can take over after an implementer API failure |
 | Codex → Claude/Qwen | `$claude-review`, `$codex-relay` | Codex leads; the selected Claude/Qwen model reviews a plan (two stages) or a scoped diff under fail-closed checks; `$codex-relay` runs the full relay |
 
 ## Four relay modes
@@ -283,10 +283,10 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
 
 Persist the selection with `codex_relay.qwen_executor=codex` and the separate
 `plugins.qwen.responses_base_url`. The Anthropic `base_url` stays separate; model and
-credential paths are reused. This executor supports exactly Codex CLI 0.160.0 and 0.163.0 and
-explicitly requests medium effort; other CLI versions stop at preflight. It records
+credential paths are reused. The read-only Responses executor pins Codex CLI 0.160.0, 0.163.0, and 0.169.1 and
+explicitly requests medium effort. Other CLI versions stop at preflight. It records
 `actual_model=null` and `model_evidence=requested_only`, not proven serving-model identity.
-Historical 0.160.0 formal plan and actual diff calls passed; 0.163.0 passed a synthetic two-stage plan check on 2026-10-20. The newer version has no verified business diff or full user-entry workflow. Large diffs can still remain silent for minutes;
+Historical 0.160.0 formal plan and actual diff calls passed; 0.163.0 passed a synthetic two-stage plan check on 2026-10-20. The 0.163.0 business diff and full user-entry workflow are unverified. Large diffs can still remain silent for minutes;
 900/1800 seconds is the tested budget, not a latency guarantee. The macOS settings display a fixed executor for each supported combination; the CLI still supports explicit executor selection. See [verification and limits](docs/COMPATIBILITY.md).
 
 AIAnti settings use Codex CLI for Codex-led API reviews, Claude Code CLI for Claude-led API reviews, and Codex CLI for Claude-to-Codex reviews. The executor field is disabled. Legacy Codex API executor changes are staged and require an explicit save before checks can run. Anthropic and Responses URLs are stored independently, with only the active protocol shown. Codex checks confirm the requested model only; the server's actual model remains unknown. Synthetic checks use the same configurable budgets (default 1800 seconds total, 900 idle); idle can terminate first. API output remains capped at 8 MiB and Qoder at 2 MiB. Formal runners get total+60 seconds for cleanup; the app allows 3700 seconds to cover the maximum 3600+60, with cancellation. Extremely slow local preparation can still exceed the outer budget. DeepSeek's full workflow remains unverified.
@@ -303,6 +303,8 @@ silently falling back.
 | `review.channels` | Claude-led review channel order only | `["codex", "same-family"]` |
 | `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
 | `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
+| `claude_relay.implementation` | Set `{"provider":"codex","model":"gpt-6.2-sol"}` to implement in an isolated worktree (CLI pin 0.169.1, live probe pending) | missing/null → implementer |
+| `plugins.qwen.claude_executor` | Claude-led Qwen executor. Set `codex` to use Responses | `claude` |
 | `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
 | `codex_relay.implementation_provider` | Codex-led implementation: native `codex`, Token Plan (`glm-5.3` / `qwen4-max`) or Qoder subscription fixed logical `glm-5.3` | missing/null → `codex` |
 | `codex_relay.secondary_model` | Native Codex implementer model; retained when switching to GLM | unset → specify per task |
@@ -324,11 +326,12 @@ Versions with path-scoped evidence:
 | Base scripts | Python 3.9+; macOS tested, other systems unverified |
 | Optional macOS menu bar app | macOS 13+, Swift 6.1, Python 3.11+; ad-hoc build, not notarized distribution |
 
+See [compatibility details](docs/COMPATIBILITY.md#2026-11-18-claude-21326--codex-01691) for Claude 2.1.326 and Codex 0.169.1 replay evidence and live probe status.
 [compat.json](compat.json) is the machine-readable version set; the path matrix and evidence
 limits in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) are authoritative for detailed support.
 Installer status reports membership, not all-path compatibility or health. Unlisted versions
-may warn and still fail independent capability/protocol gates. Qwen Responses remains exactly
-pinned to 0.160.0 or 0.163.0, registered in the general set. Installation health, model adherence and
+may warn and still fail independent capability/protocol gates. Qwen Responses pins 0.160.0,
+0.163.0, and 0.169.1. The 0.169.1 live probe is pending. Installation health, model adherence and
 full relay verification are separate; ordinary Claude login and DeepSeek full flows remain pending.
 
 The optional [macOS app](apps/macos/README.md) edits defaults and runs checks; business reviews

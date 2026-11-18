@@ -5,7 +5,7 @@
 机器可读版本集合为根 `compat.json`（schema 1），路径级证据以本文为准。
 `install.sh --status` 打印实际版本与清单归属；“在实测清单内”不证明全部路径或安装健康。
 正式评审把 CLI 版本记入 manifest；清单外警告本身不阻断，但执行器另有能力与协议门禁，
-未列版本并不保证可运行。Qwen Responses / Codex 另有精确 0.160.0 / 0.163.0 版本预检，未知版本仍拒绝。
+未列版本并不保证可运行。Qwen Responses / Codex 另有精确 0.160.0 / 0.163.0 / 0.169.1 版本预检（0.169.1 仅只读评审与 Claude 侧配置实施，Token Plan 实施仍为 0.160.0 / 0.163.0）。未知版本仍拒绝。
 
 | 组件 / 路径 | 版本或前提 | 已验程度与边界 |
 |-------------|------------|----------------|
@@ -557,3 +557,24 @@ CUA 全路径启动与读取 AX 操作连续超时，安装后界面冒烟尚未
 此前隔离候选的 GUI 验收仍仅属于当时产物及隔离配置，不能转作本次已安装包的 UI 证据。
 本记录写入时 GitHub 新版本发布尚待执行；发布说明已写入 0.3.0 CHANGELOG，
 不据此宣称远端发布完成。Claude Code 2.1.322 的事件协议缺口仍按上述边界保留。
+
+## 2026-11-18 Claude 2.1.326 / Codex 0.169.1
+
+| 路径 | 实现契约与离线证据 | 真实探针 |
+|------|-------------------|----------|
+| Claude → Codex 只读评审 | 脱敏回放两份真实评审，分别核对最后正文。stderr 识别共享的精确模板，未知行拒绝。仅完整成功的 turn 可接纳已知 Reconnect。普通失败命令记录警告，权限/沙箱迹象仍拒绝。改动和未知 item 仍拒绝。 | P1 通过：合成仓库方案评审，gpt-6.2-astra 一次完成；stderr 10 行（stdin_notice 1、model_refresh 8、model_catalog 1）均命中模板并写入 warnings.json，报告正文正确提取 |
+| Qwen Responses 只读 | 0.169.1 纳入只读钉，关闭 `code_mode_host`。离线检查版本、生效配置与材料工具契约，继续拒绝 shell 和文件改动。 | P2 通过：按 `/qwen-review` Responses 分支模板发起合成方案评审，inventory/review 两阶段 completed；两阶段生效配置均含 `features.code_mode_host=false`，请求模型 qwen4-max，actual_model=null |
+| Qwen Anthropic / Token Plan 代理 | 404 原件与直连 429 原件均由原有失败 envelope 门禁拒绝。代理仅新增 messages 与 count_tokens 两个精确 `?beta=true` 路径，转发保留查询串。主模型在可监听端口的宿主补跑代理 HTTP 单测（含 `?beta=true` 用例）全部通过。 | P2b 通过：默认 Anthropic 分支经修复后的代理，主账号 HTTP429 额度耗尽 → 同请求切备用账号完成（`switch_count=1`，`token_plan_exhausted`），评审正文返回 |
+| Claude stream-json | 四份 2.1.326 脱敏回放覆盖 allowed rate-limit、一次 init 前 `ui.render`、内置 `cc-plugin-easel` 和 `system/thinking_tokens`。未知变体拒绝。 | P3 通过（修复后复跑）：Codex 主导 `review.py diff --channel claude` 合成增量评审 completed，actual_model=claude-opus-5-5；流中含 `thinking_tokens` 3 次、allowed `rate_limit_event` 1 次 |
+| Claude → Codex 配置实施 | 0.169.1 独立钉，隔离工作树、单次有界运行，模型证据为 `requested_only`。实施回放覆盖 file_change、已知 Reconnect 和远程 MCP stderr，fake CLI 检查证据与失败保留。 | P4 通过（修复后复跑）：合成仓库关联工作树内 gpt-6.2-sol 实现 `subtract` 并 completed，增量仅 calc.py；主树未提交改动按候选树本地基线带入并在落回时保留。首轮取得的 rmcp stderr 由离线回放覆盖，复跑未出现该行 |
+| Token Plan Codex 实施 | 保留 0.160.0/0.163.0 实施钉。 | 0.169.1 待取证 |
+
+2.1.326 的 `system/thinking_tokens` 可在 init 后、终态 result 前出现多次。键集合必须恰为 `type`、`subtype`、`estimated_tokens`、`estimated_tokens_delta`、`session_id`、`uuid`，两个估算值须为非负整数，布尔值拒绝。匹配事件记录为 `thinking_tokens` 警告并跳过。
+
+Codex 0.169.1 实施探针在 workspace-write 中记录了配置的远程 MCP 请求失败。共享 stderr 校验要求 RFC3339 UTC 时间戳、` ERROR ` 分隔符以及下列逐字消息，命中后记为 `remote_mcp_unavailable` 警告。缺失时间戳、URL 改动和其他 rmcp 文案均拒绝。
+
+```text
+rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://chatgpt.com/backend-api/ps/mcp)")))
+```
+
+`compat.json` 据 P1–P4 加入 Claude 2.1.326、Codex 0.169.1；版本集合不代表全部路径，路径边界以本表为准（Token Plan Codex 实施 0.169.1 仍未取证）。

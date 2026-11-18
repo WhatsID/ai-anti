@@ -1,0 +1,33 @@
+{"type":"thread.started","thread_id":"fixture-thread"}
+{"type":"turn.started"}
+{"type":"item.completed","item":{"id":"item_0","type":"agent_message","text":"Redacted message item_0"}}
+{"type":"item.started","item":{"id":"item_1","type":"command_execution","command":"fixture-command item_1","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_1","type":"command_execution","command":"fixture-command item_1","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_2","type":"command_execution","command":"fixture-command item_2","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_2","type":"command_execution","command":"fixture-command item_2","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_3","type":"command_execution","command":"fixture-command item_3","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_3","type":"command_execution","command":"fixture-command item_3","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_4","type":"agent_message","text":"Redacted message item_4"}}
+{"type":"item.started","item":{"id":"item_5","type":"command_execution","command":"fixture-command item_5","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_5","type":"command_execution","command":"fixture-command item_5","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_6","type":"command_execution","command":"fixture-command item_6","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.started","item":{"id":"item_7","type":"command_execution","command":"fixture-command item_7","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_6","type":"command_execution","command":"fixture-command item_6","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_7","type":"command_execution","command":"fixture-command item_7","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_8","type":"command_execution","command":"fixture-command item_8","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.started","item":{"id":"item_9","type":"command_execution","command":"fixture-command item_9","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_9","type":"command_execution","command":"fixture-command item_9","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_8","type":"command_execution","command":"fixture-command item_8","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_10","type":"command_execution","command":"fixture-command item_10","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_10","type":"command_execution","command":"fixture-command item_10","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_11","type":"command_execution","command":"fixture-command item_11","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_11","type":"command_execution","command":"fixture-command item_11","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_12","type":"agent_message","text":"Redacted message item_12"}}
+{"type":"item.started","item":{"id":"item_13","type":"command_execution","command":"fixture-command item_13","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_13","type":"command_execution","command":"fixture-command item_13","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_14","type":"command_execution","command":"fixture-command item_14","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_14","type":"command_execution","command":"fixture-command item_14","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.started","item":{"id":"item_15","type":"command_execution","command":"fixture-command item_15","aggregated_output":"","exit_code":null,"status":"in_progress"}}
+{"type":"item.completed","item":{"id":"item_15","type":"command_execution","command":"fixture-command item_15","aggregated_output":"Redacted command output","exit_code":0,"status":"completed"}}
+{"type":"item.completed","item":{"id":"item_16","type":"agent_message","text":"Redacted message item_16"}}
+{"type":"turn.completed","usage":{"input_tokens":510965,"cached_input_tokens":430592,"cache_write_input_tokens":0,"output_tokens":5867,"reasoning_output_tokens":107}}

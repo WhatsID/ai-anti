@@ -1,0 +1,18 @@
+Reading additional input from stdin...
+2026-11-18T07:11:22.967644Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:11:22.987526Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:11:28.078974Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:11:28.078971Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:11:33.089240Z ERROR codex_models_manager::manager: failed to initialize model catalog: request timed out
+2026-11-18T07:11:39.467169Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:11:50.657672Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:12:03.905277Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:12:38.630400Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:12:59.981796Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:13:17.563088Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:13:46.603011Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:14:08.469092Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:14:33.533265Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:14:56.747010Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:15:19.777530Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out
+2026-11-18T07:15:57.977522Z ERROR codex_models_manager::manager: failed to refresh available models: request timed out

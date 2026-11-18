@@ -24,7 +24,7 @@ AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验�
 
 | 方向 | 入口 | 做什么 |
 |------|------|--------|
-| Claude → Codex | `/codex-review plan <方案.md>`、`/codex-review diff`、`/codex-implement <方案.md>` | Claude Code 主导；Codex 在只读沙箱里评审，或在实施子代理因 API 故障受阻时接手实施 |
+| Claude → Codex | `/codex-review plan <方案.md>`、`/codex-review diff`、`/codex-implement <方案.md>` | Claude Code 主导。Codex 在只读沙箱里评审，可按配置用指定 Codex 模型在隔离工作树实施，也可在实施子代理因 API 故障受阻时接手 |
 | Codex → Claude/Qwen | `$claude-review`、`$codex-relay` | Codex 主导；选定的 Claude/Qwen 模型在 fail-closed 检查下评审方案（两阶段）或指定范围的 diff；`$codex-relay` 跑完整接力 |
 
 ## 四级接力档位
@@ -224,7 +224,7 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
 
 持久选择使用 `codex_relay.qwen_executor=codex` 和独立的
 `plugins.qwen.responses_base_url`；不改写原 Anthropic `base_url`，复用模型及凭证路径。
-新执行器精确支持 Codex CLI 0.160.0 和 0.163.0，显式使用 medium；其他 CLI 版本预检停止。
+Responses 只读入口的版本钉包含 Codex CLI 0.160.0、0.163.0、0.169.1，显式使用 medium。其他 CLI 版本预检停止。
 该路径记录 `actual_model=null`、`model_evidence=requested_only`，不证明服务端实际模型身份。
 0.160.0 历史正式 plan 与真实 diff 已通过；0.163.0 于2026-10-20通过合成 plan 两阶段验收，未验证新版业务 diff 或用户级入口全流程；大增量仍可能长时间无输出，900/1800秒仅为本次通过的预算。
 macOS 设置窗口固定显示各组合的执行器，不可选择；CLI 仍支持显式选择执行器。详见[验证记录与边界](docs/COMPATIBILITY.md)。
@@ -241,6 +241,8 @@ AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API
 | `review.channels` | 仅 Claude 主导路径的评审通道顺序 | `["codex", "same-family"]` |
 | `defaults.deployment_scale` | 项目未声明时传给评审方的部署规模 | 未设置 → 评审提示写明「未声明部署规模」 |
 | `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
+| `claude_relay.implementation` | Claude 主导时设为 `{"provider":"codex","model":"gpt-6.2-sol"}`，在隔离工作树固定模型实施（CLI 钉 0.169.1，真实探针待验） | 缺失/null → implementer |
+| `plugins.qwen.claude_executor` | Claude 主导的 Qwen 执行器，可显式选 `codex` 走 Responses | `claude` |
 | `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
 | `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅固定逻辑 `glm-5.3` | 缺失/null → `codex` |
 | `codex_relay.secondary_model` | 原生 Codex 实施模型；切换 GLM 时保留 | 未设置 → 每次任务指定 |
@@ -261,10 +263,11 @@ AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API
 | 基础脚本 | Python 3.9+；macOS 已测，其他系统未验 |
 | 可选 macOS 菜单栏 | macOS 13+、Swift 6.1、Python 3.11+；ad-hoc 构建，非公证分发 |
 
+Claude 2.1.326 与 Codex 0.169.1 的脱敏回放与实际探针进度见 [兼容性明细](docs/COMPATIBILITY.md#2026-11-18-claude-21326--codex-01691)。
 [compat.json](compat.json) 为机器可读版本集合，详细路径与证据边界以
 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) 为准。安装 status 只报告清单归属，
 不证明全路径兼容或健康；未列版本可能警告，也可能被独立能力/协议门禁拒绝。
-Qwen Responses 精确限定 0.160.0 或 0.163.0，两版本均登记通用集合。
+Qwen Responses 的版本钉为 0.160.0、0.163.0、0.169.1，其中 0.169.1 待真实探针。
 安装健康、模型遵循与完整接力分别取证；Claude 普通登录及 DeepSeek 完整流程仍待补验。
 
 ## 成本

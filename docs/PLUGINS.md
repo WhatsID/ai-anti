@@ -53,6 +53,14 @@ plugins/<name>/
 3. `./install.sh --with-plugin <name>`，再把 `<name>` 写进自己的 `review.channels`；
 4. 先用一次最小调用确认端点与凭证可用，再用于真实评审。
 
+## Claude 主导的 Qwen 执行器
+
+默认 `/qwen-review` 使用 Claude CLI 与 `plugins.qwen.base_url`（Anthropic）。显式设置
+`plugins.qwen.claude_executor="codex"` 后，通道调用 `review.py --channel qwen --qwen-executor codex`，
+使用 `plugins.qwen.responses_base_url`，凭证相对路径以 `--repo` 为基准。默认路径仍按调用 cwd，
+均可使用绝对路径或 `~`。Responses 支持方案与相对 HEAD 的工作树增量，审指定提交需选择其他路径。
+该键缺失、null 或 `"claude"` 时沿用默认执行器，其他值报配置错误。Codex 主导的执行器单独配置。
+
 ## Codex 主导的 Qwen 接入
 
 Codex 的 `claude-review` skill 的源码入口 `review.py --channel qwen` 直接复用 `plugins.qwen` 配置，不经过

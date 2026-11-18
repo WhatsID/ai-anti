@@ -1,18 +1,20 @@
 """Strict supported Codex exec JSONL evidence; model routing is unproven."""
 import json
 from pathlib import Path
+from codex_events import known_item_warning, known_reconnect, stderr_warnings
 from review_runner import RunError
 from review_retry import upstream_error
 from review_materials import load_registry, read_material
 
 
-def validate(logfile, code, requested, cwd, required, registry):
+def validate(logfile, code, requested, cwd, required, registry, stderr_log=None):
     if Path(registry['root']).resolve() != Path(cwd).resolve() or set(required) != {x['path'] for x in registry['materials'].values()}:
         raise RunError('registry does not match stage requirements')
-    thread = turn = terminal = False
+    thread = turn = terminal = reconnect = False
     pending, seen, complete = {}, set(), set()
     failure = None
     report = None
+    stderr = stderr_warnings(stderr_log)
     warnings = []
     try:
         for line in Path(logfile).read_text('utf-8').splitlines():
@@ -24,6 +26,17 @@ def validate(logfile, code, requested, cwd, required, registry):
             if not isinstance(event, dict) or terminal:
                 raise RunError('invalid event or content after terminal')
             kind = event.get('type')
+            warning = known_item_warning(event) if thread and not turn else None
+            if (warning is not None and warning['id'] not in seen and not event.get('error')
+                    and not event.get('permission_denials') and not event.get('is_error')):
+                seen.add(warning['id'])
+                warnings.append(warning)
+                continue
+            warning = known_reconnect(event) if turn else None
+            if warning is not None:
+                reconnect = True
+                warnings.append(warning)
+                continue
             if kind == 'thread.started':
                 if thread or not isinstance(event.get('thread_id'), str) or not event['thread_id']:
                     raise RunError('duplicate or invalid thread')
@@ -79,7 +92,7 @@ def validate(logfile, code, requested, cwd, required, registry):
                 else:
                     raise RunError('unexpected Codex item: ' + str(typ))
             elif kind == 'turn.failed':
-                if not turn or not isinstance(event.get('error'), dict):
+                if reconnect or not turn or not isinstance(event.get('error'), dict):
                     raise RunError('invalid failed turn')
                 terminal = True
                 failure = upstream_error(event['error'], code)
@@ -98,5 +111,5 @@ def validate(logfile, code, requested, cwd, required, registry):
     if not terminal:
         raise RunError('missing terminal Codex result')
     return {'model': None, 'model_evidence': 'requested_only', 'result': report,
-            'complete_reads': complete, 'transport_warnings': warnings,
+            'complete_reads': complete, 'transport_warnings': stderr + warnings,
             'read_recoveries': [], 'read_recovery_count': 0}

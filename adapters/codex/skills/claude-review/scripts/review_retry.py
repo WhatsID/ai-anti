@@ -7,8 +7,17 @@ import sys
 import time
 from pathlib import Path
 
+from codex_events import known_item_warning, known_reconnect, stderr_path, stderr_warnings
+
 MAX_RETRIES = 2
 BACKOFF = (30, 90)
+CONNECTORS_WARNING = (
+    '⚠ claude.ai connectors are disabled because ANTHROPIC_API_KEY or another auth source is set '
+    "and takes precedence over your claude.ai login · Unset it to load your organization's connectors"
+)
+UNRECOGNIZED_MODEL = '[claude-code:unrecognized_model] '
+COMMAND_DENIALS = ('permission denied', 'operation not permitted', 'read-only file system',
+                   'sandbox', 'not permitted', 'denied by')
 CAPACITY = 'Selected model is at capacity. Please try a different model'
 
 
@@ -147,6 +156,10 @@ def retry(operation, logfile, timeout, max_retries=MAX_RETRIES, inputs=(), clock
                     record.setdefault('wait_finished_at', time.time())
                 record.setdefault('finished_at', time.time())
                 record['log_sha256'] = hashlib.sha256(raw.read_bytes()).hexdigest() if raw.exists() else None
+                stderr_log = stderr_path(raw)
+                if stderr_log.is_file():
+                    record['stderr_log'] = stderr_log.name
+                    record['stderr_sha256'] = hashlib.sha256(stderr_log.read_bytes()).hexdigest()
                 save(state['status'])
     except (RunError, KeyboardInterrupt, OSError, ValueError) as exc:
         state['error_kind'] = 'cancelled' if isinstance(exc, KeyboardInterrupt) else getattr(exc, 'kind', 'input_error')
@@ -177,7 +190,7 @@ def attempt_summary(logs):
             for p in Path(logs).glob('*.attempts.json')}
 
 
-def direct_result(logfile, code, protocol):
+def direct_result(logfile, code, protocol, stderr_log=None):
     """Extract a validated direct readonly report; raw remains the R10 evidence."""
     from review_runner import RunError
     text = Path(logfile).read_text('utf-8')
@@ -185,12 +198,19 @@ def direct_result(logfile, code, protocol):
         if protocol == 'claude-json':
             lines = text.splitlines()
             warnings = []
-            while lines and lines[0].startswith('[claude-code:unrecognized_model] '):
-                warning = json.loads(lines.pop(0).split('] ', 1)[1])
-                if (set(warning) != {'model', 'query_source'} or warning['query_source'] != 'sdk'
-                        or not isinstance(warning['model'], str) or warnings):
+            if lines and lines[0] == CONNECTORS_WARNING:
+                lines.pop(0)
+                if not lines or not lines[0].startswith(UNRECOGNIZED_MODEL):
+                    raise RunError('unknown transport warning')
+                warnings.append({'kind': 'connectors_disabled', 'message': CONNECTORS_WARNING})
+            if lines and lines[0].startswith(UNRECOGNIZED_MODEL):
+                warning = json.loads(lines.pop(0)[len(UNRECOGNIZED_MODEL):])
+                if (not isinstance(warning, dict) or set(warning) != {'model', 'query_source'} or warning['query_source'] != 'sdk'
+                        or not isinstance(warning['model'], str)):
                     raise RunError('unknown transport warning')
                 warnings.append(warning)
+                if lines and lines[0].startswith(UNRECOGNIZED_MODEL):
+                    raise RunError('unknown transport warning')
             event = json.loads('\n'.join(lines))
             if not isinstance(event, dict) or event.get('type') != 'result' or type(event.get('is_error')) is not bool:
                 raise RunError('invalid direct JSON result')
@@ -217,7 +237,8 @@ def direct_result(logfile, code, protocol):
             return {'result': report, 'permission_denials': event['permission_denials'], 'transport_warnings': warnings}
         if protocol != 'codex-jsonl':
             raise RunError('unsupported direct retry protocol')
-        thread = turn = terminal = False
+        warnings = stderr_warnings(stderr_log)
+        thread = turn = terminal = reconnect = False
         candidates, pending, seen = [], set(), set()
         failure = None
         for line in text.splitlines():
@@ -227,6 +248,16 @@ def direct_result(logfile, code, protocol):
             kind = event.get('type')
             if event.get('permission_denials') or event.get('is_error'):
                 raise RunError('direct error or permission denial')
+            warning = known_item_warning(event) if not turn and thread else None
+            if warning is not None and warning['id'] not in seen and not event.get('error'):
+                seen.add(warning['id'])
+                warnings.append(warning)
+                continue
+            warning = known_reconnect(event) if turn else None
+            if warning is not None:
+                reconnect = True
+                warnings.append(warning)
+                continue
             if kind == 'thread.started':
                 if thread or not isinstance(event.get('thread_id'), str) or not event['thread_id']:
                     raise RunError('invalid direct thread')
@@ -244,13 +275,23 @@ def direct_result(logfile, code, protocol):
                     if item.get('error') or item.get('permission_denials') or item.get('is_error'):
                         raise RunError('direct tool error or permission denial')
                     expected_status = 'in_progress' if kind == 'item.started' else 'completed'
-                    if item.get('status') != expected_status:
+                    failed_command = (typ == 'command_execution' and kind == 'item.completed'
+                                      and item.get('status') == 'failed')
+                    if item.get('status') != expected_status and not failed_command:
                         raise RunError('invalid direct tool status')
                     if typ == 'command_execution':
                         if not isinstance(item.get('command'), str) or not isinstance(item.get('aggregated_output'), str):
                             raise RunError('invalid direct command evidence')
-                        if (kind == 'item.completed' and (type(item.get('exit_code')) is not int or item['exit_code'] != 0)):
-                            raise RunError('failed direct command')
+                        if kind == 'item.completed':
+                            exit_code = item.get('exit_code')
+                            if type(exit_code) is not int or failed_command != (exit_code != 0):
+                                raise RunError('failed direct command')
+                            if failed_command:
+                                output = item['aggregated_output'].lower()
+                                if any(marker in output for marker in COMMAND_DENIALS):
+                                    raise RunError('failed direct command')
+                                warnings.append({'kind': 'failed_command', 'id': uid, 'exit_code': exit_code,
+                                                 'command': item['command'][:200]})
                     elif typ == 'mcp_tool_call':
                         if (not isinstance(item.get('server'), str) or not isinstance(item.get('tool'), str)
                                 or not isinstance(item.get('arguments'), dict)
@@ -277,7 +318,7 @@ def direct_result(logfile, code, protocol):
                 else:
                     raise RunError('unknown direct item')
             elif kind == 'turn.failed':
-                if not turn or not isinstance(event.get('error'), dict):
+                if reconnect or not turn or not isinstance(event.get('error'), dict):
                     raise RunError('invalid direct failed turn')
                 terminal = True
                 failure = upstream_error(event['error'], code)
@@ -293,7 +334,7 @@ def direct_result(logfile, code, protocol):
             raise failure
         if code:
             raise RunError('nonzero direct CLI exit')
-        return {'result': candidates[0], 'permission_denials': [], 'transport_warnings': []}
+        return {'result': candidates[0], 'permission_denials': [], 'transport_warnings': warnings}
     except (UnicodeError, ValueError, TypeError) as exc:
         raise RunError('malformed direct protocol') from exc
 
@@ -302,12 +343,18 @@ def readonly(command, cwd, logfile, report, timeout, idle, cap, protocol, inputs
     from review_runner import execute, RunError
     if not inputs:
         raise RunError('explicit retry inputs required')
-    if Path(report).exists():
+    report = Path(report)
+    warnings_file = report.with_name(report.name + '.warnings.json') if protocol == 'codex-jsonl' else None
+    if report.exists() or (warnings_file is not None and (warnings_file.exists() or warnings_file.is_symlink())):
         raise RunError('report output already exists')
     env = dict(os.environ if env is None else env)
     def operation(raw, remaining):
-        code = execute(command, cwd, raw, remaining, min(idle, remaining), cap, env=env)
-        return direct_result(raw, code, protocol)
+        options = {'stderr_log': stderr_path(raw)} if protocol == 'codex-jsonl' else {}
+        code = execute(command, cwd, raw, remaining, min(idle, remaining), cap, env=env, **options)
+        return direct_result(raw, code, protocol, **options)
     result = retry(operation, logfile, timeout, max_retries, inputs)
-    Path(report).write_text(result['result'], encoding='utf-8')
+    if warnings_file is not None:
+        warnings_file.write_text(json.dumps(result['transport_warnings'], ensure_ascii=False, indent=2) + '\n',
+                                 encoding='utf-8')
+    report.write_text(result['result'], encoding='utf-8')
     return result

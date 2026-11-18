@@ -23,6 +23,16 @@
   跨模型通道陆续静默失效 → 高风险任务实际都只过同族档，汇报里却写着「已按阶梯降档」。值得做的
   条件：再出现一次「通道健康却被判不可用」。候选修法：每档加极小的连通性探针（一句话提问 + 断言
   `is_error:false`）。代价要先算：一次最小探针实测约 $0.25。｜来源：评审登记
+- [x] 中｜**Claude 主导时不能把实施交给指定的 Codex 模型** — 第 4 步固定派 Claude `implementer`；
+  `/codex-implement` 只是容灾第②级，不能指定模型（落到 `~/.codex/config.toml` 默认模型）、直接写
+  主工作树、无超时外壳与模型证据；`codex-relay/scripts/implementation.py` 明确拒绝 CLI 调原生
+  Codex，`review_codex.py` 版本硬卡 0.160.0/0.163.0（本机已是 0.169.1）。失败场景：用户要求
+  「Claude 方案 → Codex astra 评审 → Codex sol 实施 → Claude 验收」时只能手动调用 `codex exec`，
+  隔离工作树、模型参数与证据全靠主模型自觉。2026-11-18 一个业务项目的功能开发按用户裁决先手动
+  执行一次。值得做的条件：该流程手动跑通且用户要求复用。候选修法：新增 Claude 主导的独立实施
+  provider/model 配置，按项目工作树配方在隔离树中有界调用，固定模型失败即停问用户、不自动换模型，
+  Codex 实施的增量不再由 Codex 评审。｜来源：用户指令（2026-11-18）
+  2026-11-18 实施关闭：独立入口已实现，真实探针待主模型。
 
 ## Codex→Claude 评审入口（claude-review / codex-relay）
 
@@ -247,9 +257,17 @@
 
 ### Codex 版本预检告警后续（2026-10-21）
 
-- [ ] 中｜成功 exec 的同类启动噪声待取证。复核时机：取得成功 exec 原始日志；
+- [x] 中｜成功 exec 的同类启动噪声待取证。复核时机：取得成功 exec 原始日志；
   关闭判据：区分启动噪声和真实协议错误后独立评估，保留非零与未知事件拒绝。
   当前无模型启动探针非零权限失败，不构成放宽 JSONL 的依据。｜来源：本次评审第1项裁决
+  2026-11-18 取得样本：Claude 主导 `/codex-review plan`，codex-cli 0.169.1 + gpt-6.2-astra，
+  评审正常完成（`turn.completed`、4 条 agent_message），但日志混入非 JSON 行
+  `Reading additional input from stdin...` 与多条 `ERROR codex_models_manager::manager: failed to
+  refresh available models: request timed out`（stderr 经 2>&1 并入），`review_retry.direct_result`
+  判 `malformed direct protocol`，attempt 计为 execution_failed。主模型手动从 JSONL 取最终
+  agent_message。原始日志在当时业务会话的 scratchpad `review1/`（会话临时目录，不长期保留）。
+  2026-11-18 关闭：已加入真实样本的脱敏回放与精确事件匹配。
+
 - [ ] 中｜远端及其他 errno 警告变体待取证。复核时机：取得不含凭证的原始日志；
   关闭判据：逐字核对后独立评估精确样本，不通配 WARNING 或 errno。
   本次仅承认 Operation not permitted (os error 1)。｜来源：本次评审第2项裁决
@@ -326,6 +344,7 @@
 - [x] 低｜发布时同步 Qwen4-Max CHANGELOG — 2026-11-16 关闭：0.3.0 已记录独立评审/实施选择、模型证据与回滚边界，保留 Claude Code 2.1.322 事件限制；远端 GitHub 发布仍待本次收尾执行。｜来源：Qwen3.8-Max 方案评审 L1
 - [ ] 低｜Anthropic 模型别名返回兼容 — 若未来端点返回带日期后缀的实际模型 ID，精确匹配会拒绝评审；只有取得真实响应证据后再评估明确别名适配，不提前放宽身份守卫。｜来源：Qwen3.8-Max 方案评审 L4
 - [ ] 中｜Claude Code 2.1.322 事件兼容 — 真实 Anthropic 评审出现 init 前的 system/ui_invalidate 和 system/thinking_tokens，现协议报 unknown system event。核实事件契约、补充严格回归后，重新验证完整两阶段评审；内置插件准入不代表该链路已通过。｜来源：Qwen4-Max 新订阅真实复验
+  2026-11-18 部分关闭：2.1.326 的 `ui_invalidate` 和 `thinking_tokens` 均已按样本适配，另见下方登记。2.1.322 的完整两阶段评审仍待复验。
 
 
 ### Token Plan 双槽后续边界（2026-11-16）
@@ -335,3 +354,14 @@
 - SSE 内额度错误不自动重放；流开始后的重放风险需另行设计。
 - 当前请求/成功响应8MiB上限；更大上下文需求另案评估，不静默放宽。
 - Claude Code 2.1.322 未识别协议事件仍为独立待办，不能因双槽功能而放宽守卫或宣称全链路兼容。
+
+
+### Claude 2.1.326 / Codex 0.169.1 后续（2026-11-18）
+
+- [ ] Token Plan 实施的 0.169.1 待取证。实施钉仍为 0.160.0/0.163.0。
+- [ ] 序列化配置时统一确认两个执行器的凭证相对路径基准。Responses 按 `--repo`，默认 Anthropic 按调用 cwd。
+- [ ] `plugins/qwen/plugin.json` 的依赖说明待表达执行器条件。
+- [ ] macOS App 的检查与选择待接入 `plugins.qwen.claude_executor`。
+- [x] `system/thinking_tokens` 已取得 2.1.326 终审样本。仅在 init 后、result 前接纳精确六键且两个估算值均为非负整数的形态，布尔值拒绝。
+- [x] Codex 0.169.1 终审实施样本中的远程 MCP stderr 已加入精确模板。要求 UTC 时间戳和原样 `https://chatgpt.com/backend-api/ps/mcp`，命中记为 `remote_mcp_unavailable`。
+- [ ] Token Plan Anthropic 的 `qwen4-max` 404 待真实复验。已定位样本中的 404 来自本地代理精确路径匹配，查询串修复后待主模型验证主账号额度耗尽及备用接续。
