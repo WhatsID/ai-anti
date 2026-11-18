@@ -289,7 +289,7 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('static let implementationGLM = "glm-5.3"', model)
         view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
         self.assertIn('.disabled(!model.draft.implementationEnabled)', view)
-        self.assertIn('model.draft.host == "claude" ? .constant("claude-agent") : $model.draft.implementationProvider', view)
+        self.assertIn('model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : $model.draft.implementationProvider', view)
         self.assertIn('$model.draft.implementationKeyInput', view)
         self.assertIn('backend/implementation_models.py', (ROOT/'apps/macos/build-app.sh').read_text())
         import implementation_models
@@ -301,6 +301,48 @@ class DesktopContract(unittest.TestCase):
         skill = (ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()
         for requirement in ('--prepare-only', 'requested_only', 'never `active_api`', 'primary acceptance'):
             self.assertIn(requirement, skill)
+
+    def test_claude_routes_match_cli_validation(self):
+        import ai_anti_config as cli
+        import config_store as desktop
+
+        implementation_samples = [
+            {}, {'claude_relay': None}, {'claude_relay': []}, {'claude_relay': {}},
+            *[{'claude_relay': {'implementation': value}} for value in (
+                None, False, 'codex', [], {}, {'provider': 'wrong', 'model': 'valid'},
+                {'provider': 'codex'}, {'provider': 'codex', 'model': 3},
+                {'provider': 'codex', 'model': ''}, {'provider': 'codex', 'model': 'two words'},
+                {'provider': 'codex', 'model': 'white\u2003space'},
+                {'provider': 'codex', 'model': 'gpt-6.2-sol', 'future': {'keep': True}},
+                {'provider': 'codex', 'model': 'custom/model:tag'},
+            )],
+        ]
+        for sample in implementation_samples:
+            with self.subTest(implementation=sample):
+                try:
+                    expected = cli.claude_implementation(sample)
+                except cli.ConfigError:
+                    with self.assertRaises(desktop.StoreError):
+                        desktop.claude_implementation(sample)
+                else:
+                    self.assertEqual(desktop.claude_implementation(sample),
+                                     ('claude-agent', '') if expected is None else ('codex', expected['model']))
+
+        executor_samples = [
+            {}, {'plugins': None}, {'plugins': 3}, {'plugins': {'qwen': None}}, {'plugins': {'qwen': []}},
+            *[{'plugins': {'qwen': {'claude_executor': value}}} for value in (
+                None, 'claude', 'codex', '', ' codex', 'Responses', True, 2, [], {},
+            )],
+        ]
+        for sample in executor_samples:
+            with self.subTest(executor=sample):
+                try:
+                    expected = cli.claude_qwen_executor(sample)
+                except cli.ConfigError:
+                    with self.assertRaises(desktop.StoreError):
+                        desktop.claude_qwen_executor(sample)
+                else:
+                    self.assertEqual(desktop.claude_qwen_executor(sample), expected)
 
     def test_mode_skill_scope_and_incident_notes(self):
         skill=(ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()

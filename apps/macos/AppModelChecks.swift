@@ -81,7 +81,8 @@ import Combine
         assert(!model.busy && !model.checking && model.status.contains("检测已取消"))
         model.inspect(); model.stopBackground(); back.complete(.failure(BridgeFailure(message: "shutdown")))
         assert(model.status.contains("检测已取消"))
-        assert(ModelCatalog.claude.count == 4 && ModelCatalog.codex.count == 4 && ModelCatalog.qwen.count == 2 && ModelCatalog.deepseek.count == 1)
+        assert(ModelCatalog.claude.count == 4 && ModelCatalog.qwen.count == 2 && ModelCatalog.deepseek.count == 1)
+        assert(ModelCatalog.codex == ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"])
         var apiSnapshot = snapshot
         var apiValues = snapshot["values"] as! [String: Any]
         apiValues["qwen_model"] = "custom-api-id"; apiValues["secondary_model"] = "legacy-implementation"
@@ -373,8 +374,13 @@ import Combine
         assert(implementationDraft.dictionary["token_plan_implementation_model"] as? String == "qwen4-max")
         implementationDraft.implementationProvider = "codex"
         assert(implementationDraft.implementationModel == "historical-native")
-        implementationDraft.host = "claude"; assert(!implementationDraft.implementationEnabled)
-        implementationDraft.host = "codex"; implementationDraft.mode = "solo"; assert(!implementationDraft.implementationEnabled)
+        implementationDraft.host = "claude"
+        assert(implementationDraft.implementationEnabled && !implementationDraft.implementationModelEnabled)
+        implementationDraft.claudeImplementationProvider = "codex"
+        assert(implementationDraft.implementationModelEnabled)
+        implementationDraft.mode = "solo"
+        assert(!implementationDraft.implementationEnabled && !implementationDraft.implementationModelEnabled)
+        implementationDraft.host = "codex"; assert(!implementationDraft.implementationEnabled)
         implementationDraft.mode = "rules"; assert(implementationDraft.implementationEnabled)
         addressModel.draft.implementationProvider = "token_plan"
         addressModel.draft.secondaryModel = "native-draft"
@@ -413,6 +419,55 @@ import Combine
         assert(dual.backupKeyInput == Draft.credentialMask)
         assert((dual.secretActions["token_plan_backup"] as! [String: String])["value"] == "")
         dual.backupKeyInput = ""; assert(dual.backupProfile.action == "clear")
+        let claudeFront = FakeClient()
+        let claude = AppModel(foreground: claudeFront, background: FakeClient(), automatic: false)
+        var claudeValues = apiValues
+        claudeValues["host"] = "claude"
+        claudeValues["channel"] = "codex"
+        claudeValues["claude_channel"] = "codex"
+        claudeValues["fallback_channels"] = ["qwen", "same-family"]
+        claudeValues["reviewer_model"] = "historical-review"
+        claudeValues["codex_models"] = ModelCatalog.codex
+        var claudeSnapshot = apiSnapshot
+        claudeSnapshot["values"] = claudeValues
+        claude.refresh(); claudeFront.complete(.success(claudeSnapshot))
+        assert(claude.draft.claudeImplementationProvider == "claude-agent")
+        assert(claude.draft.claudeQwenExecutor == "claude" && claude.claudeQwenExecutorEnabled)
+        assert(claude.reviewerOptions.contains { $0.id == "gpt-6.2-astra" })
+        assert(claude.reviewerOptions.contains { $0.id == "historical-review" })
+        claude.draft.reviewerModel = "custom-review"
+        claude.draft.claudeImplementationProvider = "codex"
+        claude.draft.claudeImplementationModel = "bad model"
+        let requestsBeforeInvalidModel = claudeFront.requests.count
+        claude.save()
+        assert(claudeFront.requests.count == requestsBeforeInvalidModel)
+        claude.draft.claudeImplementationModel = "custom-implementation"
+        claude.draft.claudeQwenExecutor = "codex"
+        assert(claude.draft.activeBaseURL == "https://fixture.invalid/v1")
+        assert(claude.draft.channel == "codex" && claude.claudeFallbacks == ["qwen", "same-family"])
+        assert(claude.secondaryOptions.contains { $0.id == "gpt-6.2-sol" })
+        claude.save()
+        let claudeSave = claudeFront.requests.last?["values"] as! [String: Any]
+        assert(claudeSave["reviewer_model"] as? String == "custom-review")
+        assert(claudeSave["claude_implementation_provider"] as? String == "codex")
+        assert(claudeSave["claude_implementation_model"] as? String == "custom-implementation")
+        assert(claudeSave["claude_qwen_executor"] as? String == "codex")
+        assert((claudeSave["host_updates"] as! [String: [String: String]]).isEmpty)
+        for key in ["reviewer_model", "claude_implementation_provider", "claude_implementation_model", "claude_qwen_executor"] {
+            claudeValues[key] = claudeSave[key]
+        }
+        claudeSnapshot["values"] = claudeValues
+        claudeFront.complete(.success(claudeSnapshot))
+        assert(!claude.dirty && claude.saved.reviewerModel == "custom-review" && claude.saved.claudeImplementationModel == "custom-implementation")
+        assert(claude.saved.claudeQwenExecutor == "codex" && claude.claudeFallbacks == ["qwen", "same-family"])
+        claude.draft.mode = "solo"
+        assert(!claude.claudeQwenExecutorEnabled && !claude.draft.implementationModelEnabled)
+        claude.discard()
+        claude.draft.claudeImplementationProvider = "claude-agent"
+        claude.save()
+        let agentSave = claudeFront.requests.last?["values"] as! [String: Any]
+        assert(agentSave["claude_implementation_provider"] as? String == "claude-agent")
+        claudeFront.complete(.failure(BridgeFailure(message: "fixture end")))
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
     }
 }

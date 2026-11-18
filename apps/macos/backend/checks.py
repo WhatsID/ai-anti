@@ -6,6 +6,7 @@ from pathlib import Path
 import shutil
 import signal
 import subprocess
+import sys
 import tempfile
 import time
 import uuid
@@ -120,6 +121,29 @@ def review_budgets(store, root, timeout=None):
     except (ValueError, OSError, ImportError, SyntaxError) as exc:
         raise CheckError('评审预算配置或源码无效：' + str(exc)) from exc
 
+def check_claude_codex_version(root, log):
+    """Use the pinned versions and parser from the formal implementation entry."""
+    path = root / 'adapters/claude-code/scripts/codex_implement.py'
+    if not path.is_file():
+        raise CheckError('ai-anti 源码缺少 Codex 实施入口；请更新 ai-anti 源码')
+    spec = importlib.util.spec_from_file_location('_aianti_check_codex_implement', path)
+    entry = importlib.util.module_from_spec(spec)
+    original_path = sys.path[:]
+    try:
+        spec.loader.exec_module(entry)
+        versions = entry.VERSIONS
+    except (AttributeError, OSError, ImportError, SyntaxError) as exc:
+        raise CheckError('Codex 实施版本检查所需源码无效') from exc
+    finally:
+        # The formal entry adds its sibling scripts to the import path.
+        sys.path[:] = original_path
+    try:
+        version, _ = entry.parse_version_output(log.read_text('utf-8'))
+    except (entry.RunError, OSError, UnicodeError) as exc:
+        raise CheckError('Codex 实施 CLI 版本输出无效') from exc
+    if version not in versions:
+        raise CheckError('Codex 实施要求 ' + '、'.join(versions))
+
 def result(kind, state, message, snapshot, actual='未知'):
     return dict(kind=kind, state=state, message=message, signature=snapshot['signature'], actual_model=actual,
                 checked_at=time.strftime('%Y-%m-%d %H:%M:%S'), timestamp=time.time())
@@ -130,7 +154,14 @@ def local(store, source=None):
     if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
     # Validation builds bytes but never writes them.
     store.outputs(v, '')
-    review_budgets(store, source_root(store, source))
+    claude_codex_implementation = v['host'] == 'claude' and v['mode'] != 'solo' and v['claude_implementation_provider'] == 'codex'
+    try:
+        root = source_root(store, source)
+    except CheckError as exc:
+        if claude_codex_implementation:
+            raise CheckError('无法定位 ai-anti 源码，未检查实施版本') from exc
+        raise
+    review_budgets(store, root)
     implementation = v['host'] == 'codex' and v['mode'] != 'solo' and v['implementation_provider'] == 'token_plan'
     if implementation:
         profile = v['model_services']['profiles']['token_plan']
@@ -144,20 +175,28 @@ def local(store, source=None):
     names = {v['host'], effective_executor(v) if v['channel'] == 'qwen' else 'qodercli' if v['channel'] == 'qoder' else 'codex'}
     if qoder_implementation:
         names.add('qodercli')
+    if claude_codex_implementation:
+        names.add('codex')
     with tempfile.TemporaryDirectory(prefix='ai-anti-local-') as temp:
         for name in names:
             cli = discover(name)
-            if run([cli, '--version'], temp, Path(temp) / (name + '.log')) != 0:
+            log = Path(temp) / (name + '.log')
+            if run([cli, '--version'], temp, log) != 0:
                 raise CheckError(name + ' --version 失败；原始输出已隐藏')
+            if name == 'codex' and claude_codex_implementation:
+                check_claude_codex_version(root, log)
             if name == 'qodercli' and qoder_implementation:
-                version = (Path(temp) / (name + '.log')).read_text('utf-8').strip()
+                version = log.read_text('utf-8').strip()
                 if version != '1.1.77':
                     raise CheckError('Qoder 实施要求 qodercli 1.1.77')
     if v['channel'] == 'qwen' and not store.credential_status(v['credential_paths'], v.get('credential_key', 'tokenplan.value'))[0]:
         raise CheckError('没有找到可解析的 Qwen 凭证')
     if store.read()['signature'] != snapshot['signature']:
         raise CheckError('检测中配置或凭证发生变化，结果作废')
-    route = ('停用独立实施' if v['mode'] == 'solo' else 'Claude Code 实施代理' if v['host'] == 'claude' else 'Qoder 订阅 · GLM-5.3 · qodercli 1.1.77' if qoder_implementation else 'Token Plan · ' + v['token_plan_implementation_model'] + ' · Responses' if implementation else 'Codex 原生 · ' + (v['secondary_model'] or '未指定'))
+    if claude_codex_implementation:
+        route = 'Codex · ' + v['claude_implementation_model'] + ' · 关联工作树实施'
+    else:
+        route = ('停用独立实施' if v['mode'] == 'solo' else 'Claude Code 实施代理' if v['host'] == 'claude' else 'Qoder 订阅 · GLM-5.3 · qodercli 1.1.77' if qoder_implementation else 'Token Plan · ' + v['token_plan_implementation_model'] + ' · Responses' if implementation else 'Codex 原生 · ' + (v['secondary_model'] or '未指定'))
     return result('local', 'passed', '本地检查通过；实施：' + route + '；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
 
 def validate_accounts(store, values):
@@ -253,7 +292,6 @@ def real(store, source=None, timeout=None):
             if not store.credential_status(v['credential_paths'], v.get('credential_key', 'tokenplan.value'))[0]:
                 raise CheckError('Qwen 凭证不存在或不可解析')
             # Formal runner retains full reads, tool/permission and actual model gates.
-            import sys
             argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
                     '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
                     '--out', str(out), '--channel', 'qwen', '--qwen-executor', effective_executor(v),
@@ -269,7 +307,6 @@ def real(store, source=None, timeout=None):
             except (OSError, ValueError, KeyError):
                 raise CheckError('Qwen 正式入口证据不完整或实际模型不匹配') from None
         elif v['channel'] == 'qoder':
-            import sys
             argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
                     '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
                     '--out', str(out), '--channel', 'qoder', '--model', 'kimi-k3.1-pro', '--timeout', str(timeout),

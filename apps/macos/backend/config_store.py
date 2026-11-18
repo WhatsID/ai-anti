@@ -21,6 +21,7 @@ def token_plan_model(value):
 
 
 MODES = ('solo', 'auto', 'rules', 'force')
+CODEX_MODELS = ('gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna')
 class StoreError(Exception):
     pass
 
@@ -58,8 +59,42 @@ def implementation_provider(value):
         raise StoreError('实施服务无效；合法值：codex/token_plan/qoder')
     return value
 
+def lookup(ai, dotted):
+    for key in dotted.split('.'):
+        if ai is None:
+            return None
+        if not isinstance(ai, dict):
+            raise StoreError(dotted + ' 的上级配置节必须为对象')
+        ai = ai.get(key)
+    return ai
+
+def claude_implementation(ai):
+    value = lookup(ai, 'claude_relay.implementation')
+    if value is None:
+        return 'claude-agent', ''
+    if not isinstance(value, dict) or value.get('provider') != 'codex':
+        raise StoreError('claude_relay.implementation 必须为 provider=codex 的对象')
+    return 'codex', model(value.get('model'))
+
+def claude_qwen_executor(ai):
+    value = lookup(ai, 'plugins.qwen.claude_executor')
+    if value is None:
+        return 'claude'
+    if value not in ('claude', 'codex'):
+        raise StoreError('plugins.qwen.claude_executor 无效；合法值：claude/codex')
+    return value
+
+def executor_for(host, values, ai):
+    if host == 'codex':
+        executor = values.get('qwen_executor', ai.get('codex_relay', {}).get('qwen_executor', 'claude'))
+    else:
+        executor = values.get('claude_qwen_executor', claude_qwen_executor(ai))
+    if executor not in ('claude', 'codex'):
+        raise StoreError('API 评审执行器无效')
+    return executor
+
 def effective_executor(values):
-    return values.get('qwen_executor', 'claude') if values['host'] == 'codex' else 'claude'
+    return executor_for(values['host'], values, {})
 
 def section(value, key):
     result = value.setdefault(key, {})
@@ -170,11 +205,14 @@ class Store:
         if host not in ('claude', 'codex'):
             raise StoreError('主导工具配置无效')
         primary = claude.get('model', '') if host == 'claude' else codex.get('model', '')
+        claude_provider, claude_model = claude_implementation(ai)
         values = dict(host=host, primary_model=primary, claude_model=claude.get('model', ''), codex_model=codex.get('model', ''),
                       channel=(channels[0] if channels else 'codex') if host == 'claude' else relay.get('review_channel', 'claude'),
                       reviewer_model=review.get('codex_model', ''), qwen_model=qwen.get('model', ''),
                       token_plan_implementation_model=token_plan_model(relay.get('token_plan_implementation_model')), secondary_model=relay.get('secondary_model') or '', implementation_provider=implementation_provider(relay.get('implementation_provider')), mode=mode_value, base_url=qwen.get('base_url', ''),
                       responses_base_url=qwen.get('responses_base_url', ''), qwen_executor=relay.get('qwen_executor', 'claude'),
+                      claude_implementation_provider=claude_provider, claude_implementation_model=claude_model,
+                      claude_qwen_executor=claude_qwen_executor(ai), codex_models=list(CODEX_MODELS),
                       credential_paths=qwen.get('credential_paths', ['~/.config/ai-anti/secrets.json']), fallback_channels=channels[1:], claude_channel=(channels[0] if channels else 'codex'), codex_channel=relay.get('review_channel', 'claude'))
         for key in ('primary_model', 'claude_model', 'codex_model', 'reviewer_model', 'qwen_model', 'secondary_model', 'base_url'):
             if not isinstance(values[key], str):
@@ -296,9 +334,26 @@ class Store:
                 profiles = services.validate(profiles, endpoint, model, self.credential_path, StoreError)
                 active_profile = profiles['profiles'][profiles['active_api']]
             values = dict(values, qwen_model=active_profile['model'], base_url=active_profile['base_url'], responses_base_url=active_profile['responses_base_url'])
-        executor = values.get('qwen_executor', relay.get('qwen_executor', 'claude'))
-        if executor not in ('claude', 'codex'):
-            raise StoreError('API 评审执行器无效')
+        executor = executor_for('codex', values, ai)
+        claude_executor = executor_for('claude', values, ai)
+        stored_provider, stored_model = claude_implementation(ai)
+        claude_provider = values.get('claude_implementation_provider', stored_provider)
+        if claude_provider not in ('claude-agent', 'codex'):
+            raise StoreError('Claude 实施服务无效；合法值：claude-agent/codex')
+        if claude_provider == 'codex':
+            chosen_model = model(values.get('claude_implementation_model', stored_model))
+            if stored_provider != 'codex':
+                if ai.get('claude_relay') is None:
+                    ai['claude_relay'] = {}
+                section(ai, 'claude_relay')['implementation'] = {'provider': 'codex', 'model': chosen_model}
+            elif chosen_model != stored_model:
+                ai['claude_relay']['implementation']['model'] = chosen_model
+        elif 'claude_implementation_provider' in values and isinstance(ai.get('claude_relay'), dict):
+            claude_relay = ai['claude_relay']
+            if 'implementation' in claude_relay:
+                del claude_relay['implementation']
+                if not claude_relay:
+                    del ai['claude_relay']
         urls = {key: endpoint(values.get(key, qwen.get(key, ''))) for key in ('base_url', 'responses_base_url')}
         channels = review.get('channels', ['codex', 'same-family'])
         if not isinstance(channels, list) or not all(isinstance(c,str) for c in channels):
@@ -313,7 +368,7 @@ class Store:
                 raise StoreError('支持 Claude→Codex、Claude→API、Codex→API/Qoder')
             if route == 'qwen' and (h == host or 'channel' in fields):
                 model(values['qwen_model'])
-                active = 'responses_base_url' if h == 'codex' and executor == 'codex' else 'base_url'
+                active = 'responses_base_url' if executor_for(h, values, ai) == 'codex' else 'base_url'
                 if not urls[active]:
                     raise StoreError('当前 API 执行器的服务地址不能为空')
             if 'channel' in fields and route != original_channels[h]:
@@ -335,6 +390,8 @@ class Store:
         qwen['model'] = values['qwen_model']
         qwen.update(urls)
         relay['qwen_executor'] = executor
+        if 'claude_qwen_executor' in values:
+            qwen['claude_executor'] = claude_executor
         paths = qwen.get('credential_paths', ['~/.config/ai-anti/secrets.json'])
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             raise StoreError('凭证路径列表无效')
@@ -496,6 +553,8 @@ class Store:
             raise StoreError('恢复记录损坏') from None
         if outputs.get('ai') is not None:
             restored_ai = object_json(outputs['ai'])
+            claude_implementation(restored_ai)
+            claude_qwen_executor(restored_ai)
             accounts.normalize(restored_ai.get('token_plan_accounts'), self.credential_path, StoreError)
             implementation_provider(section(restored_ai, 'codex_relay').get('implementation_provider'))
             token_plan_model(section(restored_ai, 'codex_relay').get('token_plan_implementation_model'))

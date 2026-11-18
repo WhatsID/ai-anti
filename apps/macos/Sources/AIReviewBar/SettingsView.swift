@@ -38,11 +38,15 @@ enum SettingsSummary {
         case "codex": model = draft.reviewerModel.isEmpty ? "CLI 默认" : draft.reviewerModel
         default: model = draft.qwenModel.isEmpty ? "未指定" : draft.qwenModel
         }
-        return "评审服务：" + ReviewService.title(draft.service) + " / " + model + (draft.mode == "solo" ? "（solo 已停用）" : "")
+        let protocolDetail = draft.channel == "qwen" ? " · " + draft.executorProtocol : ""
+        return "评审服务：" + ReviewService.title(draft.service) + protocolDetail + " / " + model + (draft.mode == "solo" ? "（solo 已停用）" : "")
     }
     static func implementation(_ draft: Draft) -> String {
         let detail: String
-        if draft.host == "claude" { detail = "Claude Code 实施代理" }
+        if draft.host == "claude" && draft.claudeImplementationProvider == "codex" {
+            detail = "Codex / " + (draft.claudeImplementationModel.isEmpty ? "未指定" : draft.claudeImplementationModel)
+        }
+        else if draft.host == "claude" { detail = "Claude Code 实施代理" }
         else if draft.implementationProvider == "qoder" { detail = "Qoder 订阅 / GLM-5.3" }
         else if draft.implementationProvider == "token_plan" { detail = "千问 Token Plan / " + draft.tokenPlanImplementationModel }
         else { detail = "Codex / " + (draft.secondaryModel.isEmpty ? "未指定" : draft.secondaryModel) }
@@ -113,7 +117,20 @@ struct SettingsView: View {
     @State private var confirmReal = false
     @State private var confirmRestore = false
     @State private var confirmRefresh = false
+    @State private var customReview = false
+    @State private var customClaudeImplementation = false
+    @State private var customCodexImplementation = false
     private var isSolo: Bool { model.draft.mode == "solo" }
+    private var invalidCustomModel: Bool {
+        (customReview && !Draft.validModelID(model.draft.reviewerModel)) ||
+        (customClaudeImplementation && model.draft.claudeImplementationProvider == "codex" && !Draft.validModelID(model.draft.claudeImplementationModel)) ||
+        (customCodexImplementation && model.draft.implementationProvider == "codex" && !Draft.validModelID(model.draft.secondaryModel))
+    }
+    private func closeCustomEditors() {
+        customReview = false
+        customClaudeImplementation = false
+        customCodexImplementation = false
+    }
     private var versionLabel: String {
         guard let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
               !version.isEmpty else { return "当前版本：开发版" }
@@ -137,6 +154,27 @@ struct SettingsView: View {
             Picker(title, selection: selection) {
                 ForEach(options) { option in Text(option.label).tag(option.id) }
             }.pickerStyle(.menu)
+        }
+    }
+    private func codexModelPicker(_ title: String, selection: Binding<String>, options: [ModelOption],
+                                  custom: Binding<Bool>) -> some View {
+        let choice = Binding<String?>(get: { custom.wrappedValue ? nil : selection.wrappedValue }, set: { value in
+            custom.wrappedValue = value == nil
+            if let value { selection.wrappedValue = value }
+        })
+        return VStack(alignment: .leading) {
+            field(title) {
+                Picker(title, selection: choice) {
+                    ForEach(options) { option in Text(option.label).tag(Optional(option.id)) }
+                    Text("自定义…").tag(nil as String?)
+                }.pickerStyle(.menu)
+            }
+            if custom.wrappedValue {
+                field("自定义模型 ID") { TextField("自定义模型 ID", text: selection) }
+                if !Draft.validModelID(selection.wrappedValue) {
+                    note("模型 ID 必须为非空且不含空白的字符串。")
+                }
+            }
         }
     }
     var body: some View {
@@ -172,17 +210,22 @@ struct SettingsView: View {
                             if !["codex", "qwen", "qoder"].contains(model.draft.channel) { Text("已有配置：\(model.draft.channel)").tag(model.draft.channel) }
                         }.disabled(isSolo)
                     } content: {
-                        if model.draft.channel == "qwen" && model.draft.activeAPI == "custom_api" {
+                        if model.draft.channel == "codex" {
+                            codexModelPicker("评审模型", selection: $model.draft.reviewerModel,
+                                             options: model.reviewerOptions, custom: $customReview).disabled(isSolo)
+                        } else if model.draft.channel == "qwen" && model.draft.activeAPI == "custom_api" {
                             field("评审模型 ID") {
                                 TextField("评审模型 ID", text: $model.draft.qwenModel).disabled(isSolo)
                             }
                         } else {
-                            modelPicker("评审模型", selection: model.draft.channel == "qoder" ? .constant("kmodel_latest") : model.draft.channel == "codex" ? $model.draft.reviewerModel : $model.draft.qwenModel, options: model.reviewerOptions).disabled(isSolo || model.draft.channel == "qoder")
+                            modelPicker("评审模型", selection: model.draft.channel == "qoder" ? .constant("kmodel_latest") : $model.draft.qwenModel, options: model.reviewerOptions).disabled(isSolo || model.draft.channel == "qoder")
+                        }
+                        if model.draft.channel == "qwen" || model.showsClaudeQwenExecutor {
+                            field("评审服务地址") {
+                                TextField("评审服务地址（" + model.draft.executorProtocol + "）", text: $model.draft.activeBaseURL).disabled(isSolo)
+                            }
                         }
                         if model.draft.channel == "qwen" {
-                            field("评审服务地址") {
-                                TextField("评审服务地址", text: $model.draft.activeBaseURL).disabled(isSolo)
-                            }
                             field(model.draft.activeAPI == "token_plan" ? "主账号API密钥" : "评审服务API密钥") {
                                 SecureField("API密钥", text: $model.draft.apiKeyInput).disabled(isSolo)
                             }
@@ -197,9 +240,16 @@ struct SettingsView: View {
                         }
                         if model.draft.host == "claude" { note("Qoder 暂不支持 Claude 主模型。") }
                         field("评审执行器") {
-                            Picker("评审执行器", selection: .constant(model.draft.channel)) {
-                                Text(model.draft.channel == "qoder" ? "Qoder CLI" : model.draft.channel == "codex" ? "Codex CLI" : model.draft.effectiveExecutor == "codex" ? "Codex CLI · Responses" : "Claude Code CLI · Anthropic").tag(model.draft.channel)
-                            }.disabled(true)
+                            if model.showsClaudeQwenExecutor {
+                                Picker("Qwen 评审执行器", selection: $model.draft.claudeQwenExecutor) {
+                                    Text("Qwen · Claude Code CLI · Anthropic").tag("claude")
+                                    Text("Qwen · Codex CLI · Responses").tag("codex")
+                                }.disabled(!model.claudeQwenExecutorEnabled)
+                            } else {
+                                Picker("评审执行器", selection: .constant(model.draft.channel)) {
+                                    Text(model.draft.channel == "qoder" ? "Qoder CLI" : model.draft.channel == "codex" ? "Codex CLI" : model.draft.effectiveExecutor == "codex" ? "Codex CLI · Responses" : "Claude Code CLI · Anthropic").tag(model.draft.channel)
+                                }.disabled(true)
+                            }
                         }
                         field("评审模型ID") {
                             Picker("评审模型ID", selection: .constant(reviewModelID)) {
@@ -219,17 +269,31 @@ struct SettingsView: View {
                         }
                     }
                     ServiceSettingsGroup("实施服务", summary: SettingsSummary.implementation(model.draft), isExpanded: $implementationExpanded) {
-                        Picker("实施服务", selection: model.draft.host == "claude" ? .constant("claude-agent") : $model.draft.implementationProvider) {
-                            if model.draft.host == "claude" { Text("Claude Code 实施代理").tag("claude-agent") }
-                            Text("Codex 原生代理").tag("codex")
-                            Text("千问 Token Plan").tag("token_plan")
-                            Text("Qoder 订阅").tag("qoder")
+                        Picker("实施服务", selection: model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : $model.draft.implementationProvider) {
+                            if model.draft.host == "claude" {
+                                Text("Claude Code 实施代理").tag("claude-agent")
+                                Text("Codex（指定模型）").tag("codex")
+                            } else {
+                                Text("Codex 原生代理").tag("codex")
+                                Text("千问 Token Plan").tag("token_plan")
+                                Text("Qoder 订阅").tag("qoder")
+                            }
                         }.disabled(!model.draft.implementationEnabled)
                     } content: {
-                        modelPicker("实施模型 ID",
-                                    selection: model.draft.host == "claude" ? .constant("claude-agent") : $model.draft.implementationModel,
-                                    options: model.draft.host == "claude" ? [ModelOption(id: "claude-agent", label: "由 Claude Code 实施代理配置")] : model.secondaryOptions)
-                            .disabled(isSolo || model.draft.host == "claude")
+                        if model.draft.host == "claude" && model.draft.claudeImplementationProvider == "codex" {
+                            codexModelPicker("实施模型 ID", selection: $model.draft.claudeImplementationModel,
+                                             options: model.secondaryOptions, custom: $customClaudeImplementation)
+                                .disabled(!model.draft.implementationModelEnabled)
+                        } else if model.draft.host == "codex" && model.draft.implementationProvider == "codex" {
+                            codexModelPicker("实施模型 ID", selection: $model.draft.secondaryModel,
+                                             options: model.secondaryOptions, custom: $customCodexImplementation)
+                                .disabled(!model.draft.implementationModelEnabled)
+                        } else {
+                            modelPicker("实施模型 ID",
+                                        selection: model.draft.host == "claude" ? .constant("claude-agent") : $model.draft.implementationModel,
+                                        options: model.draft.host == "claude" ? [ModelOption(id: "claude-agent", label: "由 Claude Code 实施代理配置")] : model.secondaryOptions)
+                                .disabled(!model.draft.implementationModelEnabled)
+                        }
                         if model.draft.host == "codex" && model.draft.implementationProvider == "token_plan" {
                             field("实施服务地址") {
                                 TextField("实施服务地址", text: $model.draft.implementationURL).disabled(isSolo)
@@ -245,7 +309,7 @@ struct SettingsView: View {
                         if model.draft.host == "codex" && model.draft.implementationProvider == "qoder" {
                             note("固定 GLM-5.3；使用已有 Qoder 订阅登录，要求 qodercli 1.1.77。检查配置仅检查版本，不验证登录或实施；评审检测仍走所选评审服务。CLI 报告模型，后端路由未知。工具限制不提供文件或网络硬隔离。")
                         }
-                        note("Codex 保留已有实施模型 ID；目录选项不代表每个模型均通过实施验证。Claude Code 沿用自己的实施代理。")
+                        note("Codex 保留已有实施模型 ID；目录选项不代表每个模型均通过实施验证。")
                     }
                 }.modifier(FullWidthFormControls())
                     .frame(width: geometry.size.width - 8, alignment: .leading).padding(4)
@@ -262,13 +326,14 @@ struct SettingsView: View {
                     .help("重新从磁盘读取 Claude、Codex 和机制默认配置，不调用模型")
                 Button("恢复上次保存") { confirmRestore = true }.disabled(model.busy || !model.canRestore || model.dirty)
                 Spacer(minLength: 8)
-                Button("取消", action: model.discard).disabled(model.busy || !model.dirty)
+                Button("取消") { model.discard(); closeCustomEditors() }.disabled(model.busy || !model.dirty)
                 Button("保存", action: model.save).buttonStyle(.borderedProminent).tint(.blue)
-                    .disabled(model.busy || !model.loaded || !model.dirty)
+                    .disabled(model.busy || !model.loaded || !model.dirty || invalidCustomModel)
             }.controlSize(.regular).fixedSize(horizontal: false, vertical: true)
             Text(versionLabel).font(.caption).foregroundStyle(.secondary)
                 .frame(maxWidth: .infinity, alignment: .leading)
         }.padding(20).frame(width: 740, height: 760)
+        .onChange(of: model.saved) { _ in closeCustomEditors() }
         .disabled(model.busy && !model.checking)
         .alert("测试会消耗模型额度", isPresented: $confirmReal) {
             Button("开始合成检测") { model.check(real: true) }; Button("取消", role: .cancel) {}

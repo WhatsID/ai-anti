@@ -361,7 +361,9 @@
 - [ ] Token Plan 实施的 0.169.1 待取证。实施钉仍为 0.160.0/0.163.0。
 - [ ] 序列化配置时统一确认两个执行器的凭证相对路径基准。Responses 按 `--repo`，默认 Anthropic 按调用 cwd。
 - [ ] `plugins/qwen/plugin.json` 的依赖说明待表达执行器条件。
-- [ ] macOS App 的检查与选择待接入 `plugins.qwen.claude_executor`。
+- [x] macOS App 已接入 `plugins.qwen.claude_executor` 的选择、本地检查及合成评审路由。Qwen 为首选或回退时可选择协议，保存保留回退顺序。
+- [ ] macOS App 的 Codex 模型目录动态发现。当前提供内置目录、自定义 ID 及已有值保留；后续评估从本机发现可用模型及刷新时机。
+- [ ] macOS App 真实检测覆盖 Claude 主导的 Codex 实施。当前本地检查验证 CLI 版本；后续评估合成实施探针的成本及写入范围。
 - [x] `system/thinking_tokens` 已取得 2.1.326 终审样本。仅在 init 后、result 前接纳精确六键且两个估算值均为非负整数的形态，布尔值拒绝。
 - [x] Codex 0.169.1 终审实施样本中的远程 MCP stderr 已加入精确模板。要求 UTC 时间戳和原样 `https://chatgpt.com/backend-api/ps/mcp`，命中记为 `remote_mcp_unavailable`。
 - [ ] Token Plan Anthropic 的 `qwen4-max` 404 待真实复验。已定位样本中的 404 来自本地代理精确路径匹配，查询串修复后待主模型验证主账号额度耗尽及备用接续。

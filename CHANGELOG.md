@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- AIAnti 0.3.1（构建号 9）支持在 Claude 主模型下单独设置 Codex 评审与实施模型 ID，保留目录外已有值并支持自定义 ID。
+- Claude 主模型的 Qwen 首选或回退通道可选择 Anthropic 或 Responses，地址随执行器切换，保存保留通道顺序。检查配置对 Claude 主导的 Codex 实施验证 CLI 版本，真实检测仍覆盖评审。
+
 - Claude 主导的接力可配置指定 Codex 模型，在隔离工作树有界实施并保存验收证据。
 - Codex 0.169.1 的已取证事件与 stderr 噪声按精确模板识别；等候主模型探针更新实测版本清单。
 - 适配 Claude 2.1.326 的已取证事件、内置插件和连接器提示。Qwen 可显式走 Responses，Token Plan 本地代理转发 Claude CLI 的两个精确查询路径。

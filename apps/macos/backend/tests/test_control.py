@@ -8,7 +8,7 @@ import tomllib
 import unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
-from config_store import Store, StoreError, atomic, edit_toml
+from config_store import Store, StoreError, atomic, edit_toml, encode
 from control import dispatch
 
 class StoreTests(unittest.TestCase):
@@ -27,6 +27,89 @@ class StoreTests(unittest.TestCase):
     def save(self, **changes):
         snap = self.snapshot(); v = snap['values']; v.update(changes)
         return self.store.save(v, snap['fingerprints'])
+
+    def test_claude_implementation_and_executor_roundtrip_restore(self):
+        route = {'provider': 'codex', 'model': 'gpt-6.2-sol', 'future': {'preserve': True}}
+        data = {'claude_relay': {'implementation': route}, 'review': {'codex_model': 'gpt-6.2-astra'},
+                'plugins': {'qwen': {'claude_executor': 'codex'}}}
+        self.write('ai', encode(data))
+        before = self.store.raw('ai')
+        values = self.snapshot()['values']
+        self.assertEqual((values['claude_implementation_provider'], values['claude_implementation_model'],
+                          values['claude_qwen_executor'], values['reviewer_model']),
+                         ('codex', 'gpt-6.2-sol', 'codex', 'gpt-6.2-astra'))
+        self.assertEqual(values['codex_models'],
+                         ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'])
+        saved = self.save(reviewer_model='custom-review')
+        original_section = before.split(b'  "claude_relay": ', 1)[1].split(b'\n  },', 1)[0]
+        updated_section = self.store.raw('ai').split(b'  "claude_relay": ', 1)[1].split(b'\n  },', 1)[0]
+        self.assertEqual(original_section, updated_section)
+        self.assertEqual(saved['values']['reviewer_model'], 'custom-review')
+        self.store.restore(saved['fingerprints'])
+        saved = self.save(claude_implementation_model='custom-implementation', claude_qwen_executor='claude')
+        written = json.loads(self.store.raw('ai'))
+        self.assertEqual(written['claude_relay']['implementation'], dict(route, model='custom-implementation'))
+        self.assertEqual(written['plugins']['qwen']['claude_executor'], 'claude')
+        self.assertEqual(saved['values']['reviewer_model'], 'gpt-6.2-astra')
+        restored = self.store.restore(saved['fingerprints'])
+        self.assertEqual(self.store.raw('ai'), before)
+        self.assertEqual(restored['values']['claude_implementation_model'], 'gpt-6.2-sol')
+        self.assertEqual(restored['values']['claude_qwen_executor'], 'codex')
+        self.assertEqual(self.save(claude_implementation_provider='claude-agent')['values']['claude_implementation_model'], '')
+        self.assertNotIn('claude_relay', json.loads(self.store.raw('ai')))
+
+    def test_claude_legacy_save_preserves_executor_implementation_and_channels(self):
+        channels = ['codex', 'qwen', 'same-family']
+        route = {'provider': 'codex', 'model': 'saved-model', 'future': 9}
+        self.write('ai', {'review': {'channels': channels},
+                          'claude_relay': {'implementation': route, 'other': 5},
+                          'plugins': {'qwen': {'claude_executor': 'codex'}}})
+        snap = self.snapshot()
+        legacy = {k: v for k, v in snap['values'].items() if k not in (
+            'claude_implementation_provider', 'claude_implementation_model', 'claude_qwen_executor', 'codex_models')}
+        self.store.save(dict(legacy, reviewer_model='review-edited'), snap['fingerprints'])
+        config = json.loads(self.store.raw('ai'))
+        self.assertEqual(config['claude_relay'], {'implementation': route, 'other': 5})
+        self.assertEqual(config['plugins']['qwen']['claude_executor'], 'codex')
+        self.save(claude_qwen_executor='claude')
+        self.assertEqual(json.loads(self.store.raw('ai'))['review']['channels'], channels)
+        self.save(claude_implementation_provider='claude-agent')
+        self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay'], {'other': 5})
+
+    def test_claude_implementation_rejects_invalid_stored_provider(self):
+        self.write('ai', {'claude_relay': {'implementation': {'provider': 'bad', 'model': 'valid'}}})
+        with self.assertRaisesRegex(StoreError, 'provider'):
+            self.snapshot()
+
+    def test_claude_route_rejects_invalid_drafts(self):
+        for fields in (
+            {'claude_implementation_provider': 'bad'},
+            {'claude_implementation_provider': 'codex', 'claude_implementation_model': ''},
+            {'claude_implementation_provider': 'codex', 'claude_implementation_model': 'white space'},
+            {'claude_qwen_executor': 'bad'},
+            {'claude_qwen_executor': None},
+        ):
+            with self.subTest(fields=fields), self.assertRaises(StoreError):
+                self.save(**fields)
+        self.assertFalse(self.store.paths['ai'].exists())
+
+    def test_batch_qwen_addresses_use_each_host_executor(self):
+        for claude_executor, codex_executor in (('claude', 'codex'), ('codex', 'claude')):
+            for host in ('claude', 'codex'):
+                with self.subTest(host=host, claude_executor=claude_executor):
+                    self.write('ai', {'plugins': {'qwen': {'claude_executor': claude_executor}},
+                                      'codex_relay': {'qwen_executor': codex_executor}})
+                    values = self.values(host=host, channel='qwen', qwen_model='qwen-fixture',
+                                         host_updates={'claude': {'channel': 'qwen'}, 'codex': {'channel': 'qwen'}},
+                                         base_url='https://fixture.invalid/anthropic',
+                                         responses_base_url='https://fixture.invalid/v1',
+                                         claude_qwen_executor=claude_executor, qwen_executor=codex_executor)
+                    legacy = {k: v for k, v in values.items() if k not in ('claude_qwen_executor', 'qwen_executor')}
+                    for payload in (values, legacy):
+                        self.store.outputs(payload, '')
+                        for address in ('base_url', 'responses_base_url'):
+                            with self.assertRaisesRegex(StoreError, '服务地址不能为空'):
+                                self.store.outputs(dict(payload, **{address: ''}), '')
     def test_implementation_provider_roundtrip_and_restore_validation(self):
         self.assertEqual(self.snapshot()['values']['implementation_provider'], 'codex')
         for bad in ('custom_api', '', [], {}, 1, True):

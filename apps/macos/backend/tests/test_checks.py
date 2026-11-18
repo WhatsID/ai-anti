@@ -93,12 +93,60 @@ class CheckTests(unittest.TestCase):
             checks.local(store, str(ROOT))
         self.assertEqual({call.args[0] for call in discover.call_args_list}, {'claude'})
 
+    def test_claude_codex_implementation_version_pin(self):
+        store = self.api_store('claude')
+        snap = store.read()
+        v = dict(snap['values'], claude_implementation_provider='codex',
+                 claude_implementation_model='gpt-6.2-sol')
+        store.save(v, snap['fingerprints'])
+        fake = self.root / 'codex'
+        for output, error in (
+            ('codex-cli 0.169.1\n', None),
+            ('codex-cli 0.163.0\n', '0.169.1'),
+        ):
+            with self.subTest(output=output):
+                fake.write_text('#!' + sys.executable + '\nimport sys\nassert sys.argv[1:] == ["--version"]\nprint(' + repr(output) + ', end="")\n')
+                fake.chmod(0o700)
+                with patch('checks.discover', side_effect=lambda name: str(fake) if name == 'codex' else '/usr/bin/true') as discover:
+                    if error:
+                        with self.assertRaisesRegex(checks.CheckError, error):
+                            checks.local(store, ROOT)
+                    else:
+                        self.assertIn('Codex · gpt-6.2-sol · 关联工作树实施', checks.local(store, ROOT)['message'])
+                        self.assertEqual({call.args[0] for call in discover.call_args_list}, {'claude', 'codex'})
+        with self.assertRaisesRegex(checks.CheckError, '无法定位 ai-anti 源码，未检查实施版本'):
+            checks.local(store, self.root / 'missing')
+        snap = store.read()
+        store.save(dict(snap['values'], mode='solo'), snap['fingerprints'])
+        with patch('checks.discover', return_value='/usr/bin/true') as discover:
+            self.assertIn('停用独立实施', checks.local(store, ROOT)['message'])
+        discover.assert_called_once_with('claude')
+
+    def test_claude_codex_implementation_version_parser_rejects_noise(self):
+        store = self.api_store('claude')
+        snap = store.read()
+        store.save(dict(snap['values'], claude_implementation_provider='codex',
+                        claude_implementation_model='gpt-6.2-sol'), snap['fingerprints'])
+        fake = self.root / 'codex'
+        warning = 'WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)'
+        for line in (warning, 'unrelated diagnostic'):
+            with self.subTest(line=line):
+                fake.write_text('#!' + sys.executable + '\nimport sys\nassert sys.argv[1:] == ["--version"]\nprint(' + repr(line) + ', file=sys.stderr)\nprint("codex-cli 0.169.1")\n')
+                fake.chmod(0o700)
+                with patch('checks.discover', side_effect=lambda name: str(fake) if name == 'codex' else '/usr/bin/true'):
+                    if line == warning:
+                        self.assertEqual(checks.local(store, ROOT)['state'], 'passed')
+                    else:
+                        with self.assertRaisesRegex(checks.CheckError, '版本输出无效'):
+                            checks.local(store, ROOT)
+
     def test_formal_executor_limits_and_requested_only(self):
-        for host in ('codex', 'claude'):
+        for host, executor in (('codex', 'codex'), ('claude', 'claude'), ('claude', 'codex')):
             store = self.api_store(host)
             data=json.loads(store.paths['ai'].read_text()); data['review'].update(timeout=321,idle_timeout=45)
+            if host == 'claude':
+                data['plugins']['qwen']['claude_executor'] = executor
             atomic(store.paths['ai'],json.dumps(data).encode())
-            executor = 'codex' if host == 'codex' else 'claude'
             def fake_run(argv, cwd, log, **kwargs):
                 if '--qwen-executor' in argv:
                     self.assertEqual(argv[argv.index('--qwen-executor')+1], executor)

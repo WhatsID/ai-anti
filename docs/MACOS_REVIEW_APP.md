@@ -6,7 +6,7 @@
 ## 首期功能
 
 - 组合 Claude→Codex、Claude→API、Codex→API/Qoder；已有 Codex→Claude 能力保留，不增加到首期新选列表。
-- 主模型默认值、独立 Codex 评审模型、独立实施服务/模型（Codex 原生、Token Plan（glm-5.3 / qwen4-max）或 Qoder 订阅固定 glm-5.3）、评审通道、协作默认模式、Qwen 模型/地址/凭证状态。
+- 主模型默认值、独立 Codex 评审模型、独立实施服务/模型（Claude 主导可选自身代理或指定 Codex 模型，Codex 主导可选原生、Token Plan 或 Qoder）、评审通道、协作默认模式、Qwen 模型/地址/凭证状态。
 - 中文菜单快捷选择、设置草稿保存/放弃、免费检查、手动真实合成检测、刷新与恢复上次保存。
 - 首次启动只读；不自动检测，不读取或展示密钥正文。窗口开着时监控配置指纹/凭证 stat，使旧检测失效。
 - 检测最多一个，后台运行、有界超时/输出、耗时与取消，退出清理模型进程；原始错误与日志不交给界面。
@@ -51,9 +51,9 @@ Qwen 复用正式 `review.py diff --channel qwen`，临时仓库有 HEAD 和小�
 检查 completed、通道/执行器/协议/请求模型；Claude 分支精确匹配实际模型，Codex 分支保留 requested_only，并保留原完整读取和权限门禁。耗时可能最多30分钟，无快速探针或自动降级。
 Codex 使用隔离临时合成仓库、提示词文件、DEVNULL、文件日志和输出上限，要求最终turn完成、
 无error且返回文件里的随机值。实际模型只有结构化字段才显示，否则未知；请求ID或exit=0不是实际模型证明。
-评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen4-Max（qwen4-max）、Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3.1-Pro（kmodel_latest；CLI 明确准入 1.1.74 / 1.1.77，1.1.77 已完成正式 bug-review 实测；桌面路由仅离线验证）；Codex 保留四个目录模型和 CLI 默认；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Codex 服务仅 Claude 主模型可新选；既有其他路由保留显示。
+评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen4-Max（qwen4-max）、Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3.1-Pro（kmodel_latest；CLI 明确准入 1.1.74 / 1.1.77，1.1.77 已完成正式 bug-review 实测；桌面路由仅离线验证）；Codex 评审目录含 gpt-6.2-sol、gpt-6.2-astra 等六个模型，支持 CLI 默认及自定义模型 ID；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Codex 服务仅 Claude 主模型可新选；既有其他路由保留显示。
 
-API 服务显示服务地址和“认证 / API 密钥”，CLI 服务隐藏这些字段，使用现有 CLI 登录并默认显示“登录状态未检测”。高级设置说明固定执行器及协议：Claude 使用 Anthropic，Codex 使用 Responses；不承诺 Chat Completions。所有真实合成检测统一读取用户配置 `review.timeout` / `review.idle_timeout`（默认1800/900秒，上限3600/900秒，先到者终止）。Qwen/Qoder正式入口外围为总时间+60秒，界面3700秒覆盖最大3600+60并支持取消；极慢本地准备仍可能触发外围预算。Qoder保留2MiB输出上限，保留正式 runner 全部门禁和实际 Kimi-K3.1-Pro 证据校验。
+API 服务显示服务地址和“认证 / API 密钥”，CLI 服务使用现有 CLI 登录，默认显示“登录状态未检测”。Claude 主模型下，Qwen 为首选或回退时，可选择 Claude Code CLI（Anthropic）或 Codex CLI（Responses），并编辑对应协议地址。此选择保存在 `plugins.qwen.claude_executor`，保存时保留回退顺序。Codex 主模型的 API 评审使用 Responses；窗口显示当前执行器。所有真实合成检测统一读取用户配置 `review.timeout` / `review.idle_timeout`（默认1800/900秒，上限3600/900秒，先到者终止）。Qwen/Qoder正式入口外围为总时间+60秒，界面3700秒覆盖最大3600+60并支持取消；极慢本地准备仍可能触发外围预算。Qoder保留2MiB输出上限，保留正式 runner 全部门禁和实际 Kimi-K3.1-Pro 证据校验。
 
 两个主导工具共享当前 API 服务及其模型、凭证；两种协议地址独立。每个服务独立保留模型、地址、未保存输入及认证动作，切回恢复；同服务换模型不会改密钥。千问新草稿预填官方两种协议地址，自定义留空。取消放弃全部服务与主导工具草稿，保存失败保留草稿，保存仅影响下次调用。菜单显示服务与模型，未完成配置时引导设置，不保存空地址。
 
@@ -84,15 +84,16 @@ model_services（version=1、active_api、固定 token_plan/custom_api profiles�
 不做业务评审启动、任务历史、余额订阅看板、通用网关、全面厂商接入；钥匙串迁移及版本兼容清单增强另评估。
 离线fake CLI与prepare-only用例覆盖边界，不冒充真实模型实测；GUI与实际账号合成检测由独立验收记录。
 
-设置上方保留主模型、主模型 ID、协作模式及通用说明；下方分别用无背景、无边框的折叠分组呈现评审和实施设置，仅通过箭头提示展开/收起，两组默认展开、独立展开/收起并支持键盘操作。评审组包含评审服务/模型/地址/密钥、执行器、评审模型ID及迁移、回退、凭证说明；实施组包含实施服务/模型及 Token Plan 地址/密钥与说明。分组标题行与上方共用标签列和输入列，箭头为独立按钮；展开时同一行显示实际服务选择框，不重复显示摘要，收起时右列显示当前草稿的服务与模型摘要，不包含地址或密钥，Claude 实施显示自身代理，solo 显示停用提示但仍可展开。折叠不保存配置、不重置草稿，标题行保持固定高度，箭头旋转、选择框与摘要交叉淡入淡出、内容高度及透明度统一使用约 0.2 秒 easeInOut 动画并尊重系统减少动态效果设置。外层纵向布局固定全宽，顶部和两组字段共用固定标签宽度与列间距，说明文字对齐输入列；分组内容无额外缩进，展开/收起不影响全局列宽。底部检测、保存等操作在分组外。`values.host_updates` 保留原两组主导工具独立草稿语义和并发保护，服务 profile 与密钥动作同次事务保存。
+设置上方保留主模型、主模型 ID、协作模式及通用说明；下方分别用无背景、无边框的折叠分组呈现评审和实施设置，仅通过箭头提示展开/收起，两组默认展开、独立展开/收起并支持键盘操作。评审组包含评审服务/模型/地址/密钥、执行器、评审模型ID及迁移、回退、凭证说明；实施组包含实施服务/模型及 Token Plan 地址/密钥与说明。分组标题行与上方共用标签列和输入列，箭头为独立按钮；展开时同一行显示实际服务选择框，不重复显示摘要，收起时右列显示当前草稿的服务与模型摘要，不包含地址或密钥，Claude 主导实施显示自身代理或 Codex 和所选模型 ID，solo 显示停用提示但仍可展开。折叠不保存配置、不重置草稿，标题行保持固定高度，箭头旋转、选择框与摘要交叉淡入淡出、内容高度及透明度统一使用约 0.2 秒 easeInOut 动画并尊重系统减少动态效果设置。外层纵向布局固定全宽，顶部和两组字段共用固定标签宽度与列间距，说明文字对齐输入列；分组内容无额外缩进，展开/收起不影响全局列宽。底部检测、保存等操作在分组外。`values.host_updates` 保留原两组主导工具独立草稿语义和并发保护，服务 profile 与密钥动作同次事务保存。
 
 空主模型保留已有默认值；空 Codex 评审模型使用 CLI 默认（真实检测需明确 ID）。两组主导工具的模型 ID/通道草稿独立。模式合法值 solo、auto、rules、force，旧 required 拒绝；用户当次指令、项目 .claude/relay-mode.local、全局默认、rules 按此顺序优先，solo 停用交叉评审及独立实施。
 
 ## 独立实施设置
 
-仅 Codex 主模型启用实施服务选择，缺省 `codex`。`secondary_model` 保留原生模型历史值；
-`implementation_provider=token_plan` 使用独立的 `token_plan_implementation_model`（默认 `glm-5.3`，可选 `qwen4-max`），不改评审模型。Claude 显示自身实施
-代理且禁用新字段，solo 同样禁用；切回、取消及保存/恢复保留对应草稿。
+Claude 主模型默认使用 Claude Code 实施代理，也可选择 Codex（指定模型）。评审 ID 写入 `review.codex_model`，实施 ID 写入 `claude_relay.implementation`，两个选择器均支持自定义 ID。切回 Claude Code 实施代理时删除 `claude_relay.implementation`。本地检查按正式入口的版本钉（当前 Codex CLI 0.169.1）验证关联工作树实施所需的 CLI。
+
+Codex 主模型的实施服务缺省为 `codex`。`secondary_model` 保留原生模型历史值；
+`implementation_provider=token_plan` 使用独立的 `token_plan_implementation_model`（默认 `glm-5.3`，可选 `qwen4-max`）。solo 停用独立实施控件；切回、取消及保存/恢复保留对应草稿。
 即使当前评审是自定义 API 或 Qoder，选择 GLM 后仍可编辑 Token Plan Responses 地址/密钥，
 它与 Token Plan 评审绑定同一个 profile 草稿，凭证内容不从后台读回 UI。旧自定义 API
 凭证不默认为 Token Plan 凭证。允许保存未填密钥草稿，本地检查对当前启用的实施路径
@@ -105,7 +106,7 @@ Qoder 实施选择保存为 `implementation_provider=qoder`，固定显示逻辑
 GLM-5.3），不显示地址/密钥输入，使用已有 Qoder 订阅登录，要求 qodercli 1.1.77。
 保留原生 secondary_model，独立于评审服务及 Kimi 模型；不要求 Token Plan URL/密钥。
 检查配置只验证 CLI 存在及版本，不发付费模型请求、不验证登录或实施。solo 停用独立
-实施，Claude 仍使用自身代理。CLI 身份不证明后端路由；工具限制不提供文件/网络硬隔离。
+实施。CLI 身份不证明后端路由；工具限制不提供文件/网络硬隔离。
 
 Token Plan 独立实施字段为 `codex_relay.token_plan_implementation_model`，仅允许
 `glm-5.3` / `qwen4-max`；缺失或 null 默认 GLM，空串、大小写变体、preview 和未知值拒绝，

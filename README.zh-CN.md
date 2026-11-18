@@ -222,14 +222,14 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
   --scale 'single user local tool' --out /private/tmp/qwen-codex-review
 ```
 
-持久选择使用 `codex_relay.qwen_executor=codex` 和独立的
+Codex 主导评审用 `codex_relay.qwen_executor=codex` 持久选择执行器，Claude 主导评审用 `plugins.qwen.claude_executor=codex`；另设独立的
 `plugins.qwen.responses_base_url`；不改写原 Anthropic `base_url`，复用模型及凭证路径。
 Responses 只读入口的版本钉包含 Codex CLI 0.160.0、0.163.0、0.169.1，显式使用 medium。其他 CLI 版本预检停止。
 该路径记录 `actual_model=null`、`model_evidence=requested_only`，不证明服务端实际模型身份。
 0.160.0 历史正式 plan 与真实 diff 已通过；0.163.0 于2026-10-20通过合成 plan 两阶段验收，未验证新版业务 diff 或用户级入口全流程；大增量仍可能长时间无输出，900/1800秒仅为本次通过的预算。
-macOS 设置窗口固定显示各组合的执行器，不可选择；CLI 仍支持显式选择执行器。详见[验证记录与边界](docs/COMPATIBILITY.md)。
+详见[验证记录与边界](docs/COMPATIBILITY.md)。
 
-AIAnti 设置窗口固定执行器：Codex→API 使用 Codex CLI，Claude→API 使用 Claude Code CLI，Claude→Codex 使用 Codex CLI。旧 Codex API 执行器配置会生成待保存草稿，保存后才能检测。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，不推导或替换域名；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。合成检测使用相同可配置预算（默认总时间1800秒、空闲900秒），idle可能先终止。API输出仍限8MiB、Qoder仍限2MiB；正式runner外围为总时间+60秒，界面3700秒覆盖最大3600+60并保留取消。极慢本地准备仍可能触发外围预算。
+Claude 为主模型且 Qwen 为首选或回退时，AIAnti 设置窗口可选择 Anthropic（Claude Code CLI）或 Responses（Codex CLI）。Codex 主导的 API 评审使用 Responses。Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独选择 Claude Code 实施代理或指定 Codex 模型 ID。旧 Codex API 执行器配置会生成待保存草稿，保存后才能检测。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，界面仅显示当前有效协议地址，不推导或替换域名；使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。合成检测使用相同可配置预算（默认总时间1800秒、空闲900秒），idle可能先终止。API输出仍限8MiB、Qoder仍限2MiB；正式runner外围为总时间+60秒，界面3700秒覆盖最大3600+60并保留取消。极慢本地准备仍可能触发外围预算。
 
 ## 配置
 

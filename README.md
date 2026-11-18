@@ -281,15 +281,15 @@ python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
   --scale 'single user local tool' --out /private/tmp/qwen-codex-review
 ```
 
-Persist the selection with `codex_relay.qwen_executor=codex` and the separate
+Persist the selection with `codex_relay.qwen_executor=codex` for Codex-led review or `plugins.qwen.claude_executor=codex` for Claude-led review, and configure the separate
 `plugins.qwen.responses_base_url`. The Anthropic `base_url` stays separate; model and
 credential paths are reused. The read-only Responses executor pins Codex CLI 0.160.0, 0.163.0, and 0.169.1 and
 explicitly requests medium effort. Other CLI versions stop at preflight. It records
 `actual_model=null` and `model_evidence=requested_only`, not proven serving-model identity.
 Historical 0.160.0 formal plan and actual diff calls passed; 0.163.0 passed a synthetic two-stage plan check on 2026-10-20. The 0.163.0 business diff and full user-entry workflow are unverified. Large diffs can still remain silent for minutes;
-900/1800 seconds is the tested budget, not a latency guarantee. The macOS settings display a fixed executor for each supported combination; the CLI still supports explicit executor selection. See [verification and limits](docs/COMPATIBILITY.md).
+900/1800 seconds is the tested budget, not a latency guarantee. See [verification and limits](docs/COMPATIBILITY.md).
 
-AIAnti settings use Codex CLI for Codex-led API reviews, Claude Code CLI for Claude-led API reviews, and Codex CLI for Claude-to-Codex reviews. The executor field is disabled. Legacy Codex API executor changes are staged and require an explicit save before checks can run. Anthropic and Responses URLs are stored independently, with only the active protocol shown. Codex checks confirm the requested model only; the server's actual model remains unknown. Synthetic checks use the same configurable budgets (default 1800 seconds total, 900 idle); idle can terminate first. API output remains capped at 8 MiB and Qoder at 2 MiB. Formal runners get total+60 seconds for cleanup; the app allows 3700 seconds to cover the maximum 3600+60, with cancellation. Extremely slow local preparation can still exceed the outer budget. DeepSeek's full workflow remains unverified.
+AIAnti settings let Claude-led workflows choose Anthropic (Claude Code CLI) or Responses (Codex CLI) when Qwen is a primary or fallback review channel. Codex-led API reviews use Responses. For Claude-to-Codex reviews, select a catalog model or enter a custom review model ID. Claude-led implementation can use the Claude Code agent or Codex with its own model ID. Legacy Codex API executor changes are staged and require an explicit save before checks can run. Anthropic and Responses URLs are stored independently, with only the active protocol shown. Codex checks confirm the requested model only; the server's actual model remains unknown. Synthetic checks use the same configurable budgets (default 1800 seconds total, 900 idle); idle can terminate first. API output remains capped at 8 MiB and Qoder at 2 MiB. Formal runners get total+60 seconds for cleanup; the app allows 3700 seconds to cover the maximum 3600+60, with cancellation. Extremely slow local preparation can still exceed the outer budget. DeepSeek's full workflow remains unverified.
 
 ## Configuration
 

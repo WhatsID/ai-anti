@@ -8,7 +8,7 @@ struct ModelOption: Identifiable, Equatable {
 enum ModelCatalog {
     static let implementationGLM = "glm-5.3"
     static let claude = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
-    static let codex = ["gpt-6-astra", "gpt-6.1-sol", "gpt-6-sol", "gpt-6-luna"]
+    static let codex = ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]
     static let tokenPlanImplementation = [implementationGLM, "qwen4-max"]
     static let qwen = ["qwen4-max", "qwen3.8-max"]
     static let deepseek = ["deepseek-v4-pro"]
@@ -18,9 +18,9 @@ enum ModelCatalog {
     static func title(_ family: String) -> String {
         switch family { case "codex": return "Codex"; case "qwen": return "Qwen"; case "deepseek": return "DeepSeek"; default: return family }
     }
-    static func options(_ family: String, preserving values: [String], emptyLabel: String? = nil) -> [ModelOption] {
+    static func options(_ family: String, preserving values: [String], emptyLabel: String? = nil, codexModels: [String] = codex) -> [ModelOption] {
         let ids: [String]
-        switch family { case "claude": ids = claude; case "codex": ids = codex; case "qwen": ids = qwen; case "deepseek": ids = deepseek; default: ids = [] }
+        switch family { case "claude": ids = claude; case "codex": ids = codexModels; case "qwen": ids = qwen; case "deepseek": ids = deepseek; default: ids = [] }
         var result: [ModelOption] = emptyLabel.map { [ModelOption(id: "", label: $0)] } ?? []
         result += ids.map { id in
             return ModelOption(id: id, label: id)
