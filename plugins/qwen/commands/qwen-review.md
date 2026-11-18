@@ -11,6 +11,8 @@ description: qwen 插件评审通道:经 anthropic 兼容端点让用户配置�
 
 **执行器选择**：先按下文从命令 symlink 解析 `ai_anti_root`，将其 `adapters/codex/skills/claude-review/scripts` 加入 Python 导入路径，调用 `ai_anti_config.claude_qwen_executor(ai_anti_config.load())`。缺失/null/`claude` 进入下文默认 Anthropic 分支。配置错误停止并报告。`codex` 只执行本节 Responses 分支，独立于 `codex_relay.qwen_executor`。
 
+AIAnti 设置固定使用 Codex Responses。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `plugins.qwen.claude_executor=claude`，Codex 主模型手动设置 `codex_relay.qwen_executor=claude`。再次用 App 保存会将两项写回 `codex`。
+
 Responses 使用 `plugins.qwen.responses_base_url`，缺失则本档不可用。凭证相对路径以 `--repo` 为基准，推荐绝对路径或 `~`。审指定已提交 commit 时停止并说明：本分支仅支持相对 HEAD 的工作树增量，可选默认 Anthropic 路径或其他通道。
 
 ```bash

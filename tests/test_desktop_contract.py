@@ -115,7 +115,7 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('.rotationEffect(.degrees(isExpanded ? 90 : 0))', view)
         self.assertIn('}.frame(height: 26)', view)
         self.assertIn('.transition(.opacity)', view)
-        for title in ('主模型', '协作模式', '评审模型 ID', '评审服务地址', '主账号API密钥', '备用账号API密钥', '评审执行器', '评审模型ID', '实施服务地址'):
+        for title in ('主模型', '协作模式', '评审模型 ID', '评审服务地址（Responses）', '主账号API密钥', '备用账号API密钥', '评审执行器', '评审模型ID', '实施服务地址'):
             self.assertIn('field("' + title + '") {', view)
         self.assertNotIn('field("评审服务")', view)
         self.assertNotIn('field("实施服务")', view)
@@ -126,6 +126,15 @@ class DesktopContract(unittest.TestCase):
         for item in ('Picker("评审服务"', 'SecureField("API密钥"', 'Picker("评审执行器"', 'Picker("评审模型ID"', 'executorMigrationPending', 'selectedCredentialMessage', 'claudeFallbacks'):
             self.assertIn(item, review_body)
             self.assertNotIn(item, implementation_body)
+        self.assertIn('if model.reviewUsesQwen {', review_body)
+        self.assertIn('TextField("评审服务地址（Responses）", text: $model.draft.responsesBaseURL)', review_body)
+        executor_field = review_body.split('field("评审执行器")', 1)[1].split('field("评审模型ID")', 1)[0]
+        self.assertIn('selection: .constant(model.draft.channel)', executor_field)
+        self.assertIn('Text(model.reviewExecutorLabel)', executor_field)
+        self.assertIn('.disabled(true)', executor_field)
+        for removed in ('Picker("Qwen 评审执行器"', 'claudeQwenExecutor', 'Anthropic', '$model.draft.baseURL'):
+            self.assertNotIn(removed, review_body)
+        self.assertIn('Qwen 评审经 Codex CLI · Responses 执行', review_body)
         for item in ('Picker("实施服务"', 'modelPicker("实施模型 ID"', 'TextField("实施服务地址"', 'SecureField("主账号API密钥", text: $model.draft.implementationKeyInput)'):
             self.assertIn(item, implementation_body)
             self.assertNotIn(item, review_body)
@@ -317,7 +326,7 @@ class DesktopContract(unittest.TestCase):
                 {'provider': 'codex', 'model': 'custom/model:tag'},
             )],
         ]
-        for sample in implementation_samples:
+        for sample in [None, [], *implementation_samples]:
             with self.subTest(implementation=sample):
                 try:
                     expected = cli.claude_implementation(sample)
@@ -334,7 +343,7 @@ class DesktopContract(unittest.TestCase):
                 None, 'claude', 'codex', '', ' codex', 'Responses', True, 2, [], {},
             )],
         ]
-        for sample in executor_samples:
+        for sample in [None, [], *executor_samples]:
             with self.subTest(executor=sample):
                 try:
                     expected = cli.claude_qwen_executor(sample)

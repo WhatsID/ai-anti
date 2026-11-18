@@ -17,7 +17,7 @@ import Combine
         let front = FakeClient(), back = FakeClient()
         let model = AppModel(foreground: front, background: back, automatic: false)
         let snapshot: [String: Any] = ["signature": "a", "fingerprints": ["fixture": "a"], "can_restore": true,
-            "values": ["host": "codex", "channel": "qwen", "mode": "rules", "primary_model": "fixture", "qwen_executor": "codex", "credential_present": true, "base_url": "https://fixture.invalid/anthropic", "responses_base_url": "https://fixture.invalid/v1"]]
+            "values": ["host": "codex", "channel": "qwen", "mode": "rules", "primary_model": "fixture", "qwen_executor": "codex", "claude_qwen_executor": "codex", "credential_present": true, "base_url": "https://fixture.invalid/anthropic", "responses_base_url": "https://fixture.invalid/v1"]]
         let checked: [String: Any] = ["signature": "a", "message": "本地检查通过", "checked_at": "fixture", "actual_model": "fake"]
         model.refresh(); assert(model.busy)
         front.complete(.success(snapshot)); assert(model.loaded && !model.busy)
@@ -113,7 +113,8 @@ import Combine
         model.switchReviewFamily("qoder"); assert(model.draft.channel == "qoder" && model.reviewerOptions.first?.id == "kmodel_latest")
         assert(model.reviewerOptions.first?.label == "Kimi-K3.1-Pro")
         model.discard()
-        model.switchHost("claude"); assert(model.primaryOptions.contains { $0.id == "legacy-claude" })
+        model.switchHost("claude")
+        assert(model.primaryOptions.contains(ModelOption(id: "legacy-claude", label: "已有配置：legacy-claude")))
         model.switchReviewFamily("qoder"); assert(model.draft.channel != "qoder")
         model.discard()
         let menuCount = front.requests.count
@@ -140,17 +141,14 @@ import Combine
         apiValues["qwen_executor"] = "codex"; apiValues["responses_base_url"] = "https://fixture.invalid/v1"
         apiSnapshot["values"] = apiValues
         model.refresh(); front.complete(.success(apiSnapshot))
-        assert(model.draft.effectiveExecutor == "codex" && model.draft.activeBaseURL == "https://fixture.invalid/v1")
-        model.draft.activeBaseURL = "https://changed.invalid/v1"
+        assert(model.reviewUsesQwen && model.reviewExecutorLabel == "Codex CLI · Responses")
+        model.draft.responsesBaseURL = "https://changed.invalid/v1"
         assert(model.draft.baseURL == "https://fixture.invalid/anthropic")
-        model.draft.qwenExecutor = "claude"
-        assert(model.draft.activeBaseURL == "https://fixture.invalid/anthropic")
-        model.draft.activeBaseURL = "https://changed.invalid/anthropic"
-        assert(model.draft.responsesBaseURL == "https://changed.invalid/v1")
-        model.discard(); assert(model.draft.activeBaseURL == "https://fixture.invalid/v1")
         model.switchHost("claude")
-        assert(model.draft.effectiveExecutor == "claude" && model.draft.qwenExecutor == "codex")
-        model.discard(); model.save()
+        assert(model.reviewUsesQwen && model.reviewExecutorLabel == "Codex CLI · Responses")
+        assert(model.draft.responsesBaseURL == "https://changed.invalid/v1")
+        model.discard(); assert(model.draft.responsesBaseURL == "https://fixture.invalid/v1")
+        model.save()
         let endpointPost = front.requests.last?["values"] as! [String: Any]
         assert(endpointPost["responses_base_url"] as? String == "https://fixture.invalid/v1")
         assert(endpointPost["qwen_executor"] as? String == "codex")
@@ -209,44 +207,44 @@ import Combine
         let unloaded = AppModel(foreground: unloadedFront, background: FakeClient(), automatic: false)
         unloaded.menuHost("claude"); unloaded.menuMode("force"); unloaded.menuChannel("qwen")
         assert(unloadedFront.requests.isEmpty && !unloaded.dirty)
-        // Fixed executor policy must stage legacy migrations, never silently check the old route.
-        let legacyFront = FakeClient()
-        let legacy = AppModel(foreground: legacyFront, background: FakeClient(), automatic: false)
-        var legacySnapshot = apiSnapshot
-        var legacyValues = apiValues
-        legacyValues["host"] = "codex"; legacyValues["channel"] = "qwen"
-        legacyValues["qwen_executor"] = "claude"
-        legacySnapshot["values"] = legacyValues
-        legacy.refresh(); legacyFront.complete(.success(legacySnapshot))
-        assert(legacy.saved.qwenExecutor == "claude" && legacy.draft.qwenExecutor == "codex" && legacy.dirty,
-               "Legacy Codex route must be staged for explicit save")
-        assert(legacy.draft.activeBaseURL == "https://fixture.invalid/v1")
-        let legacyCount = legacyFront.requests.count
-        legacy.check(); legacy.check(real: true)
-        assert(legacyFront.requests.count == legacyCount, "Unsaved executor migration must block all checks")
-        legacy.discard()
-        assert(legacy.dirty && legacy.draft.qwenExecutor == "codex" && legacy.saved.qwenExecutor == "claude")
-        legacy.save()
-        let migration = legacyFront.requests.last?["values"] as! [String: Any]
-        assert(migration["qwen_executor"] as? String == "codex")
-        assert(migration["base_url"] as? String == "https://fixture.invalid/anthropic")
-        assert(migration["responses_base_url"] as? String == "https://fixture.invalid/v1")
-        legacyFront.complete(.failure(BridgeFailure(message: "migration conflict")))
-        assert(legacy.dirty && legacy.saved.qwenExecutor == "claude")
-        legacyValues["qwen_executor"] = "codex"; legacySnapshot["values"] = legacyValues
-        legacy.save(); legacyFront.complete(.success(legacySnapshot))
-        assert(!legacy.dirty && legacy.saved.qwenExecutor == "codex")
-        legacyValues["host"] = "claude"; legacyValues["channel"] = "qwen"
-        legacyValues["qwen_executor"] = "claude"; legacySnapshot["values"] = legacyValues
-        legacy.refresh(); legacyFront.complete(.success(legacySnapshot))
-        assert(!legacy.dirty && legacy.draft.qwenExecutor == "claude" && legacy.draft.effectiveExecutor == "claude")
-        assert(legacy.draft.activeBaseURL == "https://fixture.invalid/anthropic")
-        legacy.switchHost("codex")
-        assert(legacy.dirty && legacy.draft.qwenExecutor == "codex")
-        legacy.switchHost("claude")
-        assert(legacy.draft.qwenExecutor == "codex" && legacy.draft.effectiveExecutor == "claude")
-        legacy.discard(); assert(!legacy.dirty && legacy.draft.qwenExecutor == "claude")
-        // Missing Qwen endpoints are suggestions in the active protocol draft only.
+        // Legacy migrations require an explicit save before either kind of check.
+        for (host, executorKey) in [("claude", "claude_qwen_executor"), ("codex", "qwen_executor")] {
+            let legacyFront = FakeClient()
+            let legacy = AppModel(foreground: legacyFront, background: FakeClient(), automatic: false)
+            var legacySnapshot = apiSnapshot
+            var legacyValues = apiValues
+            legacyValues["host"] = host; legacyValues["channel"] = "qwen"
+            legacyValues[executorKey] = "claude"
+            legacySnapshot["values"] = legacyValues
+            legacy.refresh(); legacyFront.complete(.success(legacySnapshot))
+            assert(legacy.executorMigrationPending && legacy.dirty)
+            assert(legacy.reviewUsesQwen && legacy.reviewExecutorLabel == "Codex CLI · Responses")
+            assert(legacy.draft.responsesBaseURL == "https://fixture.invalid/v1")
+            let legacyCount = legacyFront.requests.count
+            legacy.check(); legacy.check(real: true)
+            legacy.discard()
+            assert(legacy.dirty && legacy.executorMigrationPending)
+            legacy.check(); legacy.check(real: true)
+            assert(legacyFront.requests.count == legacyCount, "Unsaved executor migration must block all checks")
+            legacy.save()
+            let migration = legacyFront.requests.last?["values"] as! [String: Any]
+            assert(migration["qwen_executor"] as? String == "codex")
+            assert(migration["claude_qwen_executor"] as? String == "codex")
+            assert(migration["base_url"] as? String == "https://fixture.invalid/anthropic")
+            assert(migration["responses_base_url"] as? String == "https://fixture.invalid/v1")
+            legacyFront.complete(.failure(BridgeFailure(message: "migration conflict")))
+            assert(legacy.dirty && legacy.executorMigrationPending)
+            legacyValues[executorKey] = "codex"; legacySnapshot["values"] = legacyValues
+            legacy.save(); legacyFront.complete(.success(legacySnapshot))
+            assert(!legacy.dirty && !legacy.executorMigrationPending)
+            for (real, action) in [(false, "local"), (true, "real")] {
+                let before = legacyFront.requests.count
+                legacy.check(real: real)
+                assert(legacyFront.requests.count == before + 1)
+                assert(legacyFront.requests.last?["action"] as? String == action)
+                legacyFront.complete(.success(checked))
+            }
+        }
         // Service profiles retain independent protocol addresses and all unsaved actions.
         model.refresh(); front.complete(.success(apiSnapshot))
         model.switchReviewFamily("token_plan")
@@ -260,8 +258,8 @@ import Combine
         assert(model.draft.secret.isEmpty)
         model.switchReviewFamily("token_plan")
         assert(model.draft.baseURL == "https://one.invalid/a" && model.draft.responsesBaseURL == "https://one.invalid/r" && model.draft.secret == "one")
-        model.switchHost("claude"); assert(model.draft.activeBaseURL == "https://one.invalid/a")
-        model.switchHost("codex"); assert(model.draft.activeBaseURL == "https://one.invalid/r")
+        model.switchHost("claude"); assert(model.draft.responsesBaseURL == "https://one.invalid/r")
+        model.switchHost("codex"); assert(model.draft.responsesBaseURL == "https://one.invalid/r")
         model.switchReviewFamily("custom_api"); assert(model.draft.secretAction == "clear" && model.draft.baseURL == "https://two.invalid/a")
         model.discard(); assert(!model.dirty)
         var serviceSnapshot = snapshot
@@ -315,9 +313,9 @@ import Combine
         assert(addressModel.draft.baseURL == "https://token-plan.maas.qianwenaiapi.com/apps/anthropic", "Missing Token Plan Anthropic address must receive its default")
         assert(addressModel.saved.baseURL.isEmpty && addressModel.dirty, "Default is an unsaved draft, not a claim about disk")
         addressModel.switchHost("claude")
-        assert(addressModel.draft.activeBaseURL == "https://token-plan.maas.qianwenaiapi.com/apps/anthropic")
+        assert(addressModel.draft.responsesBaseURL == "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1")
         addressModel.switchHost("codex")
-        assert(addressModel.draft.activeBaseURL == "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1")
+        assert(addressModel.draft.responsesBaseURL == "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1")
         missingToken.baseURL = "https://existing.invalid/anthropic"; missingToken.responsesBaseURL = ""
         missingAddressValues["base_url"] = missingToken.baseURL
         missingAddressValues["responses_base_url"] = ""
@@ -427,12 +425,35 @@ import Combine
         claudeValues["claude_channel"] = "codex"
         claudeValues["fallback_channels"] = ["qwen", "same-family"]
         claudeValues["reviewer_model"] = "historical-review"
+        claudeValues["primary_model"] = "opus"
+        claudeValues["claude_model"] = "opus"
         claudeValues["codex_models"] = ModelCatalog.codex
         var claudeSnapshot = apiSnapshot
         claudeSnapshot["values"] = claudeValues
         claude.refresh(); claudeFront.complete(.success(claudeSnapshot))
         assert(claude.draft.claudeImplementationProvider == "claude-agent")
-        assert(claude.draft.claudeQwenExecutor == "claude" && claude.claudeQwenExecutorEnabled)
+        assert(claude.reviewUsesQwen && claude.reviewExecutorLabel == "Codex CLI")
+        let expectedPrimaryOptions = [
+            ModelOption(id: "", label: "不修改（沿用当前设置）"),
+            ModelOption(id: "opus", label: "opus（别名 · 自动跟随最新 Opus）"),
+            ModelOption(id: "sonnet", label: "sonnet（别名 · 自动跟随最新 Sonnet）"),
+            ModelOption(id: "haiku", label: "haiku（别名 · 自动跟随最新 Haiku）"),
+            ModelOption(id: "fable", label: "fable（别名 · 自动跟随最新 Fable）"),
+            ModelOption(id: "claude-fable-5-1", label: "claude-fable-5-1（固定版本）"),
+            ModelOption(id: "claude-opus-5-5", label: "claude-opus-5-5（固定版本）"),
+            ModelOption(id: "claude-sonnet-5-5", label: "claude-sonnet-5-5（固定版本）"),
+            ModelOption(id: "claude-haiku-5-5", label: "claude-haiku-5-5（固定版本）"),
+        ]
+        assert(claude.primaryOptions == expectedPrimaryOptions)
+        claude.draft.primaryModel = "future-claude"
+        assert(claude.primaryOptions.last == ModelOption(id: "future-claude", label: "已有配置：future-claude"))
+        claude.discard()
+        claude.switchHost("codex")
+        assert(claude.primaryOptions.first == expectedPrimaryOptions[0])
+        assert(claude.primaryOptions.dropFirst().prefix(6).map(\.label) == ModelCatalog.codex)
+        claude.switchReviewFamily("qoder")
+        assert(!claude.reviewUsesQwen && claude.reviewExecutorLabel == "Qoder CLI")
+        claude.discard()
         assert(claude.reviewerOptions.contains { $0.id == "gpt-6.2-astra" })
         assert(claude.reviewerOptions.contains { $0.id == "historical-review" })
         claude.draft.reviewerModel = "custom-review"
@@ -442,8 +463,7 @@ import Combine
         claude.save()
         assert(claudeFront.requests.count == requestsBeforeInvalidModel)
         claude.draft.claudeImplementationModel = "custom-implementation"
-        claude.draft.claudeQwenExecutor = "codex"
-        assert(claude.draft.activeBaseURL == "https://fixture.invalid/v1")
+        assert(claude.draft.responsesBaseURL == "https://fixture.invalid/v1")
         assert(claude.draft.channel == "codex" && claude.claudeFallbacks == ["qwen", "same-family"])
         assert(claude.secondaryOptions.contains { $0.id == "gpt-6.2-sol" })
         claude.save()
@@ -459,9 +479,9 @@ import Combine
         claudeSnapshot["values"] = claudeValues
         claudeFront.complete(.success(claudeSnapshot))
         assert(!claude.dirty && claude.saved.reviewerModel == "custom-review" && claude.saved.claudeImplementationModel == "custom-implementation")
-        assert(claude.saved.claudeQwenExecutor == "codex" && claude.claudeFallbacks == ["qwen", "same-family"])
+        assert(!claude.executorMigrationPending && claude.claudeFallbacks == ["qwen", "same-family"])
         claude.draft.mode = "solo"
-        assert(!claude.claudeQwenExecutorEnabled && !claude.draft.implementationModelEnabled)
+        assert(!claude.draft.implementationModelEnabled)
         claude.discard()
         claude.draft.claudeImplementationProvider = "claude-agent"
         claude.save()

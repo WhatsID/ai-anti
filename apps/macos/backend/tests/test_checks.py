@@ -88,10 +88,10 @@ class CheckTests(unittest.TestCase):
         with patch('checks.discover', return_value='/usr/bin/true') as discover:
             checks.local(store, str(ROOT))
         self.assertEqual({call.args[0] for call in discover.call_args_list}, {'codex'})
-        snap = store.read(); v = snap['values']; v['host'] = 'claude'; store.save(v, snap['fingerprints'])
+        snap = store.read(); v = snap['values']; v.update(host='claude', channel='qwen'); store.save(v, snap['fingerprints'])
         with patch('checks.discover', return_value='/usr/bin/true') as discover:
             checks.local(store, str(ROOT))
-        self.assertEqual({call.args[0] for call in discover.call_args_list}, {'claude'})
+        self.assertEqual({call.args[0] for call in discover.call_args_list}, {'claude', 'codex'})
 
     def test_claude_codex_implementation_version_pin(self):
         store = self.api_store('claude')
@@ -118,9 +118,10 @@ class CheckTests(unittest.TestCase):
             checks.local(store, self.root / 'missing')
         snap = store.read()
         store.save(dict(snap['values'], mode='solo'), snap['fingerprints'])
-        with patch('checks.discover', return_value='/usr/bin/true') as discover:
+        with patch('checks.discover', return_value='/usr/bin/true') as discover, patch('checks.check_claude_codex_version') as version_check:
             self.assertIn('停用独立实施', checks.local(store, ROOT)['message'])
-        discover.assert_called_once_with('claude')
+        self.assertEqual({call.args[0] for call in discover.call_args_list}, {'claude', 'codex'})
+        version_check.assert_not_called()
 
     def test_claude_codex_implementation_version_parser_rejects_noise(self):
         store = self.api_store('claude')
@@ -144,9 +145,15 @@ class CheckTests(unittest.TestCase):
         for host, executor in (('codex', 'codex'), ('claude', 'claude'), ('claude', 'codex')):
             store = self.api_store(host)
             data=json.loads(store.paths['ai'].read_text()); data['review'].update(timeout=321,idle_timeout=45)
-            if host == 'claude':
-                data['plugins']['qwen']['claude_executor'] = executor
+            data['plugins']['qwen']['claude_executor'] = 'claude'
+            data['codex_relay']['qwen_executor'] = 'claude'
             atomic(store.paths['ai'],json.dumps(data).encode())
+            if executor == 'codex':
+                snap = store.read()
+                store.save(snap['values'], snap['fingerprints'])
+                with patch('checks.discover', return_value='/usr/bin/true') as discover:
+                    self.assertEqual(checks.local(store, str(ROOT))['state'], 'passed')
+                self.assertEqual({call.args[0] for call in discover.call_args_list}, {host, 'codex'})
             def fake_run(argv, cwd, log, **kwargs):
                 if '--qwen-executor' in argv:
                     self.assertEqual(argv[argv.index('--qwen-executor')+1], executor)
@@ -326,7 +333,7 @@ class CheckTests(unittest.TestCase):
         self.assertIn('未验证登录',value['message'])
     def test_local_qwen_skips_relative_and_uses_global(self):
         store=Store(self.root/'home')
-        atomic(store.paths['ai'],b'{"review":{"channels":["qwen"]},"plugins":{"qwen":{"model":"qwen-fixture","base_url":"https://example.invalid","credential_paths":["project/credentials.json","~/.config/ai-anti/secrets.json"]}}}')
+        atomic(store.paths['ai'],b'{"review":{"channels":["qwen"]},"plugins":{"qwen":{"model":"qwen-fixture","claude_executor":"codex","responses_base_url":"https://example.invalid/v1","credential_paths":["project/credentials.json","~/.config/ai-anti/secrets.json"]}}}')
         atomic(store.paths['secrets'],b'{"tokenplan":{"value":"fake-global"}}')
         with patch('checks.discover',return_value='/usr/bin/true'):
             value=checks.local(store,str(ROOT))

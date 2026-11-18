@@ -38,7 +38,7 @@ enum SettingsSummary {
         case "codex": model = draft.reviewerModel.isEmpty ? "CLI 默认" : draft.reviewerModel
         default: model = draft.qwenModel.isEmpty ? "未指定" : draft.qwenModel
         }
-        let protocolDetail = draft.channel == "qwen" ? " · " + draft.executorProtocol : ""
+        let protocolDetail = draft.channel == "qwen" ? " · Responses" : ""
         return "评审服务：" + ReviewService.title(draft.service) + protocolDetail + " / " + model + (draft.mode == "solo" ? "（solo 已停用）" : "")
     }
     static func implementation(_ draft: Draft) -> String {
@@ -220,9 +220,9 @@ struct SettingsView: View {
                         } else {
                             modelPicker("评审模型", selection: model.draft.channel == "qoder" ? .constant("kmodel_latest") : $model.draft.qwenModel, options: model.reviewerOptions).disabled(isSolo || model.draft.channel == "qoder")
                         }
-                        if model.draft.channel == "qwen" || model.showsClaudeQwenExecutor {
-                            field("评审服务地址") {
-                                TextField("评审服务地址（" + model.draft.executorProtocol + "）", text: $model.draft.activeBaseURL).disabled(isSolo)
+                        if model.reviewUsesQwen {
+                            field("评审服务地址（Responses）") {
+                                TextField("评审服务地址（Responses）", text: $model.draft.responsesBaseURL).disabled(isSolo)
                             }
                         }
                         if model.draft.channel == "qwen" {
@@ -240,25 +240,21 @@ struct SettingsView: View {
                         }
                         if model.draft.host == "claude" { note("Qoder 暂不支持 Claude 主模型。") }
                         field("评审执行器") {
-                            if model.showsClaudeQwenExecutor {
-                                Picker("Qwen 评审执行器", selection: $model.draft.claudeQwenExecutor) {
-                                    Text("Qwen · Claude Code CLI · Anthropic").tag("claude")
-                                    Text("Qwen · Codex CLI · Responses").tag("codex")
-                                }.disabled(!model.claudeQwenExecutorEnabled)
-                            } else {
-                                Picker("评审执行器", selection: .constant(model.draft.channel)) {
-                                    Text(model.draft.channel == "qoder" ? "Qoder CLI" : model.draft.channel == "codex" ? "Codex CLI" : model.draft.effectiveExecutor == "codex" ? "Codex CLI · Responses" : "Claude Code CLI · Anthropic").tag(model.draft.channel)
-                                }.disabled(true)
-                            }
+                            Picker("评审执行器", selection: .constant(model.draft.channel)) {
+                                Text(model.reviewExecutorLabel).tag(model.draft.channel)
+                            }.disabled(true)
                         }
                         field("评审模型ID") {
                             Picker("评审模型ID", selection: .constant(reviewModelID)) {
                                 Text(reviewModelID).tag(reviewModelID)
                             }.disabled(true)
                         }
-                        if model.executorMigrationPending { note("保存后 Codex 主模型的 API 评审改用 Responses 地址，请确认服务支持。") }
+                        if model.executorMigrationPending { note("保存后 Qwen 评审改用 Responses 地址") }
                         if model.draft.host == "claude" {
                             note("已配置回退列表：" + (model.claudeFallbacks.isEmpty ? "无" : model.claudeFallbacks.joined(separator: " → ")))
+                            if model.draft.channel == "codex" && model.claudeFallbacks.contains("qwen") {
+                                note("Qwen 评审经 Codex CLI · Responses 执行")
+                            }
                         } else {
                             note("Codex 评审失败即停止，不自动回退。")
                         }

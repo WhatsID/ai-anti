@@ -50,7 +50,7 @@ class NamespaceTests(unittest.TestCase):
             self.assertEqual(d['model_services'][k]['value'],'fixture-'+k)
         for k,p in c['model_services']['profiles'].items():
             self.assertEqual(p['credential_key'],'model_services.'+k+'.value')
-        self.assertEqual(c['plugins']['qwen'], dict(c['model_services']['profiles']['token_plan'], claude_executor='claude'))
+        self.assertEqual(c['plugins']['qwen'], dict(c['model_services']['profiles']['token_plan'], claude_executor='codex'))
         self.assertEqual(c['token_plan_accounts']['backup']['credential_key'],'model_services.token_plan_backup.value')
         self.assertNotIn('fixture-',json.dumps(state))
         self.assertEqual(self.store.paths['secrets'].stat().st_mode & 0o777,0o600)

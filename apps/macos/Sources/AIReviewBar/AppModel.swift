@@ -77,15 +77,7 @@ struct Draft: Equatable {
     var mode = "rules"
     var baseURL: String { get { profile.baseURL } set { profile.baseURL = newValue } }
     var responsesBaseURL: String { get { profile.responsesBaseURL } set { profile.responsesBaseURL = newValue } }
-    var qwenExecutor = "claude"
-    var claudeQwenExecutor = "claude"
-    var effectiveExecutor: String { host == "codex" ? qwenExecutor : claudeQwenExecutor }
-    var executorProtocol: String { effectiveExecutor == "codex" ? "Responses" : "Anthropic" }
     static func validModelID(_ id: String) -> Bool { !id.isEmpty && !id.unicodeScalars.contains { $0.properties.isWhitespace } }
-    var activeBaseURL: String {
-        get { effectiveExecutor == "codex" ? responsesBaseURL : baseURL }
-        set { if effectiveExecutor == "codex" { responsesBaseURL = newValue } else { baseURL = newValue } }
-    }
     var secret: String { get { profile.secret } set { profile.secret = newValue } }
     // A display-only marker keeps stored credentials out of the UI process.
     static let credentialMask = String(repeating: "•", count: 50)
@@ -114,9 +106,9 @@ struct Draft: Equatable {
         return result
     }
     var dictionary: [String: Any] {
-        ["token_plan_accounts": accountDictionary, "model_services": serviceDictionary, "host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "token_plan_implementation_model": tokenPlanImplementationModel, "implementation_provider": implementationProvider, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": qwenExecutor,
+        ["token_plan_accounts": accountDictionary, "model_services": serviceDictionary, "host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "token_plan_implementation_model": tokenPlanImplementationModel, "implementation_provider": implementationProvider, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": "codex",
          "claude_implementation_provider": claudeImplementationProvider, "claude_implementation_model": claudeImplementationModel,
-         "claude_qwen_executor": claudeQwenExecutor, "codex_models": codexModels]
+         "claude_qwen_executor": "codex", "codex_models": codexModels]
     }
 }
 
@@ -142,13 +134,13 @@ struct Draft: Equatable {
     }
     @Published var canRestore = false
     @Published var fallbacks: [String] = []
+    @Published private(set) var executorMigrationPending = false
     @Published var sources: [String: String] = [:]
     @Published var elapsed = 0
     @Published var checking = false
     private var fingerprints: [String: Any] = [:]
     private var signature = ""
     private var checkSignature: String?
-    private var channels: [String: String] = [:]
     private var watching: Timer?
     private var menuSaving = false
     private var defaults: [String: String] = [:]
@@ -168,19 +160,21 @@ struct Draft: Equatable {
         hosts[draft.host] = HostDraft(primaryModel: draft.primaryModel, channel: draft.channel)
         return hosts
     }
-    var dirty: Bool { draft != saved || (loaded && currentHosts != savedHosts) }
-    var executorMigrationPending: Bool { saved.qwenExecutor != "codex" && draft.qwenExecutor == "codex" }
-    private func normalizeExecutorDraft() {
-        if draft.host == "codex" && draft.channel == "qwen" { draft.qwenExecutor = "codex" }
-    }
-    private func resetDrafts() { draft = saved; hostDrafts = savedHosts; normalizeExecutorDraft() }
+    var dirty: Bool { executorMigrationPending || draft != saved || (loaded && currentHosts != savedHosts) }
+    private func resetDrafts() { draft = saved; hostDrafts = savedHosts }
     var claudeFallbacks: [String] {
-        ([channels["claude"] ?? "codex"] + fallbacks).filter { $0 != draft.channel }
+        ([savedHosts["claude"]?.channel ?? "codex"] + fallbacks).filter { $0 != draft.channel }
     }
-    var showsClaudeQwenExecutor: Bool {
-        draft.host == "claude" && (draft.channel == "qwen" || claudeFallbacks.contains("qwen"))
+    var reviewUsesQwen: Bool {
+        draft.channel == "qwen" || (draft.host == "claude" && claudeFallbacks.contains("qwen"))
     }
-    var claudeQwenExecutorEnabled: Bool { showsClaudeQwenExecutor && draft.mode != "solo" }
+    var reviewExecutorLabel: String {
+        switch draft.channel {
+        case "qwen": return "Codex CLI · Responses"
+        case "qoder": return "Qoder CLI"
+        default: return "Codex CLI"
+        }
+    }
     var reviewFamily: String { draft.service }
     var savedReviewFamily: String { saved.service }
     var title: String {
@@ -189,13 +183,13 @@ struct Draft: Equatable {
         switch saved.channel {
         case "codex": detail = saved.reviewerModel.isEmpty ? "CLI 默认" : saved.reviewerModel
         case "qoder": detail = "Kimi-K3.1-Pro"
-        case "qwen": detail = saved.executorProtocol + " · " + saved.qwenModel
+        case "qwen": detail = "Responses · " + saved.qwenModel
         default: detail = saved.qwenModel
         }
         return "\(saved.host == "claude" ? "Claude" : "Codex") → \(service) · \(detail)"
     }
     var primaryOptions: [ModelOption] {
-        ModelCatalog.options(draft.host, preserving: [defaults[draft.host] ?? "", draft.host == saved.host ? saved.primaryModel : "", draft.primaryModel], emptyLabel: "保留当前默认值", codexModels: draft.codexModels)
+        ModelCatalog.options(draft.host, preserving: [defaults[draft.host] ?? "", draft.host == saved.host ? saved.primaryModel : "", draft.primaryModel], emptyLabel: "不修改（沿用当前设置）", codexModels: draft.codexModels)
     }
     var secondaryOptions: [ModelOption] {
         if draft.host == "claude" {
@@ -226,7 +220,6 @@ struct Draft: Equatable {
         guard ReviewService.api.contains(service) || (service == "qoder" && draft.host == "codex") || (service == "codex" && draft.host == "claude") else { return }
         if ReviewService.api.contains(service) { draft.activeAPI = service; draft.channel = "qwen" }
         else { draft.channel = service }
-        normalizeExecutorDraft()
         status = "未检测（服务已变化）"; checkSignature = nil
     }
     let modes = [("solo", "独立完成"), ("auto", "自动判断"), ("rules", "按规模评审"), ("force", "始终评审")]
@@ -329,11 +322,11 @@ struct Draft: Equatable {
                 }
             }
         }
-        d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.tokenPlanImplementationModel = v["token_plan_implementation_model"] as? String ?? ModelCatalog.implementationGLM; d.implementationProvider = v["implementation_provider"] as? String ?? "codex"; d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url"); d.qwenExecutor = v["qwen_executor"] as? String ?? "claude"
+        d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.tokenPlanImplementationModel = v["token_plan_implementation_model"] as? String ?? ModelCatalog.implementationGLM; d.implementationProvider = v["implementation_provider"] as? String ?? "codex"; d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url")
         d.claudeImplementationProvider = v["claude_implementation_provider"] as? String ?? "claude-agent"
         d.claudeImplementationModel = text("claude_implementation_model")
-        d.claudeQwenExecutor = v["claude_qwen_executor"] as? String ?? "claude"
         d.codexModels = v["codex_models"] as? [String] ?? ModelCatalog.codex
+        executorMigrationPending = text("qwen_executor") == "claude" || text("claude_qwen_executor") == "claude"
         saved = d; draft = d; loaded = true
         // Legacy configurations may only contain the endpoint for one host.
         // Suggest missing Token Plan defaults in the draft; keep the disk snapshot intact.
@@ -343,8 +336,7 @@ struct Draft: Equatable {
             if token.responsesBaseURL.isEmpty { token.responsesBaseURL = defaults.responsesBaseURL }
             draft.profiles["token_plan"] = token
         }
-        normalizeExecutorDraft()
-        channels = ["claude": text("claude_channel"), "codex": text("codex_channel")]
+        let channels = ["claude": text("claude_channel"), "codex": text("codex_channel")]
         defaults = ["claude": text("claude_model"), "codex": text("codex_model")]
         savedHosts = [:]
         for host in ["claude", "codex"] {
@@ -363,7 +355,6 @@ struct Draft: Equatable {
     }
     func refresh() { operation(["action": "load"]) }
     func save() {
-        normalizeExecutorDraft()
         if draft.claudeImplementationProvider == "codex" && !Draft.validModelID(draft.claudeImplementationModel) {
             message = "Claude 的 Codex 实施模型 ID 必须为非空且不含空白的字符串"
             return
@@ -402,13 +393,12 @@ struct Draft: Equatable {
         hostDrafts = currentHosts
         guard let target = hostDrafts[host] else { return }
         draft.host = host; draft.primaryModel = target.primaryModel; draft.channel = target.channel
-        normalizeExecutorDraft()
     }
     func menuHost(_ host: String) {
         guard !busy, loaded, !dirty else { message = "设置草稿尚未保存或配置尚未读取、忙碌"; return }
         switchHost(host)
         guard dirty, draft.host == host else { return }
-        if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.activeBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
+        if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.responsesBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
             message = "请在设置中完成所选服务的地址、模型与认证后保存"; return
         }
         menuSaving = true; save()
@@ -417,7 +407,7 @@ struct Draft: Equatable {
         guard !busy, loaded, !dirty else { message = "设置草稿尚未保存或配置忙碌"; return }
         switchReviewFamily(family)
         guard dirty else { return }
-        if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.activeBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
+        if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.responsesBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
             message = "请在设置中完成所选服务的地址、模型与认证后保存"; return
         }
         menuSaving = true; save()

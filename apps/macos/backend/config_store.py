@@ -334,8 +334,9 @@ class Store:
                 profiles = services.validate(profiles, endpoint, model, self.credential_path, StoreError)
                 active_profile = profiles['profiles'][profiles['active_api']]
             values = dict(values, qwen_model=active_profile['model'], base_url=active_profile['base_url'], responses_base_url=active_profile['responses_base_url'])
-        executor = executor_for('codex', values, ai)
-        claude_executor = executor_for('claude', values, ai)
+        # Legacy executor fields still have to be valid even though saves fix both routes.
+        executor_for('codex', values, ai)
+        executor_for('claude', values, ai)
         stored_provider, stored_model = claude_implementation(ai)
         claude_provider = values.get('claude_implementation_provider', stored_provider)
         if claude_provider not in ('claude-agent', 'codex'):
@@ -366,16 +367,16 @@ class Store:
             route = fields.get('channel', original_channels[h])
             if 'channel' in fields and route not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder')):
                 raise StoreError('支持 Claude→Codex、Claude→API、Codex→API/Qoder')
-            if route == 'qwen' and (h == host or 'channel' in fields):
-                model(values['qwen_model'])
-                active = 'responses_base_url' if executor_for(h, values, ai) == 'codex' else 'base_url'
-                if not urls[active]:
-                    raise StoreError('当前 API 执行器的服务地址不能为空')
             if 'channel' in fields and route != original_channels[h]:
                 if h == 'claude':
                     review['channels'] = [route] + [c for c in channels if c != route]
                 else:
                     relay['review_channel'] = route
+        if not urls['responses_base_url'] and ('qwen' in review.get('channels', channels) or relay.get('review_channel') == 'qwen'):
+            raise StoreError('Qwen 评审使用 Responses，请填写评审服务地址（Responses）')
+        for h, fields in updates.items():
+            if fields.get('channel', original_channels[h]) == 'qwen' and (h == host or 'channel' in fields):
+                model(values['qwen_model'])
         if values['reviewer_model']:
             review['codex_model'] = values['reviewer_model']
         else:
@@ -389,9 +390,8 @@ class Store:
         section(ai, 'desktop')['primary_host'] = host
         qwen['model'] = values['qwen_model']
         qwen.update(urls)
-        relay['qwen_executor'] = executor
-        if 'claude_qwen_executor' in values:
-            qwen['claude_executor'] = claude_executor
+        relay['qwen_executor'] = 'codex'
+        qwen['claude_executor'] = 'codex'
         paths = qwen.get('credential_paths', ['~/.config/ai-anti/secrets.json'])
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             raise StoreError('凭证路径列表无效')

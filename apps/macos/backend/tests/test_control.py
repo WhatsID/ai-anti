@@ -49,7 +49,7 @@ class StoreTests(unittest.TestCase):
         saved = self.save(claude_implementation_model='custom-implementation', claude_qwen_executor='claude')
         written = json.loads(self.store.raw('ai'))
         self.assertEqual(written['claude_relay']['implementation'], dict(route, model='custom-implementation'))
-        self.assertEqual(written['plugins']['qwen']['claude_executor'], 'claude')
+        self.assertEqual(written['plugins']['qwen']['claude_executor'], 'codex')
         self.assertEqual(saved['values']['reviewer_model'], 'gpt-6.2-astra')
         restored = self.store.restore(saved['fingerprints'])
         self.assertEqual(self.store.raw('ai'), before)
@@ -58,12 +58,12 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(self.save(claude_implementation_provider='claude-agent')['values']['claude_implementation_model'], '')
         self.assertNotIn('claude_relay', json.loads(self.store.raw('ai')))
 
-    def test_claude_legacy_save_preserves_executor_implementation_and_channels(self):
+    def test_claude_legacy_save_preserves_implementation_and_channels(self):
         channels = ['codex', 'qwen', 'same-family']
         route = {'provider': 'codex', 'model': 'saved-model', 'future': 9}
         self.write('ai', {'review': {'channels': channels},
                           'claude_relay': {'implementation': route, 'other': 5},
-                          'plugins': {'qwen': {'claude_executor': 'codex'}}})
+                          'plugins': {'qwen': {'claude_executor': 'codex', 'responses_base_url': 'https://fixture.invalid/v1'}}})
         snap = self.snapshot()
         legacy = {k: v for k, v in snap['values'].items() if k not in (
             'claude_implementation_provider', 'claude_implementation_model', 'claude_qwen_executor', 'codex_models')}
@@ -93,23 +93,71 @@ class StoreTests(unittest.TestCase):
                 self.save(**fields)
         self.assertFalse(self.store.paths['ai'].exists())
 
-    def test_batch_qwen_addresses_use_each_host_executor(self):
-        for claude_executor, codex_executor in (('claude', 'codex'), ('codex', 'claude')):
-            for host in ('claude', 'codex'):
-                with self.subTest(host=host, claude_executor=claude_executor):
-                    self.write('ai', {'plugins': {'qwen': {'claude_executor': claude_executor}},
-                                      'codex_relay': {'qwen_executor': codex_executor}})
-                    values = self.values(host=host, channel='qwen', qwen_model='qwen-fixture',
-                                         host_updates={'claude': {'channel': 'qwen'}, 'codex': {'channel': 'qwen'}},
-                                         base_url='https://fixture.invalid/anthropic',
-                                         responses_base_url='https://fixture.invalid/v1',
-                                         claude_qwen_executor=claude_executor, qwen_executor=codex_executor)
-                    legacy = {k: v for k, v in values.items() if k not in ('claude_qwen_executor', 'qwen_executor')}
-                    for payload in (values, legacy):
-                        self.store.outputs(payload, '')
-                        for address in ('base_url', 'responses_base_url'):
-                            with self.assertRaisesRegex(StoreError, '服务地址不能为空'):
-                                self.store.outputs(dict(payload, **{address: ''}), '')
+    def test_save_forces_both_qwen_executors_preserving_channels_and_empty_model(self):
+        channels = ['codex', 'qwen', 'same-family']
+        for host in ('claude', 'codex'):
+            with self.subTest(host=host):
+                self.write('claude', b'{ "model": "opus", "custom": true }\n')
+                self.write('codex', b'# keep comment\nmodel = "existing-codex"\n')
+                self.write('ai', {'review': {'channels': channels}, 'desktop': {'primary_host': host},
+                                  'codex_relay': {'review_channel': 'qwen', 'qwen_executor': 'claude'},
+                                  'plugins': {'qwen': {'claude_executor': 'claude', 'model': 'fixture-api',
+                                                       'responses_base_url': 'https://fixture.invalid/v1'}}})
+                before = {key: self.store.raw(key) for key in ('claude', 'codex')}
+                self.save(primary_model='')
+                config = json.loads(self.store.raw('ai'))
+                self.assertEqual(config['plugins']['qwen']['claude_executor'], 'codex')
+                self.assertEqual(config['codex_relay']['qwen_executor'], 'codex')
+                self.assertEqual(config['review']['channels'], channels)
+                self.assertEqual(config['codex_relay']['review_channel'], 'qwen')
+                self.assertEqual({key: self.store.raw(key) for key in before}, before)
+
+    def test_qwen_fallback_requires_responses_for_model_only_save(self):
+        channels = ['codex', 'qwen']
+        self.write('ai', {'review': {'channels': channels},
+                          'plugins': {'qwen': {'claude_executor': 'claude', 'model': 'fixture-api',
+                                               'base_url': 'https://fixture.invalid/anthropic'}}})
+        self.write('claude', b'{ "model": "opus" }\n')
+        before = {key: self.store.raw(key) for key in self.store.paths}
+        with self.assertRaisesRegex(StoreError, r'Qwen 评审使用 Responses，请填写评审服务地址（Responses）'):
+            self.save(primary_model='sonnet')
+        self.assertEqual({key: self.store.raw(key) for key in before}, before)
+        self.assertFalse(self.store.desktop.exists())
+        self.save(primary_model='sonnet', responses_base_url='https://fixture.invalid/v1')
+        self.assertEqual(json.loads(self.store.raw('ai'))['review']['channels'], channels)
+        self.assertEqual(json.loads(self.store.raw('claude'))['model'], 'sonnet')
+
+    def test_legacy_qwen_save_uses_responses_with_explicit_or_omitted_executor(self):
+        for explicit in (True, False):
+            for address in ('responses_base_url', 'base_url'):
+                with self.subTest(explicit=explicit, address=address):
+                    self.write('ai', {'review': {'channels': ['qwen', 'codex']},
+                                      'plugins': {'qwen': {'claude_executor': 'claude', 'model': 'fixture-api',
+                                                           address: 'https://fixture.invalid/api'}}})
+                    before = self.store.raw('ai')
+                    snap = self.snapshot()
+                    values = dict(snap['values'])
+                    if not explicit:
+                        values.pop('claude_qwen_executor')
+                        values.pop('qwen_executor')
+                    if address == 'responses_base_url':
+                        saved = self.store.save(values, snap['fingerprints'])
+                        self.assertEqual(saved['values']['claude_qwen_executor'], 'codex')
+                        self.assertEqual(saved['values']['qwen_executor'], 'codex')
+                    else:
+                        with self.assertRaisesRegex(StoreError, '请填写评审服务地址'):
+                            self.store.save(values, snap['fingerprints'])
+                        self.assertEqual(self.store.raw('ai'), before)
+
+    def test_batch_qwen_address_validation_uses_updated_channels(self):
+        self.write('ai', {'codex_relay': {'review_channel': 'qwen'},
+                          'plugins': {'qwen': {'model': 'fixture-api'}}})
+        with self.assertRaisesRegex(StoreError, '请填写评审服务地址'):
+            self.save(primary_model='sonnet')
+        self.save(primary_model='sonnet', host_updates={'codex': {'channel': 'qoder'}})
+        with self.assertRaisesRegex(StoreError, '请填写评审服务地址'):
+            self.save(host_updates={'codex': {'channel': 'qwen'}})
+
     def test_implementation_provider_roundtrip_and_restore_validation(self):
         self.assertEqual(self.snapshot()['values']['implementation_provider'], 'codex')
         for bad in ('custom_api', '', [], {}, 1, True):
@@ -148,7 +196,8 @@ class StoreTests(unittest.TestCase):
     def test_batch_hosts_dispatch_restore_and_unchanged_bytes(self):
         self.write('claude', b'{ "model": "claude-old", "custom": 1 }\n')
         self.write('codex', b'# keep comment\nmodel = "codex-old"\n')
-        self.write('ai', {'review': {'channels': ['codex', 'same-family', 'qwen']}})
+        self.write('ai', {'review': {'channels': ['codex', 'same-family', 'qwen']},
+                          'plugins': {'qwen': {'responses_base_url': 'https://fixture.invalid/v1'}}})
         before = {k: self.store.raw(k) for k in ('ai', 'claude', 'codex')}
         snap = self.snapshot(); v = snap['values']
         v.update(primary_model='claude-new', host_updates={'claude': {'primary_model': 'claude-new'}, 'codex': {'primary_model': 'codex-new', 'channel': 'qwen'}}, qwen_model='fixture-api', base_url='https://fixture.invalid/anthropic')
@@ -180,7 +229,7 @@ class StoreTests(unittest.TestCase):
         self.save(host='codex', primary_model='another-codex', channel='claude')
         self.assertEqual(self.snapshot()['values']['codex_channel'], 'claude')
         v = self.values(host='claude', channel='same-family', host_updates={'codex': {'channel': 'qwen'}}, qwen_model='fixture-api', qwen_executor='codex', base_url='https://fixture.invalid/anthropic')
-        with self.assertRaisesRegex(StoreError, '不能为空'): self.store.outputs(v, '')
+        with self.assertRaisesRegex(StoreError, '请填写评审服务地址'): self.store.outputs(v, '')
         v['responses_base_url'] = 'https://fixture.invalid/v1'
         self.store.outputs(v, '')
         v['host_updates'] = {'claude': {'channel': 'same-family'}}
@@ -223,12 +272,10 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(outputs['plugins']['qwen']['custom'], 7)
         self.store.restore(reply['fingerprints']); self.assertEqual(self.store.raw('ai'), before)
 
-    def test_codex_only_endpoint_and_effective_host(self):
+    def test_qwen_responses_only_endpoint_for_both_hosts(self):
         v = self.values(host='codex', channel='qwen', qwen_model='qwen-fixture', qwen_executor='codex', responses_base_url='https://example.invalid/v1')
         self.store.outputs(v, '')
         v['host'] = 'claude'
-        with self.assertRaisesRegex(StoreError, '不能为空'): self.store.outputs(v, '')
-        v['base_url'] = 'https://example.invalid/anthropic'
         self.store.outputs(v, '')
 
     def test_endpoint_and_executor_validation(self):
@@ -268,7 +315,7 @@ class StoreTests(unittest.TestCase):
         self.assertNotIn('SENTINEL', json.dumps(value))
     def test_unknown_keys_and_fallback_order_preserved(self):
         self.write('ai', {'custom':{'x':1}, 'review': {'channels':['same-family','codex','qwen'], 'other':2}})
-        self.save(channel='qwen', qwen_model='qwen-fixture', base_url='https://example.invalid/anthropic')
+        self.save(channel='qwen', qwen_model='qwen-fixture', responses_base_url='https://example.invalid/v1')
         value = json.loads(self.store.raw('ai'))
         self.assertEqual(value['custom'], {'x':1})
         self.assertEqual(value['review']['other'], 2)
