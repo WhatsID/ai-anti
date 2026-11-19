@@ -16,6 +16,7 @@ class ConfigError(ValueError):
 # Keys are passed to `claude --model` as one argv element (never a shell), so they
 # must be a value the CLI itself accepts: an alias or a full model name.
 ALIAS = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:-]*')
+EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
 
 
 def config_path():
@@ -90,6 +91,20 @@ def review_limits(data, timeout=None, idle_timeout=None):
                 raise ConfigError('invalid bounded resource limits: ai-anti config review.' + key + ' must be an integer in 1..' + str(maximum))
         values.append(value if override is None else override)
     return tuple(values)
+
+
+def _codex_effort(data, key):
+    value = lookup(data, key)
+    if value is not None and (not isinstance(value, str) or value not in EFFORTS):
+        raise ConfigError('ai-anti config: ' + key + ' must be one of ' + ', '.join(EFFORTS))
+    return value
+
+
+def review_codex_effort(data):
+    """Return the optional Codex effort for Claude-led review."""
+    return _codex_effort(data, 'review.codex_effort')
+
+
 def claude_implementation(data):
     """Return the explicitly selected Claude-led implementation route."""
     key = 'claude_relay.implementation'
@@ -101,7 +116,7 @@ def claude_implementation(data):
     model = value.get('model')
     if not isinstance(model, str) or not model or any(c.isspace() for c in model):
         raise ConfigError('ai-anti config: ' + key + '.model must be a non-empty string without whitespace')
-    return {'provider': 'codex', 'model': model}
+    return {'provider': 'codex', 'model': model, 'effort': _codex_effort(data, key + '.effort')}
 
 
 def claude_qwen_executor(data):

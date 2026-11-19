@@ -91,6 +91,7 @@ model_services（version=1、active_api、固定 token_plan/custom_api profiles�
 ## 独立实施设置
 
 Claude 主模型默认使用 Claude Code 实施代理，也可选择 Codex（指定模型）。评审 ID 写入 `review.codex_model`，实施 ID 写入 `claude_relay.implementation`，两个选择器均支持自定义 ID。切回 Claude Code 实施代理时删除 `claude_relay.implementation`。本地检查按正式入口的版本钉（当前 Codex CLI 0.169.1）验证关联工作树实施所需的 CLI。
+App 暂无思考深度设置，保存时保留手工设置的 `review.codex_effort`，在维持 Codex 实施服务时保存或更换模型也会保留 `claude_relay.implementation.effort`，切离后再换回 Codex 需重设实施深度，本地检查不校验这两个键，App 的真实评审检测也不传思考深度参数。
 
 Codex 主模型的实施服务缺省为 `codex`。`secondary_model` 保留原生模型历史值；
 `implementation_provider=token_plan` 使用独立的 `token_plan_implementation_model`（默认 `glm-5.3`，可选 `qwen4-max`）。solo 停用独立实施控件；切回、取消及保存/恢复保留对应草稿。

@@ -165,27 +165,60 @@ class DesktopContract(unittest.TestCase):
         outer=int(re.search(r'action == "real" \? (\d+)',bridge).group(1))
         self.assertEqual(outer,3700); self.assertGreaterEqual(outer,maximum+60)
 
-    def test_codex_review_executable_model_snippet(self):
+    def test_codex_review_executable_model_and_effort_snippet(self):
         command=(ROOT/'adapters/claude-code/commands/codex-review.md').read_text()
         code=next(x for x in re.findall(r'```python\n(.*?)```',command,re.S) if 'model_args' in x)
-        scratch=self.root/'scratch'; scratch.mkdir(); (scratch/'review_prompt.txt').write_text('synthetic prompt')
-        store=Store(self.root); atomic(store.paths['ai'],b'{"review":{"codex_model":"gpt-6-astra"}}')
-        harness='from pathlib import Path\nreview_inputs=[]\nai_anti_root=Path('+repr(str(ROOT))+')\nscratchpad=Path('+repr(str(scratch))+')\n'+code
+        store=Store(self.root)
         fake=self.root/'codex'; fake.write_text('#!'+sys.executable+'\nimport sys,json\nfor e in [{"type":"thread.started","thread_id":"fixture"},{"type":"turn.started"},{"type":"item.completed","item":{"id":"final","type":"agent_message","text":json.dumps(sys.argv[1:])}},{"type":"turn.completed"}]:print(json.dumps(e))\n'); fake.chmod(0o700)
         env=dict(self.env,PATH=str(self.root)+':/usr/bin:/bin')
-        process=subprocess.run([sys.executable,'-c',harness],env=env,capture_output=True,text=True)
-        self.assertEqual(process.returncode,0,process.stderr)
-        argv=json.loads((scratch/'review_out.txt').read_text()); self.assertEqual(argv[argv.index('--model')+1],'gpt-6-astra')
-        for model in ('', 'x\ny', 4, None):
-            atomic(store.paths['ai'],json.dumps({'review':{'codex_model':model}}).encode())
-            process=subprocess.run([sys.executable,'-c',harness],env=env,capture_output=True,text=True)
-            self.assertNotEqual(process.returncode,0)
-        atomic(store.paths['ai'],b'{}')
-        for output_file in scratch.glob('review*'):
-            if output_file.name != 'review_prompt.txt': output_file.unlink()
-        subprocess.run([sys.executable,'-c',harness],env=env,check=True)
-        self.assertNotIn('--model',json.loads((scratch/'review_out.txt').read_text()))
-        self.assertEqual(json.loads((scratch/'review_out.txt.warnings.json').read_text()), [])
+
+        def invoke(config):
+            case = Path(tempfile.mkdtemp(dir=self.root))
+            (case/'review_prompt.txt').write_text('synthetic prompt')
+            atomic(store.paths['ai'], json.dumps(config).encode())
+            harness = f'from pathlib import Path\nreview_inputs=[]\nai_anti_root=Path({str(ROOT)!r})\nscratchpad=Path({str(case)!r})\n' + code
+            result = subprocess.run([sys.executable, '-c', harness], env=env, capture_output=True, text=True)
+            return result, case
+
+        model_args = ['--model', 'gpt-6-astra']
+        effort_args = ['-c', 'model_reasoning_effort="xhigh"']
+        for config, expected in (
+            ({}, []),
+            ({'review': {'codex_effort': None}}, []),
+            ({'review': {'codex_model': 'gpt-6-astra'}}, model_args),
+            ({'review': {'codex_effort': 'xhigh'}}, effort_args),
+            ({'review': {'codex_model': 'gpt-6-astra', 'codex_effort': 'xhigh'}}, model_args + effort_args),
+        ):
+            with self.subTest(config=config):
+                process, case = invoke(config)
+                self.assertEqual(process.returncode, 0, process.stderr)
+                argv = json.loads((case/'review_out.txt').read_text())
+                self.assertEqual(argv, ['exec', '--json', '--sandbox', 'read-only', *expected, 'synthetic prompt'])
+                self.assertEqual(json.loads((case/'review_out.txt.warnings.json').read_text()), [])
+        for key, invalid_values in (('codex_model', ('', 'x\ny', 4, None)),
+                                    ('codex_effort', ('XHIGH', 'x high', 1, 'minimal'))):
+            for value in invalid_values:
+                with self.subTest(key=key, value=value):
+                    process, case = invoke({'review': {key: value}})
+                    self.assertNotEqual(process.returncode, 0)
+                    self.assertFalse((case/'review_raw.jsonl').exists())
+
+    def test_app_save_preserves_claude_codex_efforts(self):
+        store = Store(self.root)
+        atomic(store.paths['ai'], json.dumps({
+            'review': {'codex_model': 'gpt-6-astra', 'codex_effort': 'xhigh'},
+            'claude_relay': {'implementation': {'provider': 'codex', 'model': 'gpt-6.2-sol', 'effort': 'high'}},
+        }).encode())
+        for updates in ({'primary_model': 'claude-test-primary'},
+                        {'reviewer_model': 'gpt-6.2-astra', 'claude_implementation_model': 'gpt-6.2-astra'}):
+            with self.subTest(updates=updates):
+                state = store.read()
+                saved = store.save(dict(state['values'], **updates), state['fingerprints'])
+                for key, value in updates.items():
+                    self.assertEqual(saved['values'][key], value)
+                config = json.loads(store.raw('ai'))
+                self.assertEqual(config['review']['codex_effort'], 'xhigh')
+                self.assertEqual(config['claude_relay']['implementation']['effort'], 'high')
     def test_qwen_formal_entry_prepare_contract(self):
         # Real parser/preflight/snapshot gates, with fixture HOME and a new output.
         store=Store(self.root)

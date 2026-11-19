@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Claude 主导的 Codex 评审和实施可分别配置思考深度（`review.codex_effort`、`claude_relay.implementation.effort`），缺失或为 `null` 时沿用 CLI 默认。评审汇报传入值，实施 manifest 记录 `requested_effort`。
 - AIAnti 0.3.2（构建号 10）为主模型 ID 的空值标注「不修改（沿用当前设置）」，为 Claude 区分别名与固定版本。Claude 主导的 Codex 评审和实施继续独立配置，支持目录外及自定义 ID。
 - AIAnti 设置窗口对两种主模型的 Qwen 评审统一使用 Codex CLI · Responses。Qwen 为首选或回退时，窗口只显示「评审服务地址（Responses）」。任一主模型的通道含 Qwen 时，保存需要填写 Responses 地址，保存保留通道顺序。发现旧执行器配置时，保存后才能检测。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `plugins.qwen.claude_executor=claude`，Codex 主模型手动设置 `codex_relay.qwen_executor=claude`。再次用 AIAnti 保存会将两项都写回 `codex`。Responses 路径不支持评审已提交的 commit。 检查配置对 Claude 主导的 Codex 实施验证 CLI 版本，真实检测覆盖评审。
 

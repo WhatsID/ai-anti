@@ -303,9 +303,11 @@ silently falling back.
 | Key | Meaning | Default |
 |-----|---------|---------|
 | `review.channels` | Claude-led review channel order only | `["codex", "same-family"]` |
+| `review.codex_effort` | Reasoning effort for Claude-led `/codex-review`, independent of `review.codex_model` | missing/null → Codex CLI default |
 | `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
 | `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
 | `claude_relay.implementation` | Set `{"provider":"codex","model":"gpt-6.2-sol"}` to implement in an isolated worktree (CLI pin 0.169.1, live probe pending) | missing/null → implementer |
+| `claude_relay.implementation.effort` | Reasoning effort for configured Claude-led Codex implementation | missing/null → Codex CLI default |
 | `plugins.qwen.claude_executor` | Claude-led Qwen executor. Set `codex` to use Responses | `claude` |
 | `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
 | `codex_relay.implementation_provider` | Codex-led implementation: native `codex`, Token Plan (`glm-5.3` / `qwen4-max`) or Qoder subscription fixed logical `glm-5.3` | missing/null → `codex` |
@@ -313,6 +315,8 @@ silently falling back.
 | `codex_relay.qwen_executor` | CLI executor for Qwen review | `claude` |
 | `plugins.qwen.responses_base_url` | Separate Responses URL for the Codex executor | none |
 | `plugins.<name>` | Plugin settings, e.g. qwen `model`, `base_url`, `credential_paths` | none |
+
+Both effort keys accept `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` exactly. Invalid values stop the call before Codex starts. Review reports list the effort passed to Codex or indicate the CLI default. Implementation records `requested_effort` in the manifest (`null` for the CLI default).
 
 Credentials live outside the repository, e.g. `~/.config/ai-anti/secrets.json`; plugins only read
 the paths you configure.

@@ -56,6 +56,7 @@ def run(args):
     if selected is None:
         raise ConfigError('claude_relay.implementation must explicitly select codex')
     model = selected['model']
+    effort = selected['effort']
     timeout, idle = review_limits(config, args.timeout, args.idle_timeout)
     prompt_bytes = prompt.read_bytes()
     payload = prompt_bytes.decode('utf-8')
@@ -66,7 +67,8 @@ def run(args):
     saved_prompt.write_bytes(prompt_bytes)
     log = out / 'implementation.jsonl'
     stderr = out / 'implementation.stderr.txt'
-    evidence = dict(provider='codex', requested_model=model, model_evidence='requested_only',
+    evidence = dict(provider='codex', requested_model=model, requested_effort=effort,
+                    model_evidence='requested_only',
                     cli_version=None, prompt_sha256=digest(saved_prompt), workspace=str(workspace),
                     head=head, duration_seconds=0, exit_code=None, log=log.name, log_sha256=None,
                     stderr_log=stderr.name, stderr_sha256=None, warnings=[], status='running',
@@ -86,8 +88,10 @@ def run(args):
         evidence['cli_version'] = version
         if version not in VERSIONS:
             raise RunError('Codex implementation verified only for ' + ', '.join(VERSIONS))
-        argv = [cli, 'exec', '--json', '--sandbox', 'workspace-write', '--model', model,
-                '-C', str(workspace), '--', payload]
+        argv = [cli, 'exec', '--json', '--sandbox', 'workspace-write', '--model', model]
+        if effort is not None:
+            argv += ['-c', 'model_reasoning_effort=' + json.dumps(effort)]
+        argv += ['-C', str(workspace), '--', payload]
         code = execute(argv, workspace, log, timeout, idle, CAP, stderr_log=stderr)
         evidence['exit_code'] = code
         evidence.update(validate(log, code, stderr_log=stderr), status='completed', completed=True)

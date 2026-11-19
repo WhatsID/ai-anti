@@ -5,6 +5,7 @@
       "same-family"
     ],
     "codex_model": "gpt-6-astra",
+    "codex_effort": "xhigh",
     "timeout": 1800,
     "idle_timeout": 900
   },
@@ -18,7 +19,8 @@
     }
   },
   "claude_relay": {
-    "implementation": {"provider": "codex", "model": "gpt-6.2-sol"}
+    "implementation": {"provider": "codex", "model": "gpt-6.2-sol",
+                       "effort": "high"}
   },
   "codex_relay": {
     "review_channel": "claude",

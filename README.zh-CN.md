@@ -241,9 +241,11 @@ Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独
 | 键 | 含义 | 默认 |
 |----|------|------|
 | `review.channels` | 仅 Claude 主导路径的评审通道顺序 | `["codex", "same-family"]` |
+| `review.codex_effort` | Claude 主导 `/codex-review` 的思考深度，可独立于 `review.codex_model` 设置 | 缺失/null → Codex CLI 默认 |
 | `defaults.deployment_scale` | 项目未声明时传给评审方的部署规模 | 未设置 → 评审提示写明「未声明部署规模」 |
 | `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
 | `claude_relay.implementation` | Claude 主导时设为 `{"provider":"codex","model":"gpt-6.2-sol"}`，在隔离工作树固定模型实施（CLI 钉 0.169.1，真实探针待验） | 缺失/null → implementer |
+| `claude_relay.implementation.effort` | Claude 主导时按配置调用 Codex 实施的思考深度 | 缺失/null → Codex CLI 默认 |
 | `plugins.qwen.claude_executor` | Claude 主导的 Qwen 执行器，可显式选 `codex` 走 Responses | `claude` |
 | `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
 | `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅固定逻辑 `glm-5.3` | 缺失/null → `codex` |
@@ -251,6 +253,8 @@ Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独
 | `codex_relay.qwen_executor` | Qwen 评审的 CLI 执行器 | `claude` |
 | `plugins.qwen.responses_base_url` | Codex 执行器独立的 Responses 地址 | 无 |
 | `plugins.<name>` | 插件配置，如 qwen 的 `model`、`base_url`、`credential_paths` | 无 |
+
+两个思考深度键仅接受 `low`、`medium`、`high`、`xhigh`、`max`、`ultra`，非法值会在启动 Codex 前报错。评审汇报注明传入值或「CLI 默认」，实施 manifest 记录 `requested_effort`（沿用 CLI 默认时为 `null`）。
 
 凭证放在仓库之外，例如 `~/.config/ai-anti/secrets.json`；插件只读取你配置的路径。
 

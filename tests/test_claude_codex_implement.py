@@ -12,10 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / 'adapters/claude-code/scripts/codex_implement.py'
 sys.path.insert(0, str(ROOT / 'adapters/codex/skills/claude-review/scripts'))
 from ai_anti_config import ConfigError, claude_implementation
+import ai_anti_config
 
 FAKE = """import json, os, pathlib, sys
 assert sys.stdin.read() == ''
 if sys.argv[1:] == ['--version']:
+    pathlib.Path(os.environ['FIXTURE_CODEX_CALLS'] + '.version').touch()
     print(os.environ['FIXTURE_CODEX_VERSION'])
     sys.exit(0)
 with open(os.environ['FIXTURE_CODEX_CALLS'], 'a') as calls:
@@ -81,6 +83,7 @@ class ClaudeCodexImplement(unittest.TestCase):
         self.assertEqual(manifest, json.loads((self.out / 'status.json').read_text()))
         self.assertEqual(manifest['provider'], 'codex')
         self.assertEqual(manifest['requested_model'], 'gpt-6.2-sol')
+        self.assertIsNone(manifest['requested_effort'])
         self.assertEqual(manifest['model_evidence'], 'requested_only')
         self.assertEqual(manifest['cli_version'], 'codex-cli 0.169.1')
         self.assertEqual(manifest['workspace'], str(self.worktree))
@@ -100,6 +103,30 @@ class ClaudeCodexImplement(unittest.TestCase):
                                   'gpt-6.2-sol', '-C', str(self.worktree), '--', self.prompt.read_text()]])
         self.assertEqual((self.repo / 'target.txt').read_text(), 'original')
         self.assertEqual((self.worktree / 'target.txt').read_text(), 'fixture change')
+
+    def configure_effort(self, effort):
+        data = json.loads(self.config.read_text())
+        data['claude_relay']['implementation']['effort'] = effort
+        self.config.write_text(json.dumps(data))
+
+    def test_configured_effort_sets_argv_and_evidence(self):
+        self.configure_effort('high')
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        calls = [json.loads(line) for line in self.calls.read_text().splitlines()]
+        self.assertEqual(calls, [['exec', '--json', '--sandbox', 'workspace-write', '--model',
+                                  'gpt-6.2-sol', '-c', 'model_reasoning_effort="high"',
+                                  '-C', str(self.worktree), '--', self.prompt.read_text()]])
+        self.assertEqual(self.manifest()['requested_effort'], 'high')
+
+    def test_invalid_effort_stops_before_codex_starts(self):
+        self.configure_effort('XHIGH')
+        result = self.invoke()
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('claude_relay.implementation.effort', result.stderr)
+        self.assertFalse(self.calls.with_suffix('.jsonl.version').exists())
+        self.assertFalse(self.calls.exists())
+        self.assertFalse(self.out.exists())
 
     def test_rejects_before_exec(self):
         nongit = self.base / 'nongit'
@@ -145,6 +172,28 @@ class ClaudeCodexImplement(unittest.TestCase):
 
 
 class ClaudeImplementationConfig(unittest.TestCase):
+    def test_implementation_effort_optional_and_strict(self):
+        config = {'provider': 'codex', 'model': 'gpt-6.2-sol'}
+        for fields, expected in [({}, None), *[({'effort': value}, value) for value in
+                (None, 'low', 'medium', 'high', 'xhigh', 'max', 'ultra')]]:
+            with self.subTest(fields=fields):
+                actual = claude_implementation({'claude_relay': {'implementation': dict(config, **fields)}})
+                self.assertEqual(actual, dict(config, effort=expected))
+        for value in ('XHIGH', 'x high', 1, 'minimal', 'high ', '', [], {}, True):
+            with self.subTest(value=value), self.assertRaisesRegex(ConfigError, r'claude_relay\.implementation\.effort'):
+                claude_implementation({'claude_relay': {'implementation': dict(config, effort=value)}})
+
+    def test_review_effort_optional_and_strict(self):
+        for config in ({}, {'review': {}}, {'review': {'codex_effort': None}}):
+            with self.subTest(config=config):
+                self.assertIsNone(ai_anti_config.review_codex_effort(config))
+        for value in ('low', 'medium', 'high', 'xhigh', 'max', 'ultra'):
+            with self.subTest(value=value):
+                self.assertEqual(ai_anti_config.review_codex_effort({'review': {'codex_effort': value}}), value)
+        for value in ('XHIGH', 'x high', 1, 'minimal', 'high ', '', [], {}, True):
+            with self.subTest(value=value), self.assertRaisesRegex(ConfigError, r'review\.codex_effort'):
+                ai_anti_config.review_codex_effort({'review': {'codex_effort': value}})
+
     def test_missing_null_and_invalid_implementation(self):
         for config in ({}, {'claude_relay': None}, {'claude_relay': {'implementation': None}}):
             self.assertIsNone(claude_implementation(config))
