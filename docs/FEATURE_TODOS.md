@@ -368,3 +368,7 @@
 - [x] `system/thinking_tokens` 已取得 2.1.326 终审样本。仅在 init 后、result 前接纳精确六键且两个估算值均为非负整数的形态，布尔值拒绝。
 - [x] Codex 0.169.1 终审实施样本中的远程 MCP stderr 已加入精确模板。要求 UTC 时间戳和原样 `https://chatgpt.com/backend-api/ps/mcp`，命中记为 `remote_mcp_unavailable`。
 - [ ] Token Plan Anthropic 的 `qwen4-max` 404 待真实复验。已定位样本中的 404 来自本地代理精确路径匹配，查询串修复后待主模型验证主账号额度耗尽及备用接续。
+
+### Codex 0.169.1 噪声行误判（2026-11-20）
+
+- [ ] 中｜两条未登记的 Codex 输出被判为运行失败 — ①评审：`turn.completed` 与完整最终消息之后出现 `error: Reconnecting... (stream disconnected… IO error…)` 事件，解析器报未知事件；②实施：stderr 出现 `ERROR codex_core::tools::router: error=write_stdin failed: Unknown process id <n>`（清理后台命令时），`codex_events.py` 报 `unknown Codex stderr line`，而 JSONL 已有 `turn.completed` 与完整报告。两次均由用户裁决人工采用产物。值得做：按真实样本登记这两个模板并补严格回归（仍须拒绝无 `turn.completed` 的运行），不放宽通配。复核判据：用样本重放时两次运行判 completed，截断样本仍判失败。｜来源：业务仓库接力 2026-11-19/20（方案评审第 1 轮、实施段）
