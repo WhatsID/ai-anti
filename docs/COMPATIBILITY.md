@@ -17,7 +17,7 @@
 | Qwen Responses 经 Codex | Codex 0.160.0 | 正式 plan 与历史 scoped diff；`actual_model=null`、`model_evidence=requested_only` |
 | Qwen Responses 经 Codex | Codex 0.163.0 | 2026-10-20 合成 plan 两阶段；未验证新版业务 diff 或用户级入口全流程，模型证据仍为 requested_only |
 | Codex → Qoder | Qoder CLI 1.1.74 / 1.1.77，实际 Kimi-K3.1-Pro | 1.1.77 正式 bug-review 双阶段；新版 plan/diff 仅离线覆盖，旧版历史证据归属见下文 |
-| Claude 主导 → AGY 双方案规划 | AGY CLI 1.5.13 | 已有本机 `--mode plan --sandbox --output-format stream-json` 探针与离线全路径单测；正式 `agy_plan.py` 真实 `draft`/`synthesize` 探针待主模型终审补录，`model_evidence=requested_only` |
+| Claude 主导 → AGY 双方案规划 | AGY CLI 1.5.13 | 本机 `--mode plan --sandbox --output-format stream-json` 探针、生产 `agy_plan.py` 的真实 `draft`/`synthesize` 探针均已完成，并有离线全路径单测。`model_evidence=requested_only` |
 | Codex 用户级入口 / 共享方法 | Codex 0.160.0 | 有限跨项目发现、隔离接力与方法样本；不是任意任务遵循保证 |
 | Claude 普通登录主导完整链路 | 待补验 | 历史 Login expired；Qwen bare 鉴权不能代替普通登录验收 |
 | DeepSeek | 历史端点 / 离线能力 | 不代表当前配置、桌面外部调用或完整接力通过 |
@@ -594,3 +594,10 @@ rmcp::transport::worker: worker quit with fatal: Transport channel closed, when 
   - **探针 B（`--stage synthesize`）**：退出码 `0`、`completed=true`、`integrity_ok=true`、`warnings=[]`、`tool_warnings=[]`、stderr 为空（19.8s）；两份短草稿分别放独有约束 `CONSTRAINT_CLAUDE_ALPHA` 与 `CONSTRAINT_AGY_BETA`，最终 `plan.md` 明确比对并处理了两项约束。
 - **离线验证边界**：`tests/test_claude_agy_plan.py`（Python 3.9+）以离线替身 CLI 与真实临时 Git 仓库覆盖配置 fail-closed、`git archive` + 脏追踪叠加 + `128 MiB` 字节上限的隔离只读暂存、原件与被忽略 `.request.md` 零变化、R2 `## 附录：非需求` 剥离、`synthesize` 三材料校验与内联、前导 `-` 与前导 `/` 保护、四级退出码（`0`/`1`/`2`/`3`）与 `fallback_allowed` 门禁（含写工具尝试、原件/暂存变化、`stop_group` 清理失败）以及非阻塞版本/stderr/工具警告，并对三项核心守卫做了隔离受控变异红绿验证。
 - **未覆盖边界**：不包含 Claude Code 真实交互会话内 `/disable-dual-plan` 的端到端模型遵循；一期不包含 macOS App UI 与长会话压缩后 `/disable-dual-plan` 状态持久化（已登记于 [FEATURE_TODOS.md](FEATURE_TODOS.md)）。
+
+### 双方案一期修复后的触发与退出码
+
+- 当次显式启用时传 `--trigger user-message`，仍校验配置和运行预算。每次调用使用全新的 `--out`，综合取实际成功的 draft 目录。
+- 两阶段在建 `--out` 或探测 AGY 版本前按 UTF-8 字节预检，固定上限 120 KiB。超限返回 2，建议精简草稿或改由 Claude 综合。启动时的 `E2BIG` 也返回 2，终态 `error_kind=prompt_too_large`。证据记录 `prompt_bytes` 和 `limits.max_prompt_bytes`。
+- `0` 表示完成。仅 `1` 且 `fallback_allowed=true`、`integrity_ok=true` 时可按 `on_failure` 处理。`2` 为配置、前置检查或启动参数超限，`3` 为完整性中止（含暂存清理失败或完整性核验未完成）。`130` 为 SIGINT 或无信号号的中断，`143` 为 SIGTERM。完整性问题优先于中断，其余非零码及无法核验的状态也须停止保留证据。
+- 需求和草稿在提示词副本中按子串替换仓库物理与逻辑绝对路径，原件字节保持不变。兄弟目录如 `<repo>-other` 也会变成 `<REPO_ROOT>-other`；`--instructions` 中命中仓库路径则直接拒绝。`input_sha256.request_user` 在 draft 哈希剥离附录后的正文，在 synthesize 哈希整个原文件。`prompt_sha256` 哈希实际发送的提示词。

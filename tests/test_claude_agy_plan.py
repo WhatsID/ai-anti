@@ -1,13 +1,19 @@
 """Offline tests for claude_relay.dual_plan config and agy_plan.py (Python 3.9+)."""
+from contextlib import redirect_stderr, redirect_stdout
+import errno
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
+import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest import mock
 
@@ -33,7 +39,7 @@ def load_agy_plan_module():
     return module
 
 
-FAKE_AGY = """import json, os, pathlib, stat, sys
+FAKE_AGY = """import json, os, pathlib, signal, stat, subprocess, sys, time
 assert sys.stdin.read() == ''
 if sys.argv[1:] == ['--version']:
     pathlib.Path(os.environ['FIXTURE_AGY_CALLS'] + '.version').write_text('called')
@@ -152,6 +158,20 @@ else:
         },
     }))
 
+if mode == 'block':
+    child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(60)'])
+
+    def stop(signum, frame):
+        child.wait(timeout=3)
+        sys.exit(128 + signum)
+
+    signal.signal(signal.SIGTERM, stop)
+    sys.stdout.flush()
+    pathlib.Path(os.environ['FIXTURE_AGY_CALLS'] + '.ready').write_text(
+        json.dumps([os.getpid(), child.pid]))
+    time.sleep(60)
+if mode == 'child_sigterm':
+    os.kill(os.getpid(), signal.SIGTERM)
 if mode == 'nonzero':
     sys.exit(1)
 if mode == 'write_then_nonzero':
@@ -349,7 +369,7 @@ class AgyPlanTests(unittest.TestCase):
         dual.update(overrides)
         self.config.write_text(json.dumps({'claude_relay': {'dual_plan': dual}}), encoding='utf-8')
 
-    def invoke(self, stage='draft', out=None, extra_args=None, extra_env=None, repo=None, request=None):
+    def command(self, stage='draft', out=None, extra_args=None, repo=None, request=None):
         cmd = [
             sys.executable,
             str(ENTRY),
@@ -363,10 +383,47 @@ class AgyPlanTests(unittest.TestCase):
         ]
         if extra_args:
             cmd.extend(extra_args)
+        return cmd
+
+    def invoke(self, extra_env=None, **kwargs):
+        cmd = self.command(**kwargs)
         env = dict(self.env)
         if extra_env:
             env.update(extra_env)
         return subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=20)
+
+    def invoke_main(self, mod):
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with mock.patch.object(sys, 'argv', self.command()[1:]), \
+             mock.patch.dict(os.environ, self.env), \
+             redirect_stdout(stdout), redirect_stderr(stderr):
+            code = mod.main()
+        return subprocess.CompletedProcess([], code, stdout.getvalue(), stderr.getvalue())
+
+    def assert_no_cli(self):
+        self.assertFalse(self.calls.exists())
+        self.assertFalse(self.calls.with_suffix('.jsonl.version').exists())
+
+    def assert_terminal(self, result, code, status, error_kind=None, out=None):
+        self.assertEqual(result.returncode, code, result.stderr)
+        manifest = self.load_manifest(out)
+        self.assertEqual(manifest['status'], status)
+        self.assertEqual(manifest['error_kind'], error_kind)
+        self.assertFalse(manifest['completed'])
+        self.assertFalse(manifest['fallback_allowed'])
+        self.assertEqual(manifest['integrity_ok'], code != 3)
+        target = out or self.out
+        self.assertFalse((target / 'plan.md').exists())
+        self.assertFalse((target / '.plan.md.tmp').exists())
+        log = target / 'plan.jsonl'
+        if log.is_file():
+            self.assertEqual(manifest['log_sha256'], hashlib.sha256(log.read_bytes()).hexdigest())
+        for key, value in json.loads(result.stdout).items():
+            self.assertEqual(value, manifest[key], key)
+        return manifest
+
+    def synthesize_args(self):
+        return ['--claude-draft', str(self.claude_draft), '--agy-draft', str(self.agy_draft)]
 
     def load_manifest(self, out=None):
         target = out if out is not None else self.out
@@ -374,6 +431,352 @@ class AgyPlanTests(unittest.TestCase):
         status = json.loads((target / 'status.json').read_text(encoding='utf-8'))
         self.assertEqual(manifest, status)
         return manifest
+
+    def test_user_message_trigger_uses_defaults_inherits_fields_and_overrides_synthesizer(self):
+        for label, stage, config in (
+            ('missing', 'draft', {}),
+            ('disabled', 'draft', {'enabled': False, 'model': 'fixture-model', 'effort': 'high'}),
+            ('claude', 'synthesize', {'enabled': True, 'synthesizer': 'claude'}),
+            ('missing-synthesizer', 'synthesize', {}),
+        ):
+            with self.subTest(case=label):
+                if config:
+                    self.write_config(**config)
+                else:
+                    self.config.write_text('{}', encoding='utf-8')
+                out = self.base / label
+                args = ['--trigger', 'user-message']
+                if stage == 'synthesize':
+                    args.extend(self.synthesize_args())
+                result = self.invoke(stage=stage, out=out, extra_args=args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                manifest = self.load_manifest(out)
+                self.assertEqual(manifest['trigger'], 'user-message')
+                self.assertEqual(manifest['requested_model'], config.get('model'))
+                self.assertEqual(manifest['requested_effort'], config.get('effort'))
+                self.assertEqual(manifest['on_failure'], 'stop')
+                argv = json.loads(self.calls.read_text(encoding='utf-8').splitlines()[-1])['argv']
+                if label == 'disabled':
+                    self.assertEqual(argv[-5:-1], ['--model', 'fixture-model', '--effort', 'high'])
+                else:
+                    self.assertNotIn('--model', argv)
+                    self.assertNotIn('--effort', argv)
+
+    def test_user_message_trigger_still_validates_config_and_review_limits(self):
+        for config, error in (
+            ('{broken', 'invalid JSON'),
+            ('{"claude_relay":{"dual_plan":{"enabled":false,"effort":"ultra"}}}', '.effort'),
+            ('{"review":{"timeout":0}}', 'review.timeout'),
+        ):
+            with self.subTest(error=error):
+                self.config.write_text(config, encoding='utf-8')
+                result = self.invoke(extra_args=['--trigger', 'user-message'])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn(error, result.stderr)
+                self.assertFalse(self.out.exists())
+                self.assert_no_cli()
+
+    def test_distinct_output_directories_preserve_evidence_and_reuse_is_rejected(self):
+        first = self.invoke(extra_env={'FIXTURE_RESPONSE': '# First'})
+        self.assertEqual(first.returncode, 0, first.stderr)
+        self.assertEqual(self.load_manifest()['trigger'], 'config')
+        first_files = {path.name: path.read_bytes() for path in self.out.iterdir()}
+        second_out = self.base / 'out-2'
+        second = self.invoke(out=second_out, extra_env={'FIXTURE_RESPONSE': '# Second'})
+        self.assertEqual(second.returncode, 0, second.stderr)
+        self.assertEqual((second_out / 'plan.md').read_text(encoding='utf-8'), '# Second\n')
+        self.assertEqual(self.load_manifest(second_out)['status'], 'completed')
+        reused = self.invoke()
+        self.assertEqual(reused.returncode, 2, reused.stderr)
+        self.assertEqual({path.name: path.read_bytes() for path in self.out.iterdir()}, first_files)
+        self.assertEqual(len(self.calls.read_bytes().splitlines()), 2)
+
+    def test_oversize_prompt_is_rejected_before_output_and_cli(self):
+        self.write_config(synthesizer='agy')
+        for stage, content in (
+            ('draft', 'a' * (120 * 1024 + 1)),
+            ('synthesize', 'b' * (120 * 1024 + 1)),
+            ('draft', '中' * (41 * 1024)),
+        ):
+            with self.subTest(stage=stage, char=content[0]):
+                out = self.base / f'oversize-{stage}-{content[0]}'
+                path = self.request if stage == 'draft' else self.claude_draft
+                path.write_text(content, encoding='utf-8')
+                args = self.synthesize_args() if stage == 'synthesize' else []
+                result = self.invoke(stage=stage, out=out, extra_args=args)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertRegex(result.stderr, r'prompt.* \([0-9]+ bytes\).*122880')
+                self.assertIn('Claude', result.stderr)
+                self.assertFalse(out.exists())
+                self.assert_no_cli()
+
+    def test_execute_e2big_is_nonfallback_with_terminal_evidence(self):
+        self.write_config(on_failure='fallback')
+        mod = load_agy_plan_module()
+        execute = mod.execute
+
+        def e2big(argv, *args, **kwargs):
+            if argv[1:] == ['--version']:
+                return execute(argv, *args, **kwargs)
+            raise RunError('could not launch CLI') from OSError(errno.E2BIG, 'Argument list too long')
+
+        with mock.patch.object(mod, 'execute', side_effect=e2big):
+            self.assert_terminal(self.invoke_main(mod), 2, 'failed', 'prompt_too_large')
+        self.assertFalse((self.out / '.staging').exists())
+
+    def test_staging_cleanup_failure_after_success_or_failure_is_integrity_abort(self):
+        self.write_config(on_failure='fallback')
+        mod = load_agy_plan_module()
+        for mode in ('ok', 'nonzero'):
+            with self.subTest(mode=mode):
+                self.out = self.base / mode
+                self.addCleanup(mod.remove_tree_readonly_safe, self.out / '.staging')
+                self.env['FIXTURE_MODE'] = mode
+                with mock.patch.object(mod, 'remove_tree_readonly_safe',
+                                       side_effect=PermissionError('fixture cleanup denied')) as cleanup:
+                    result = self.invoke_main(mod)
+                manifest = self.assert_terminal(result, 3, 'integrity_aborted', 'staging_cleanup_failed')
+                cleanup.assert_called_once_with(self.out / '.staging')
+                self.assertIn('fixture cleanup denied', manifest['error'])
+                if mode == 'nonzero':
+                    self.assertEqual(manifest['original_error']['error'], 'nonzero AGY CLI exit: 1')
+                    self.assertEqual(manifest['original_error']['error_kind'], 'execution_failed')
+                else:
+                    self.assertNotIn('original_error', manifest)
+
+    def test_preparation_rollback_cleanup_preserves_original_error(self):
+        mod = load_agy_plan_module()
+        with mock.patch.object(mod, 'prepare_staging', side_effect=ConfigError('original staging error')), \
+             mock.patch.object(mod, 'remove_tree_readonly_safe',
+                               side_effect=PermissionError('fixture cleanup denied')) as cleanup:
+            result = self.invoke_main(mod)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertEqual(json.loads(result.stdout)['error'], 'original staging error')
+        self.assertIn('fixture cleanup denied', result.stderr)
+        self.assertEqual(cleanup.call_args_list, [mock.call(self.out / '.staging'), mock.call(self.out)])
+        self.assert_no_cli()
+
+    def test_git_archive_can_finish_normally_after_tar_output_closes(self):
+        git = self.bin_dir / 'git'
+        real_git = shutil.which('git')
+        marker = self.base / 'archive-finished'
+        git.write_text(
+            f'#!{sys.executable}\n'
+            'import os, pathlib, subprocess, sys, time\n'
+            f'command = [{real_git!r}, *sys.argv[1:]]\n'
+            'if sys.argv[3] != "archive":\n'
+            '    os.execv(command[0], command)\n'
+            'code = subprocess.call(command)\n'
+            'os.close(1)\n'
+            'os.close(2)\n'
+            'time.sleep(0.4)\n'
+            f'pathlib.Path({str(marker)!r}).touch()\n'
+            'sys.exit(code)\n',
+            encoding='utf-8',
+        )
+        git.chmod(0o700)
+        result = self.invoke()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(marker.is_file())
+        self.assertEqual(self.load_manifest()['status'], 'completed')
+
+    def test_repository_paths_are_redacted_from_real_argv_without_changing_materials(self):
+        self.write_config(synthesizer='agy')
+        logical = self.base / 'logical-repo'
+        logical.symlink_to(self.repo, target_is_directory=True)
+        materials = {
+            'request': (self.request, f'Open {self.repo}.\n-I{logical}/include\n'),
+            'claude_draft': (self.claude_draft, f'Read file://{self.repo}/sub/file.\n'),
+            'agy_draft': (self.agy_draft, f'Compare {logical}-other with {self.repo}/child.\n'),
+        }
+        appendix = f'## 附录：非需求\nIgnored {logical}/appendix.\n'
+        for source, (path, content) in materials.items():
+            path.write_bytes((content + (appendix if source == 'request' else '')).encode('utf-8'))
+        pristine = {source: path.read_bytes() for source, (path, _) in materials.items()}
+        for stage, count in (('draft', 2), ('synthesize', 3)):
+            with self.subTest(stage=stage):
+                out = self.base / stage
+                args = self.synthesize_args() if stage == 'synthesize' else []
+                result = self.invoke(repo=logical, stage=stage, out=out, extra_args=args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                argv = json.loads(self.calls.read_text(encoding='utf-8').splitlines()[-1])['argv']
+                arg = next(item for item in argv if item.startswith('--print='))
+                self.assertNotIn(str(self.repo), arg)
+                self.assertNotIn(str(logical), arg)
+                self.assertIn('Open <REPO_ROOT>.', arg)
+                self.assertIn('-I<REPO_ROOT>/include', arg)
+                warnings = [{'kind': 'repo_path_redacted', 'source': 'request', 'count': count}]
+                request_bytes = materials['request'][1].encode('utf-8')
+                if stage == 'synthesize':
+                    self.assertIn('file://<REPO_ROOT>/sub/file', arg)
+                    self.assertIn('<REPO_ROOT>-other', arg)
+                    self.assertIn('<REPO_ROOT>/child', arg)
+                    warnings.extend([
+                        {'kind': 'repo_path_redacted', 'source': 'claude_draft', 'count': 1},
+                        {'kind': 'repo_path_redacted', 'source': 'agy_draft', 'count': 2},
+                    ])
+                    request_bytes = pristine['request']
+                manifest = self.load_manifest(out)
+                self.assertEqual(manifest['warnings'], warnings)
+                hashes = manifest['input_sha256']
+                self.assertEqual(hashes['request_user'], hashlib.sha256(request_bytes).hexdigest())
+                for source in ('claude_draft', 'agy_draft'):
+                    expected = hashlib.sha256(pristine[source]).hexdigest() if stage == 'synthesize' else None
+                    self.assertEqual(hashes[source], expected)
+                payload = arg[len('--print='):].encode('utf-8')
+                self.assertEqual((out / 'prompt.txt').read_bytes(), payload)
+                self.assertEqual(manifest['prompt_sha256'], hashlib.sha256(payload).hexdigest())
+                self.assertEqual(manifest['prompt_bytes'], len(payload))
+                self.assertEqual(manifest['limits']['max_prompt_bytes'], 122880)
+                for source, (path, _) in materials.items():
+                    self.assertEqual(path.read_bytes(), pristine[source])
+
+    def test_instructions_and_residual_repository_path_are_rejected_before_cli(self):
+        logical = self.base / 'logical-repo'
+        logical.symlink_to(self.repo, target_is_directory=True)
+        for path in (self.repo, logical):
+            with self.subTest(path=path):
+                out = self.base / f'instructions-{path.name}'
+                self.instructions.write_text(f'Use -I{path}/include.', encoding='utf-8')
+                result = self.invoke(repo=logical, out=out,
+                                     extra_args=['--instructions', str(self.instructions)])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('--instructions', result.stderr)
+                self.assertFalse(out.exists())
+                self.assert_no_cli()
+        mod = load_agy_plan_module()
+        with mock.patch.object(mod, 'assemble_prompt', return_value=f'Open {self.repo}.'):
+            result = self.invoke_main(mod)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('repository absolute path', result.stderr)
+        self.assertFalse(self.out.exists())
+        self.assert_no_cli()
+
+    def interrupt_wrapper(self, signum, *, write_tool=False):
+        self.write_config(on_failure='fallback')
+        env = dict(self.env, FIXTURE_MODE='block')
+        if write_tool:
+            env['FIXTURE_WRITE_TOOL'] = 'write_file'
+        ready = self.calls.with_suffix('.jsonl.ready')
+        with subprocess.Popen(self.command(), env=env, stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True) as process:
+            pids = None
+            try:
+                deadline = time.monotonic() + 10
+                while not pids and process.poll() is None and time.monotonic() < deadline:
+                    if ready.exists():
+                        data = ready.read_text(encoding='utf-8')
+                        if data:
+                            pids = json.loads(data)
+                    if not pids:
+                        time.sleep(0.01)
+                self.assertIsNotNone(pids, 'fake AGY did not reach the blocking stage')
+                process.send_signal(signum)
+                stdout, stderr = process.communicate(timeout=8)
+                for pid in pids:
+                    with self.assertRaises(ProcessLookupError):
+                        os.kill(pid, 0)
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                if pids:
+                    try:
+                        os.killpg(pids[0], signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
+        return subprocess.CompletedProcess([], process.returncode, stdout, stderr)
+
+    def test_wrapper_signals_stop_process_group_and_forbid_fallback(self):
+        for signum, code in ((signal.SIGTERM, 143), (signal.SIGINT, 130)):
+            with self.subTest(signum=signum):
+                self.out = self.base / str(code)
+                self.calls.with_suffix('.jsonl.ready').unlink(missing_ok=True)
+                result = self.interrupt_wrapper(signum)
+                self.assert_terminal(result, code, 'interrupted', 'interrupted')
+                self.assertFalse((self.out / '.staging').exists())
+
+    def test_write_tool_takes_priority_over_interrupt(self):
+        result = self.interrupt_wrapper(signal.SIGTERM, write_tool=True)
+        manifest = self.assert_terminal(result, 3, 'integrity_aborted', 'integrity_violation')
+        self.assertIn('write_file', manifest['error'])
+        self.assertFalse((self.out / '.staging').exists())
+
+    def test_pre_output_signals_are_interrupted_and_restore_handlers(self):
+        mod = load_agy_plan_module()
+        for signum, code in ((signal.SIGINT, 130), (signal.SIGTERM, 143)):
+            with self.subTest(signum=signum):
+                before = signal.getsignal(signum)
+                with mock.patch.object(mod, 'load', side_effect=lambda _: os.kill(os.getpid(), signum)):
+                    result = self.invoke_main(mod)
+                self.assertEqual(signal.getsignal(signum), before)
+                self.assertEqual(result.returncode, code, result.stderr)
+                self.assertEqual(json.loads(result.stdout)['status'], 'interrupted')
+                self.assertFalse(self.out.exists())
+                self.assert_no_cli()
+
+    def test_child_sigterm_without_wrapper_signal_forbids_fallback(self):
+        self.write_config(on_failure='fallback')
+        result = self.invoke(extra_env={'FIXTURE_MODE': 'child_sigterm'})
+        manifest = self.assert_terminal(result, 143, 'interrupted', 'interrupted')
+        self.assertEqual(manifest['cli_exit_code'], -signal.SIGTERM)
+
+    def test_wrapper_signal_takes_priority_over_runner_log_limit(self):
+        self.write_config(on_failure='fallback')
+        mod = load_agy_plan_module()
+        execute = mod.execute
+
+        def log_limit(argv, *args, **kwargs):
+            if argv[1:] == ['--version']:
+                return execute(argv, *args, **kwargs)
+            try:
+                os.kill(os.getpid(), signal.SIGTERM)
+            except KeyboardInterrupt:
+                raise RunError('log limit')
+
+        with mock.patch.object(mod, 'execute', side_effect=log_limit):
+            self.assert_terminal(self.invoke_main(mod), 143, 'interrupted', 'interrupted')
+
+    def test_interrupt_during_log_scan_integrity_check_or_plan_write_has_terminal_evidence(self):
+        mod = load_agy_plan_module()
+        for phase in ('scan', 'integrity', 'write'):
+            with self.subTest(phase=phase):
+                self.out = self.base / phase
+                capture = mod.capture_integrity_state
+                write_bytes = Path.write_bytes
+                write_text = Path.write_text
+
+                def post_integrity(*args, **kwargs):
+                    if (self.out / 'manifest.json').exists():
+                        raise KeyboardInterrupt('post-integrity interrupted')
+                    return capture(*args, **kwargs)
+
+                def partial_write_bytes(path, data):
+                    if path.name in ('plan.md', '.plan.md.tmp'):
+                        write_bytes(path, data[:5])
+                        raise KeyboardInterrupt('plan write interrupted')
+                    return write_bytes(path, data)
+
+                def partial_write_text(path, data, *args, **kwargs):
+                    if path.name == 'plan.md':
+                        write_text(path, data[:5], *args, **kwargs)
+                        raise KeyboardInterrupt('plan write interrupted')
+                    return write_text(path, data, *args, **kwargs)
+
+                if phase == 'scan':
+                    with mock.patch.object(mod, 'scan_log_for_write_tools', side_effect=KeyboardInterrupt):
+                        result = self.invoke_main(mod)
+                elif phase == 'integrity':
+                    with mock.patch.object(mod, 'capture_integrity_state', side_effect=post_integrity):
+                        result = self.invoke_main(mod)
+                else:
+                    with mock.patch.object(Path, 'write_bytes', partial_write_bytes), \
+                         mock.patch.object(Path, 'write_text', partial_write_text):
+                        result = self.invoke_main(mod)
+                if phase == 'write':
+                    self.assert_terminal(result, 130, 'interrupted', 'interrupted')
+                else:
+                    self.assert_terminal(result, 3, 'integrity_aborted', 'integrity_violation')
+                self.assertFalse((self.out / '.staging').exists())
 
     def test_draft_success_strips_r2_appendix_handles_leading_dash_and_hashes_evidence(self):
         self.write_config(model='agy-plan-model', effort='high')

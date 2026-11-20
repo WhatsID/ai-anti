@@ -134,6 +134,18 @@ def claude_qwen_executor(data):
     return value
 
 
+def claude_dual_plan_defaults():
+    """Return a fresh copy of the built-in dual-plan settings."""
+    return {
+        'enabled': False,
+        'partner': 'agy',
+        'model': None,
+        'effort': None,
+        'synthesizer': 'claude',
+        'on_failure': 'stop',
+    }
+
+
 def claude_dual_plan(data):
     """Return validated Claude-led dual-plan settings, or None when absent/null."""
     key = 'claude_relay.dual_plan'
@@ -143,36 +155,34 @@ def claude_dual_plan(data):
     if not isinstance(value, dict):
         raise ConfigError('ai-anti config: ' + key + ' must be an object')
 
-    if 'enabled' in value:
-        enabled = value['enabled']
-        if type(enabled) is not bool:
-            raise ConfigError('ai-anti config: ' + key + '.enabled must be a boolean')
-    else:
-        enabled = False
+    defaults = claude_dual_plan_defaults()
+    enabled = value.get('enabled', defaults['enabled'])
+    if type(enabled) is not bool:
+        raise ConfigError('ai-anti config: ' + key + '.enabled must be a boolean')
 
     partner = value.get('partner')
     if partner is None:
-        partner = 'agy'
+        partner = defaults['partner']
     elif not isinstance(partner, str) or partner not in DUAL_PLAN_PARTNERS:
         raise ConfigError('ai-anti config: ' + key + '.partner must be one of ' + ', '.join(DUAL_PLAN_PARTNERS))
 
-    model = value.get('model')
+    model = value.get('model', defaults['model'])
     if model is not None and (not isinstance(model, str) or not model or any(c.isspace() for c in model)):
         raise ConfigError('ai-anti config: ' + key + '.model must be a non-empty string without whitespace')
 
-    effort = value.get('effort')
+    effort = value.get('effort', defaults['effort'])
     if effort is not None and (not isinstance(effort, str) or effort not in AGY_EFFORTS):
         raise ConfigError('ai-anti config: ' + key + '.effort must be one of ' + ', '.join(AGY_EFFORTS))
 
     synthesizer = value.get('synthesizer')
     if synthesizer is None:
-        synthesizer = 'claude'
+        synthesizer = defaults['synthesizer']
     elif not isinstance(synthesizer, str) or synthesizer not in DUAL_PLAN_SYNTHESIZERS:
         raise ConfigError('ai-anti config: ' + key + '.synthesizer must be one of ' + ', '.join(DUAL_PLAN_SYNTHESIZERS))
 
     on_failure = value.get('on_failure')
     if on_failure is None:
-        on_failure = 'stop'
+        on_failure = defaults['on_failure']
     elif not isinstance(on_failure, str) or on_failure not in DUAL_PLAN_ON_FAILURE:
         raise ConfigError('ai-anti config: ' + key + '.on_failure must be one of ' + ', '.join(DUAL_PLAN_ON_FAILURE))
 

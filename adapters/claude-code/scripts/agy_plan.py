@@ -6,6 +6,7 @@ Protects the real repository by executing AGY inside an isolated read-only
 staging snapshot exported from HEAD with tracked working-tree edits overlaid.
 """
 import argparse
+import errno
 import hashlib
 import json
 import os
@@ -17,16 +18,19 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
 import time
 
 ROOT = Path(__file__).resolve().parents[3]
 SKILLS = ROOT / 'adapters' / 'codex' / 'skills'
 sys.path[:0] = [str(SKILLS / 'claude-review' / 'scripts')]
 
-from ai_anti_config import ConfigError, claude_dual_plan, load, review_limits
+from ai_anti_config import ConfigError, claude_dual_plan, claude_dual_plan_defaults, load, review_limits
 from review_runner import RunError, execute
 
 CAP = 8 * 1024 * 1024
+# Leave room for the --print= prefix and NUL below Linux MAX_ARG_STRLEN.
+MAX_PROMPT_BYTES = 120 * 1024
 DEFAULT_MAX_SNAPSHOT_BYTES = 128 * 1024 * 1024
 SEMVER_RE = re.compile(r'\b([0-9]+\.[0-9]+\.[0-9]+)\b')
 R2_APPENDIX_PREFIX = '## 附录：非需求'
@@ -54,10 +58,6 @@ TOOL_ERROR_STATUSES = frozenset({
     'canceled',
     'aborted',
 })
-
-
-def interrupt(signum, frame):
-    raise KeyboardInterrupt('AGY planning interrupted')
 
 
 def digest_bytes(data):
@@ -190,6 +190,23 @@ def validate_prompt(payload):
     if payload.startswith('/') or payload.lstrip().startswith('/'):
         raise ConfigError('assembled prompt must not start with /')
     return payload
+
+
+def repo_path_variants(repo, supplied_repo):
+    paths = {str(repo).rstrip('/'), os.path.abspath(supplied_repo).rstrip('/')}
+    return sorted(paths - {''}, key=lambda path: (-len(path), path))
+
+
+def redact_repo_path(material, paths, source, warnings):
+    if material is None:
+        return None
+    count = 0
+    for path in paths:
+        count += material.count(path)
+        material = material.replace(path, '<REPO_ROOT>')
+    if count:
+        warnings.append({'kind': 'repo_path_redacted', 'source': source, 'count': count})
+    return material
 
 
 def assemble_prompt(stage, request_text, instructions_text=None, claude_draft=None, agy_draft=None):
@@ -406,13 +423,19 @@ def prepare_staging(repo, staging, delete_set, overlay_files, max_snapshot_bytes
     skip_from_archive = delete_set | set(overlay_files.keys())
     written_bytes = 0
 
-    proc = subprocess.Popen(
-        ['git', '-C', str(repo), 'archive', '--format=tar', 'HEAD'],
-        env=git_env(),
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    # A regular file lets us wait with a timeout without blocking on stderr.
+    archive_stderr = tempfile.TemporaryFile()
+    try:
+        proc = subprocess.Popen(
+            ['git', '-C', str(repo), 'archive', '--format=tar', 'HEAD'],
+            env=git_env(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=archive_stderr,
+        )
+    except BaseException:
+        archive_stderr.close()
+        raise
     try:
         with tarfile.open(fileobj=proc.stdout, mode='r|') as tf:
             for member in tf:
@@ -473,15 +496,27 @@ def prepare_staging(repo, staging, delete_set, overlay_files, max_snapshot_bytes
                     os.link(link_src, dest)
                 else:
                     raise ConfigError(f'unsupported archive member type: {rel}')
-    finally:
-        if proc.stdout is not None:
-            proc.stdout.close()
-        stderr_bytes = proc.stderr.read() if proc.stderr is not None else b''
-        if proc.stderr is not None:
-            proc.stderr.close()
+        proc.stdout.close()
         rc = proc.wait(timeout=30)
-    if rc != 0:
-        raise ConfigError('git archive failed: ' + stderr_bytes.decode('utf-8', errors='replace').strip())
+    except BaseException:
+        try:
+            proc.terminate()
+            try:
+                proc.wait(timeout=3)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=3)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            print(f'agy_plan warning: git archive cleanup failed: {exc}', file=sys.stderr)
+        raise
+    else:
+        if rc != 0:
+            archive_stderr.seek(0)
+            detail = archive_stderr.read().decode('utf-8', errors='replace').strip()
+            raise ConfigError('git archive failed: ' + detail)
+    finally:
+        proc.stdout.close()
+        archive_stderr.close()
 
     # Apply deletions (for any directories/files that might remain)
     for rel in sorted(delete_set):
@@ -829,7 +864,29 @@ def is_cleanup_failure(exc):
     )
 
 
-def run(args):
+def interruption_signal(signal_state, exc=None, child_rc=None):
+    if signal_state.get('signum') is not None:
+        return signal_state['signum']
+    if isinstance(exc, KeyboardInterrupt) or (isinstance(exc, RunError) and str(exc) == 'interrupted'):
+        return signal.SIGINT
+    if child_rc in (-signal.SIGINT, -signal.SIGTERM):
+        return -child_rc
+    return None
+
+
+def write_plan_atomic(plan_path, data):
+    temporary = plan_path.with_name('.plan.md.tmp')
+    try:
+        temporary.write_bytes(data)
+        os.chmod(temporary, 0o600)
+        os.replace(temporary, plan_path)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def run(args, signal_state=None):
+    if signal_state is None:
+        signal_state = {}
     # 1. Validate numeric limits
     if type(args.max_snapshot_bytes) is not int or args.max_snapshot_bytes <= 0:
         raise ConfigError('--max-snapshot-bytes must be a positive integer')
@@ -856,10 +913,13 @@ def run(args):
     # 4. Load and validate config (fail closed)
     config = load(args.config)
     dual = claude_dual_plan(config)
-    if dual is None or not dual['enabled']:
-        raise ConfigError('claude_relay.dual_plan must be configured with enabled=true')
-    if args.stage == 'synthesize' and dual['synthesizer'] != 'agy':
-        raise ConfigError('claude_relay.dual_plan.synthesizer must be agy for --stage synthesize')
+    if args.trigger == 'config':
+        if dual is None or not dual['enabled']:
+            raise ConfigError('claude_relay.dual_plan must be configured with enabled=true')
+        if args.stage == 'synthesize' and dual['synthesizer'] != 'agy':
+            raise ConfigError('claude_relay.dual_plan.synthesizer must be agy for --stage synthesize')
+    else:
+        dual = dual or claude_dual_plan_defaults()
     timeout, idle = review_limits(config, args.timeout, args.idle_timeout)
 
     # 5. Validate stage-specific inputs
@@ -910,15 +970,26 @@ def run(args):
             extra_files.append(rel)
 
     # 7. Assemble & validate prompt before creating --out
+    paths = repo_path_variants(repo, args.repo)
+    if instructions_text and any(path in instructions_text for path in paths):
+        raise ConfigError('--instructions must not expose real repository absolute path')
+    warnings = []
     payload = assemble_prompt(
         args.stage,
-        request_for_prompt,
+        redact_repo_path(request_for_prompt, paths, 'request', warnings),
         instructions_text=instructions_text,
-        claude_draft=claude_text,
-        agy_draft=agy_text,
+        claude_draft=redact_repo_path(claude_text, paths, 'claude_draft', warnings),
+        agy_draft=redact_repo_path(agy_text, paths, 'agy_draft', warnings),
     )
-    if instructions_text and str(repo) in instructions_text:
-        raise ConfigError('--instructions must not expose real repository absolute path')
+    print_arg = '--print=' + payload
+    if any(path in print_arg for path in paths):
+        raise ConfigError('assembled prompt must not expose real repository absolute path')
+    prompt_bytes = validate_prompt(payload).encode('utf-8')
+    if len(prompt_bytes) > MAX_PROMPT_BYTES:
+        raise ConfigError(
+            f'assembled prompt ({len(prompt_bytes)} bytes) exceeds the limit ({MAX_PROMPT_BYTES} bytes); '
+            'shorten the drafts or synthesize with Claude'
+        )
 
     # 8. Plan staging overlay and pre-check snapshot byte cap before creating --out
     status_raw = run_git(repo, 'status', '--porcelain=v1', '-z', binary=True)
@@ -948,13 +1019,10 @@ def run(args):
     stderr_path = out / 'plan.stderr.txt'
     plan_path = out / 'plan.md'
 
-    prompt_bytes = payload.encode('utf-8')
-    prompt_path.write_bytes(prompt_bytes)
-    os.chmod(prompt_path, 0o600)
-
     evidence = {
         'provider': 'agy',
         'stage': args.stage,
+        'trigger': args.trigger,
         'requested_model': dual['model'],
         'requested_effort': dual['effort'],
         'model_evidence': 'requested_only',
@@ -963,6 +1031,7 @@ def run(args):
         'repo': str(repo),
         'head': head,
         'input_sha256': input_sha256,
+        'prompt_bytes': len(prompt_bytes),
         'prompt_sha256': digest_bytes(prompt_bytes),
         'plan_file': None,
         'plan_sha256': None,
@@ -970,7 +1039,7 @@ def run(args):
         'log_sha256': None,
         'stderr_log': stderr_path.name,
         'stderr_sha256': None,
-        'warnings': [],
+        'warnings': warnings,
         'tool_warnings': [],
         'on_failure': dual['on_failure'],
         'fallback_allowed': False,
@@ -985,142 +1054,194 @@ def run(args):
             'idle_timeout': idle,
             'max_output_bytes': CAP,
             'max_snapshot_bytes': args.max_snapshot_bytes,
+            'max_prompt_bytes': MAX_PROMPT_BYTES,
         },
     }
 
     started = time.monotonic()
-    pre_integrity = None
+    manifest_written = False
+    integrity_check_finished = False
+    staging_cleanup_attempted = False
+    staging_cleanup_error = None
+    child_rc = None
     run_exc = None
     validated = None
     integrity_reasons = []
 
-    try:
+    def cleanup_staging():
+        nonlocal staging_cleanup_attempted, staging_cleanup_error
         try:
-            prepare_staging(repo, staging, delete_set, overlay_files, args.max_snapshot_bytes)
-            pre_integrity = capture_integrity_state(repo, dirty_paths, extra_files, input_paths, staging)
-            make_tree_readonly(staging)
-        except Exception:
             remove_tree_readonly_safe(staging)
-            remove_tree_readonly_safe(out)
-            raise
+        except OSError as exc:
+            staging_cleanup_error = f'staging cleanup failed: {exc}'
+        staging_cleanup_attempted = True
 
-        write_json(out / 'manifest.json', evidence)
-        write_json(out / 'status.json', evidence)
-
-        try:
-            cli = shutil.which('agy')
-            if not cli:
-                raise RunError('AGY CLI unavailable')
-
-            vcode = execute([cli, '--version'], staging, version_log, 20, 15, 65536)
-            if vcode != 0:
-                raise RunError(f'AGY version probe failed with exit code {vcode}')
-            vtext = version_log.read_text(encoding='utf-8')
-            match = SEMVER_RE.search(vtext)
-            if not match:
-                raise RunError('could not parse semver from AGY --version output')
-            cli_version = match.group(1)
-            evidence['cli_version'] = cli_version
-            evidence['warnings'].extend(check_compat_version(cli_version))
-
-            argv = [
-                cli,
-                '--mode', 'plan',
-                '--sandbox',
-                '--output-format', 'stream-json',
-                '--print-timeout', f'{timeout}s',
-            ]
-            if dual['model'] is not None:
-                argv += ['--model', dual['model']]
-            if dual['effort'] is not None:
-                argv += ['--effort', dual['effort']]
-            argv.append('--print=' + payload)
-
-            cli_rc = execute(argv, staging, log_path, timeout, idle, CAP, stderr_log=stderr_path)
-            evidence['cli_exit_code'] = cli_rc
-            validated = validate_stream(log_path, cli_rc)
-            evidence['conversation_id'] = validated['conversation_id']
-            evidence['tool_warnings'].extend(validated['tool_warnings'])
-        except (RunError, OSError, UnicodeError, KeyboardInterrupt) as exc:
-            run_exc = exc
-
-        # Record non-empty stderr as a warning (non-blocking)
-        if stderr_path.is_file():
-            try:
-                stderr_raw = stderr_path.read_bytes()
-                if stderr_raw.strip():
-                    evidence['warnings'].append({'kind': 'non_empty_stderr', 'bytes': len(stderr_raw)})
-            except OSError:
-                pass
-
-        # Always check for write tools in log even if execute/validate raised an error
-        write_tool = scan_log_for_write_tools(log_path)
-        if write_tool is not None:
-            integrity_reasons.append(f'disallowed write tool invocation: {write_tool}')
-
-        # Check for cleanup failure or explicit integrity_violation RunError
-        if run_exc is not None and is_cleanup_failure(run_exc):
-            integrity_reasons.append(str(run_exc))
-
-        # Always run post-run integrity verification before removing staging
-        try:
-            post_integrity = capture_integrity_state(repo, dirty_paths, extra_files, input_paths, staging)
-            integrity_reasons.extend(diff_integrity_state(pre_integrity, post_integrity))
-        except Exception as exc:
-            integrity_reasons.append('post-run integrity verification failed: ' + str(exc))
-
-        # Deduplicate preserving order
-        seen_reasons = set()
-        dedup_reasons = []
-        for reason in integrity_reasons:
-            if reason not in seen_reasons:
-                seen_reasons.add(reason)
-                dedup_reasons.append(reason)
-
-        if dedup_reasons:
+    def finalize(exc=None):
+        signum = interruption_signal(signal_state, exc) or interruption_signal(signal_state, run_exc, child_rc)
+        failure = run_exc if run_exc is not None else exc
+        cause = failure.__cause__ if isinstance(failure, RunError) else None
+        reasons = list(integrity_reasons)
+        if staging_cleanup_error is not None:
+            reasons.append(staging_cleanup_error)
+            if run_exc is not None:
+                evidence['original_error'] = {
+                    'error_kind': getattr(run_exc, 'kind', 'execution_failed'),
+                    'error': str(run_exc),
+                }
+        evidence.update(
+            duration_seconds=round(time.monotonic() - started, 3),
+            completed=False,
+            fallback_allowed=False,
+            plan_file=None,
+            plan_sha256=None,
+        )
+        if reasons:
             evidence.update(
                 status='integrity_aborted',
-                completed=False,
                 integrity_ok=False,
-                fallback_allowed=False,
                 exit_code=3,
-                error_kind='integrity_violation',
-                error='; '.join(dedup_reasons),
+                error_kind='integrity_violation' if integrity_reasons else 'staging_cleanup_failed',
+                error='; '.join(dict.fromkeys(reasons)),
             )
-        elif run_exc is not None:
+        elif signum is not None:
+            evidence.update(
+                status='interrupted',
+                exit_code=128 + signum,
+                error_kind='interrupted',
+                error='AGY planning interrupted',
+            )
+        elif isinstance(cause, OSError) and cause.errno == errno.E2BIG:
             evidence.update(
                 status='failed',
-                completed=False,
-                integrity_ok=True,
+                exit_code=2,
+                error_kind='prompt_too_large',
+                error=f'AGY could not start with a {len(prompt_bytes)}-byte prompt: {failure}; '
+                      'shorten the drafts or synthesize with Claude',
+            )
+        elif failure is not None:
+            evidence.update(
+                status='failed',
                 fallback_allowed=True,
                 exit_code=1,
-                error_kind=getattr(run_exc, 'kind', 'execution_failed'),
-                error=str(run_exc),
+                error_kind=getattr(failure, 'kind', 'execution_failed'),
+                error=str(failure),
             )
         else:
-            plan_text = validated['response']
-            if not plan_text.endswith('\n'):
-                plan_text += '\n'
-            plan_path.write_text(plan_text, encoding='utf-8')
-            os.chmod(plan_path, 0o600)
             evidence.update(
                 status='completed',
                 completed=True,
-                integrity_ok=True,
-                fallback_allowed=False,
                 exit_code=0,
                 plan_file=plan_path.name,
-                plan_sha256=digest_file(plan_path),
+                plan_sha256=plan_sha256,
             )
+        if not evidence['completed']:
+            plan_path.unlink(missing_ok=True)
+
+    try:
+        prompt_path.write_bytes(prompt_bytes)
+        os.chmod(prompt_path, 0o600)
+        prepare_staging(repo, staging, delete_set, overlay_files, args.max_snapshot_bytes)
+        pre_integrity = capture_integrity_state(repo, dirty_paths, extra_files, input_paths, staging)
+        make_tree_readonly(staging)
+    except BaseException:
+        for path in (staging, out):
+            try:
+                remove_tree_readonly_safe(path)
+            except OSError as exc:
+                print(f'agy_plan warning: preparation rollback failed for {path}: {exc}', file=sys.stderr)
+        raise
+
+    try:
+        try:
+            write_json(out / 'manifest.json', evidence)
+            manifest_written = True
+            write_json(out / 'status.json', evidence)
+
+            try:
+                cli = shutil.which('agy')
+                if not cli:
+                    raise RunError('AGY CLI unavailable')
+
+                child_rc = execute([cli, '--version'], staging, version_log, 20, 15, 65536)
+                if child_rc != 0:
+                    raise RunError(f'AGY version probe failed with exit code {child_rc}')
+                vtext = version_log.read_text(encoding='utf-8')
+                match = SEMVER_RE.search(vtext)
+                if not match:
+                    raise RunError('could not parse semver from AGY --version output')
+                cli_version = match.group(1)
+                evidence['cli_version'] = cli_version
+                evidence['warnings'].extend(check_compat_version(cli_version))
+
+                argv = [
+                    cli,
+                    '--mode', 'plan',
+                    '--sandbox',
+                    '--output-format', 'stream-json',
+                    '--print-timeout', f'{timeout}s',
+                ]
+                if dual['model'] is not None:
+                    argv += ['--model', dual['model']]
+                if dual['effort'] is not None:
+                    argv += ['--effort', dual['effort']]
+                argv.append(print_arg)
+
+                child_rc = execute(argv, staging, log_path, timeout, idle, CAP, stderr_log=stderr_path)
+                evidence['cli_exit_code'] = child_rc
+                validated = validate_stream(log_path, child_rc)
+                evidence['conversation_id'] = validated['conversation_id']
+                evidence['tool_warnings'].extend(validated['tool_warnings'])
+            except (RunError, OSError, UnicodeError, KeyboardInterrupt) as exc:
+                run_exc = exc
+
+            if stderr_path.is_file():
+                try:
+                    stderr_raw = stderr_path.read_bytes()
+                    if stderr_raw.strip():
+                        evidence['warnings'].append({'kind': 'non_empty_stderr', 'bytes': len(stderr_raw)})
+                except OSError:
+                    pass
+
+            # Scan even on failed executions before relying on the post-run snapshot.
+            write_tool = scan_log_for_write_tools(log_path)
+            if write_tool is not None:
+                integrity_reasons.append(f'disallowed write tool invocation: {write_tool}')
+            if run_exc is not None and is_cleanup_failure(run_exc):
+                integrity_reasons.append(str(run_exc))
+
+            try:
+                post_integrity = capture_integrity_state(repo, dirty_paths, extra_files, input_paths, staging)
+                integrity_reasons.extend(diff_integrity_state(pre_integrity, post_integrity))
+            except BaseException as exc:
+                integrity_reasons.append('post-run integrity verification failed: ' + (str(exc) or type(exc).__name__))
+            integrity_check_finished = True
+
+            cleanup_staging()
+            if (not integrity_reasons and staging_cleanup_error is None and run_exc is None
+                    and interruption_signal(signal_state, child_rc=child_rc) is None):
+                plan_text = validated['response']
+                if not plan_text.endswith('\n'):
+                    plan_text += '\n'
+                plan_bytes = plan_text.encode('utf-8')
+                plan_sha256 = digest_bytes(plan_bytes)
+                write_plan_atomic(plan_path, plan_bytes)
+        finally:
+            if not staging_cleanup_attempted:
+                cleanup_staging()
+            if manifest_written:
+                evidence.update(
+                    log_sha256=digest_file(log_path),
+                    stderr_sha256=digest_file(stderr_path),
+                )
+        finalize()
+    except BaseException as exc:
+        if not manifest_written:
+            raise
+        if not integrity_check_finished:
+            integrity_reasons.append('post-run integrity verification incomplete: ' + (str(exc) or type(exc).__name__))
+        finalize(exc)
     finally:
-        if staging.exists() or staging.is_symlink():
-            remove_tree_readonly_safe(staging)
-        if out.is_dir():
-            evidence.update(
-                duration_seconds=round(time.monotonic() - started, 3),
-                log_sha256=digest_file(log_path),
-                stderr_sha256=digest_file(stderr_path),
-            )
+        if manifest_written:
             write_json(out / 'manifest.json', evidence)
             write_json(out / 'status.json', evidence)
 
@@ -1131,6 +1252,7 @@ def build_parser():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--repo', required=True, type=Path)
     parser.add_argument('--stage', required=True, choices=('draft', 'synthesize'))
+    parser.add_argument('--trigger', choices=('config', 'user-message'), default='config')
     parser.add_argument('--request', required=True, type=Path)
     parser.add_argument('--claude-draft', type=Path)
     parser.add_argument('--agy-draft', type=Path)
@@ -1145,32 +1267,51 @@ def build_parser():
 
 
 def main():
-    signal.signal(signal.SIGTERM, interrupt)
-    parser = build_parser()
-    try:
-        args = parser.parse_args()
-        evidence = run(args)
-    except (ConfigError, OSError, UnicodeError, subprocess.TimeoutExpired, KeyboardInterrupt) as exc:
-        summary = {
-            'status': 'invalid_config',
-            'completed': False,
-            'fallback_allowed': False,
-            'integrity_ok': True,
-            'exit_code': 2,
-            'error': str(exc),
-        }
-        print('agy_plan preparation failed: ' + str(exc), file=sys.stderr)
-        print(json.dumps(summary, ensure_ascii=False))
-        return 2
+    signal_state = {}
 
-    summary = {
-        key: evidence[key]
-        for key in ('status', 'stage', 'completed', 'fallback_allowed', 'integrity_ok', 'exit_code', 'plan_file')
-    }
-    if 'error' in evidence:
-        summary['error'] = evidence['error']
-    print(json.dumps(summary, ensure_ascii=False))
-    return evidence['exit_code']
+    def interrupt(signum, frame):
+        signal_state['signum'] = signum
+        raise KeyboardInterrupt('AGY planning interrupted')
+
+    handlers = {signum: signal.getsignal(signum) for signum in (signal.SIGTERM, signal.SIGINT)}
+    try:
+        try:
+            for signum in handlers:
+                signal.signal(signum, interrupt)
+            args = build_parser().parse_args()
+            evidence = run(args, signal_state)
+        except KeyboardInterrupt as exc:
+            summary = {
+                'status': 'interrupted',
+                'completed': False,
+                'fallback_allowed': False,
+                'integrity_ok': True,
+                'exit_code': 128 + interruption_signal(signal_state, exc),
+                'error_kind': 'interrupted',
+                'error': str(exc) or 'AGY planning interrupted',
+            }
+        except (ConfigError, OSError, UnicodeError, subprocess.TimeoutExpired) as exc:
+            summary = {
+                'status': 'invalid_config',
+                'completed': False,
+                'fallback_allowed': False,
+                'integrity_ok': True,
+                'exit_code': 2,
+                'error': str(exc),
+            }
+            print('agy_plan preparation failed: ' + str(exc), file=sys.stderr)
+        else:
+            summary = {
+                key: evidence[key]
+                for key in ('status', 'stage', 'completed', 'fallback_allowed', 'integrity_ok', 'exit_code', 'plan_file')
+            }
+            if 'error' in evidence:
+                summary['error'] = evidence['error']
+        print(json.dumps(summary, ensure_ascii=False))
+        return summary['exit_code']
+    finally:
+        for signum, handler in handlers.items():
+            signal.signal(signum, handler)
 
 
 if __name__ == '__main__':
