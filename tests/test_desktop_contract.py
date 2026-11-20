@@ -219,6 +219,37 @@ class DesktopContract(unittest.TestCase):
                 config = json.loads(store.raw('ai'))
                 self.assertEqual(config['review']['codex_effort'], 'xhigh')
                 self.assertEqual(config['claude_relay']['implementation']['effort'], 'high')
+
+    def test_app_save_and_switch_off_codex_preserves_claude_dual_plan(self):
+        store = Store(self.root)
+        dual_plan = {
+            'enabled': True,
+            'partner': 'agy',
+            'model': 'agy-plan-model',
+            'effort': 'high',
+            'synthesizer': 'agy',
+            'on_failure': 'fallback',
+        }
+        atomic(store.paths['ai'], json.dumps({
+            'review': {'codex_model': 'gpt-6-astra'},
+            'claude_relay': {
+                'implementation': {'provider': 'codex', 'model': 'gpt-6.2-sol', 'effort': 'high'},
+                'dual_plan': dual_plan,
+            },
+        }).encode())
+
+        # Ordinary save preserves claude_relay.dual_plan verbatim
+        state = store.read()
+        store.save(dict(state['values'], mode='auto', reviewer_model='gpt-6.2-astra'), state['fingerprints'])
+        config = json.loads(store.raw('ai'))
+        self.assertEqual(config['claude_relay']['dual_plan'], dual_plan)
+
+        # Switching Claude implementation away from Codex removes implementation but keeps dual_plan
+        state = store.read()
+        store.save(dict(state['values'], claude_implementation_provider='claude-agent'), state['fingerprints'])
+        config = json.loads(store.raw('ai'))
+        self.assertNotIn('implementation', config['claude_relay'])
+        self.assertEqual(config['claude_relay']['dual_plan'], dual_plan)
     def test_qwen_formal_entry_prepare_contract(self):
         # Real parser/preflight/snapshot gates, with fixture HOME and a new output.
         store=Store(self.root)

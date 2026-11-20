@@ -17,6 +17,7 @@
 | Qwen Responses 经 Codex | Codex 0.160.0 | 正式 plan 与历史 scoped diff；`actual_model=null`、`model_evidence=requested_only` |
 | Qwen Responses 经 Codex | Codex 0.163.0 | 2026-10-20 合成 plan 两阶段；未验证新版业务 diff 或用户级入口全流程，模型证据仍为 requested_only |
 | Codex → Qoder | Qoder CLI 1.1.74 / 1.1.77，实际 Kimi-K3.1-Pro | 1.1.77 正式 bug-review 双阶段；新版 plan/diff 仅离线覆盖，旧版历史证据归属见下文 |
+| Claude 主导 → AGY 双方案规划 | AGY CLI 1.5.13 | 已有本机 `--mode plan --sandbox --output-format stream-json` 探针与离线全路径单测；正式 `agy_plan.py` 真实 `draft`/`synthesize` 探针待主模型终审补录，`model_evidence=requested_only` |
 | Codex 用户级入口 / 共享方法 | Codex 0.160.0 | 有限跨项目发现、隔离接力与方法样本；不是任意任务遵循保证 |
 | Claude 普通登录主导完整链路 | 待补验 | 历史 Login expired；Qwen bare 鉴权不能代替普通登录验收 |
 | DeepSeek | 历史端点 / 离线能力 | 不代表当前配置、桌面外部调用或完整接力通过 |
@@ -578,3 +579,18 @@ rmcp::transport::worker: worker quit with fatal: Transport channel closed, when 
 ```
 
 `compat.json` 据 P1–P4 加入 Claude 2.1.326、Codex 0.169.1；版本集合不代表全部路径，路径边界以本表为准（Token Plan Codex 实施 0.169.1 仍未取证）。
+
+## 2026-11-20 Claude 主导 AGY 双方案规划（一期）
+
+- `compat.json` 新增 `tested.agy: ["1.5.13"]`，未登记版本在 `agy_plan.py` 中记录 `untested_cli_version` 警告、不阻断，但 `init`/`result`/写工具与完整性门禁仍独立 fail closed。`install.sh --status` 不因未安装可选 `agy` 报警告。
+- **实测协议与 CLI 边界（`agy 1.5.13`）**：
+  - 调用形态为 `--mode plan --sandbox --output-format stream-json --print-timeout <N>s [--model <m>] [--effort <e>] --print=<payload>`（不传 `--disable-slash-commands`，否则 `--mode plan` 展开失效）。
+  - `init` 事件将 `permission_mode="request-review"` 与 `expanded_commands`（含 `{"name":"plan","type":"system"}`）嵌套于 `init` 对象下；`step_update` 嵌套于 `step_update` 与 `tool_info`。在非交互 `request-review` 模式下，调用 `run_command` 会被拒绝并导致空 `response` 与 `result.denied_actions`，因此封装器在提示词中明确禁止终端命令、仅使用只读文件/检索工具。
+  - 若配置的 AGY 模型 ID 本身含深度后缀（如 `gemini-3.8-flash-medium`），再传冲突的 `effort` 会被 `agy` 拒绝退出码 1（已实测复现，封装器按普通失败留证并标记 `integrity_ok=true`）；可只填带后缀模型名且 `effort` 留 `null`。流内不证明供应方后端路由，固定记为 `model_evidence="requested_only"`。
+  - 受限沙箱若禁止访问 AGY 本地安装状态目录会报权限错误，真实调用须在允许该目录的宿主环境执行。
+- **生产脚本真实探针（2026-11-20，主模型终审独立执行）**：
+  - 合成临时 Git 仓库（含已提交 `calc.py`、未提交追踪修改 `sub` 与 `.gitignore` 内 `.claude/plans/demo.request.md` 含 R2 附录标记），使用生产 `adapters/claude-code/scripts/agy_plan.py` 与 `agy 1.5.13`（请求模型 `gemini-3.8-flash-low`，`effort=null`）：
+  - **探针 A（`--stage draft`）**：退出码 `0`、`completed=true`、`integrity_ok=true`、`warnings=[]`、`tool_warnings=[]`、stderr 为空（15.9s）；隔离只读暂存正确带入未提交追踪改动 `sub`、剥离 R2 附录、真实原件与被忽略 request 字节零变化。
+  - **探针 B（`--stage synthesize`）**：退出码 `0`、`completed=true`、`integrity_ok=true`、`warnings=[]`、`tool_warnings=[]`、stderr 为空（19.8s）；两份短草稿分别放独有约束 `CONSTRAINT_CLAUDE_ALPHA` 与 `CONSTRAINT_AGY_BETA`，最终 `plan.md` 明确比对并处理了两项约束。
+- **离线验证边界**：`tests/test_claude_agy_plan.py`（Python 3.9+）以离线替身 CLI 与真实临时 Git 仓库覆盖配置 fail-closed、`git archive` + 脏追踪叠加 + `128 MiB` 字节上限的隔离只读暂存、原件与被忽略 `.request.md` 零变化、R2 `## 附录：非需求` 剥离、`synthesize` 三材料校验与内联、前导 `-` 与前导 `/` 保护、四级退出码（`0`/`1`/`2`/`3`）与 `fallback_allowed` 门禁（含写工具尝试、原件/暂存变化、`stop_group` 清理失败）以及非阻塞版本/stderr/工具警告，并对三项核心守卫做了隔离受控变异红绿验证。
+- **未覆盖边界**：不包含 Claude Code 真实交互会话内 `/disable-dual-plan` 的端到端模型遵循；一期不包含 macOS App UI 与长会话压缩后 `/disable-dual-plan` 状态持久化（已登记于 [FEATURE_TODOS.md](FEATURE_TODOS.md)）。

@@ -308,6 +308,7 @@ silently falling back.
 | `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
 | `claude_relay.implementation` | Set `{"provider":"codex","model":"gpt-6.2-sol"}` to implement in an isolated worktree (CLI pin 0.169.1, live probe pending) | missing/null → implementer |
 | `claude_relay.implementation.effort` | Reasoning effort for configured Claude-led Codex implementation | missing/null → Codex CLI default |
+| `claude_relay.dual_plan` | Opt-in Claude-led dual planning with AGY (`enabled`, `partner="agy"`, optional `model`/`effort` in `low\|medium\|high\|xhigh\|max`, `synthesizer="claude"\|"agy"`, `on_failure="stop"\|"fallback"`); session override via `/disable-dual-plan` | missing/null/`enabled: false` → Claude single plan |
 | `plugins.qwen.claude_executor` | Claude-led Qwen executor. Set `codex` to use Responses | `claude` |
 | `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
 | `codex_relay.implementation_provider` | Codex-led implementation: native `codex`, Token Plan (`glm-5.3` / `qwen4-max`) or Qoder subscription fixed logical `glm-5.3` | missing/null → `codex` |
@@ -329,6 +330,7 @@ Versions with path-scoped evidence:
 |-----------|------------------------------------|
 | Claude Code | 2.1.258, 2.1.280 (review paths) |
 | Codex CLI | 0.156.0, 0.160.0, 0.163.0 (different verified paths) |
+| AGY CLI | 1.5.13 (Claude-led dual-plan `draft`/`synthesize` synthetic live probes; see `docs/COMPATIBILITY.md`) |
 | Base scripts | Python 3.9+; macOS tested, other systems unverified |
 | Optional macOS menu bar app | macOS 13+, Swift 6.1, Python 3.11+; ad-hoc build, not notarized distribution |
 

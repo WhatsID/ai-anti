@@ -95,7 +95,7 @@ PY
 }
 
 assert_full_install() {
-  for name in codex-implement codex-review opus-review relay-mode bug-review; do
+  for name in codex-implement codex-review opus-review relay-mode bug-review disable-dual-plan; do
     check link_is "$C/commands/$name.md" "$CHECKOUT/adapters/claude-code/commands/$name.md"
   done
   check link_is "$C/commands/qwen-review.md" "$CHECKOUT/plugins/qwen/commands/qwen-review.md"

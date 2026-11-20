@@ -20,7 +20,15 @@
   },
   "claude_relay": {
     "implementation": {"provider": "codex", "model": "gpt-6.2-sol",
-                       "effort": "high"}
+                       "effort": "high"},
+    "dual_plan": {
+      "enabled": false,
+      "partner": "agy",
+      "model": null,
+      "effort": null,
+      "synthesizer": "claude",
+      "on_failure": "stop"
+    }
   },
   "codex_relay": {
     "review_channel": "claude",

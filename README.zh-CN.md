@@ -246,6 +246,7 @@ Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独
 | `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
 | `claude_relay.implementation` | Claude 主导时设为 `{"provider":"codex","model":"gpt-6.2-sol"}`，在隔离工作树固定模型实施（CLI 钉 0.169.1，真实探针待验） | 缺失/null → implementer |
 | `claude_relay.implementation.effort` | Claude 主导时按配置调用 Codex 实施的思考深度 | 缺失/null → Codex CLI 默认 |
+| `claude_relay.dual_plan` | Claude 主导可选 AGY 双方案规划（`enabled`、`partner="agy"`、可选 `model`/`effort` 取 `low\|medium\|high\|xhigh\|max`、`synthesizer="claude"\|"agy"`、`on_failure="stop"\|"fallback"`）；会话级临时禁用命令 `/disable-dual-plan` | 缺失/null/`enabled: false` → Claude 单方案 |
 | `plugins.qwen.claude_executor` | Claude 主导的 Qwen 执行器，可显式选 `codex` 走 Responses | `claude` |
 | `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
 | `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅固定逻辑 `glm-5.3` | 缺失/null → `codex` |
@@ -266,6 +267,7 @@ Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独
 |------|------------------|
 | Claude Code | 2.1.258、2.1.280（评审路径） |
 | Codex CLI | 0.156.0、0.160.0、0.163.0（已验路径不同） |
+| AGY CLI | 1.5.13（Claude 主导双方案 `draft`/`synthesize` 合成真实探针，边界见 `docs/COMPATIBILITY.md`） |
 | 基础脚本 | Python 3.9+；macOS 已测，其他系统未验 |
 | 可选 macOS 菜单栏 | macOS 13+、Swift 6.1、Python 3.11+；ad-hoc 构建，非公证分发 |
 

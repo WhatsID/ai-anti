@@ -372,3 +372,8 @@
 ### Codex 0.169.1 噪声行误判（2026-11-20）
 
 - [ ] 中｜两条未登记的 Codex 输出被判为运行失败 — ①评审：`turn.completed` 与完整最终消息之后出现 `error: Reconnecting... (stream disconnected… IO error…)` 事件，解析器报未知事件；②实施：stderr 出现 `ERROR codex_core::tools::router: error=write_stdin failed: Unknown process id <n>`（清理后台命令时），`codex_events.py` 报 `unknown Codex stderr line`，而 JSONL 已有 `turn.completed` 与完整报告。两次均由用户裁决人工采用产物。值得做：按真实样本登记这两个模板并补严格回归（仍须拒绝无 `turn.completed` 的运行），不放宽通配。复核判据：用样本重放时两次运行判 completed，截断样本仍判失败。｜来源：业务仓库接力 2026-11-19/20（方案评审第 1 轮、实施段）
+
+### Claude 主导 AGY 双方案规划后续（2026-11-20）
+
+- [ ] 低｜**二期 macOS App 增加 `claude_relay.dual_plan` 界面与 AGY 检测** — 一期按用户取舍不做桌面界面，只通过契约测试保证 `config_store.Store` 保存其他设置及切离 Codex 实施时完整保留 `claude_relay.dual_plan`。值得做的条件：双方案规划长期稳定使用且用户希望在菜单栏应用可视化开关/切换模型与综合方。关闭判据：App 可读写 `claude_relay.dual_plan` 全字段并校验 `AGY_EFFORTS`，本地检查支持 AGY 版本探测且不误报未装用户的默认配置。｜来源：2026-11-20 双方案需求第 4 项取舍与方案评审
+- [ ] 中｜**`/disable-dual-plan` 长会话上下文压缩状态边界** — 为防止跨会话静默停用双方案，一期刻意不做磁盘持久化；超长会话发生上下文压缩后，会话内临时禁用状态可能丢失。当前在命令模板说明压缩后可用 `/disable-dual-plan status` 复核或在当次消息显式声明（最高优先）。值得做的条件：真实长会话频繁发生压缩后误触发双方案。候选修法：评估绑定单会话 ID 的只读内存/临时标记与过期回收，避免跨会话残留。｜来源：2026-11-20 双方案第 1 轮评审第 7 项裁决
