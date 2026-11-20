@@ -60,6 +60,10 @@ Material filtering rejects common sensitive file names, not secrets embedded in 
 content. A mistakenly selected secret may reach both the service and local evidence. Review
 and redact artifacts before sharing; logs are not guaranteed to be automatically sanitized.
 
+The AGY planning CLI receives its prompt as `--print=<payload>`, which is visible to local
+`ps` while the process runs. Follow the R2 redaction rule and keep raw credentials out of
+the request, drafts and instructions.
+
 ## Credential lifecycle
 
 Users supply API credentials through configured paths, typically outside this repository in

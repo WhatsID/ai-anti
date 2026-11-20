@@ -16,6 +16,7 @@ import tempfile
 import time
 import unittest
 from unittest import mock
+from urllib.parse import quote
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / 'adapters' / 'claude-code' / 'scripts' / 'agy_plan.py'
@@ -196,7 +197,7 @@ if mode == 'trailing_event':
     print(json.dumps({'event': 'step_update', 'tool_call': {'name': 'read_file', 'status': 'SUCCESS'}}))
     sys.exit(0)
 
-response = os.environ.get('FIXTURE_RESPONSE', '# AGY Plan\\n\\n- Concrete step')
+response = os.environ.get('FIXTURE_RESPONSE', '# AGY Plan\\n\\n- Concrete step').replace('@@CWD@@', str(cwd))
 print(json.dumps({
     'event': 'result',
     'result': {'status': 'SUCCESS', 'response': response, 'conversation_id': 'conv-fixture-001'},
@@ -431,6 +432,17 @@ class AgyPlanTests(unittest.TestCase):
         status = json.loads((target / 'status.json').read_text(encoding='utf-8'))
         self.assertEqual(manifest, status)
         return manifest
+
+    def assert_read_only_self_check_rules(self, prompt_text):
+        rules = prompt_text.split('Rules:\n', 1)[1].split('\n\n', 1)[0]
+        self.assertIn('Check each key design point against source and walk through counterexamples.', rules)
+        self.assertIn('Self-check record', rules)
+        self.assertIn('statically confirmed', rules)
+        self.assertIn('needs runtime verification (with a minimal example)', rules)
+        self.assertIn('Do not claim to have run commands or tests.', rules)
+        self.assertIn('Use repository-relative paths for file references.', rules)
+        self.assertIn('Do not output staging absolute paths or file:// links to staging', rules)
+        self.assertIn('call read_file on a directory', rules)
 
     def test_user_message_trigger_uses_defaults_inherits_fields_and_overrides_synthesizer(self):
         for label, stage, config in (
@@ -809,6 +821,7 @@ class AgyPlanTests(unittest.TestCase):
         self.assertNotIn('## 附录：非需求', prompt_text)
         self.assertNotIn('Secret Claude inference', prompt_text)
         self.assertNotIn(str(self.repo), prompt_text)
+        self.assert_read_only_self_check_rules(prompt_text)
 
         expected_user_req = '- Requirement starting with dash\nPlease add dual-plan support.\n\n'
         self.assertEqual(
@@ -873,7 +886,55 @@ class AgyPlanTests(unittest.TestCase):
         self.assertIn('Constraint A: keep config strict.', prompt_text)
         self.assertIn('<<<BEGIN_AGY_DRAFT>>>', prompt_text)
         self.assertIn('Constraint B: isolate snapshot.', prompt_text)
+        self.assert_read_only_self_check_rules(prompt_text)
+        rules = prompt_text.split('Rules:\n', 1)[1].split('\n\n', 1)[0]
+        self.assertIn('Do not adopt a draft design based on its citations alone.', rules)
+        self.assertIn('Keep points marked as needing runtime verification in either draft pending', rules)
+        self.assertIn('Do not mark them as confirmed.', rules)
         self.assertIn('Merged A and B.', (self.out / 'plan.md').read_text(encoding='utf-8'))
+
+    def test_staging_references_are_rewritten_in_plan_only(self):
+        staging = str(self.out / '.staging')
+        cases = [
+            ('file-link', '[app.py](file://@@CWD@@/app.py#L1-L2)', '`app.py#L1-L2`'),
+            ('localhost-link', '[入口](file://localhost@@CWD@@/b.py)', '入口（`b.py`）'),
+            ('bare-child', '见 @@CWD@@/c.py。', '见 c.py。'),
+            ('root-link', '[root](file://@@CWD@@)', 'root（`.`）'),
+            ('bare-root', '目录 @@CWD@@.', '目录 <REPO_ROOT>.'),
+            ('backup-sibling', '兄弟 @@CWD@@-backup/x.py', f'兄弟 {staging}-backup/x.py'),
+            ('suffix-sibling', '兄弟 @@CWD@@X/x.py', f'兄弟 {staging}X/x.py'),
+            ('unrelated-path', '/tmp/other/.staging/y.py', '/tmp/other/.staging/y.py'),
+            ('term', '暂存目录称为 .staging。', '暂存目录称为 .staging。'),
+        ]
+        response = '\n'.join(source for _, source, _ in cases)
+        result = self.invoke(extra_env={'FIXTURE_RESPONSE': response})
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+        plan_bytes = (self.out / 'plan.md').read_bytes()
+        lines = plan_bytes.decode('utf-8').splitlines(keepends=True)
+        self.assertEqual(len(lines), len(cases))
+        for (name, _, expected), line in zip(cases, lines):
+            with self.subTest(case=name):
+                self.assertEqual(line, expected + '\n')
+
+        manifest = self.load_manifest()
+        self.assertEqual(manifest['warnings'], [{'kind': 'staging_path_rewritten', 'count': 5}])
+        self.assertEqual(manifest['plan_sha256'], hashlib.sha256(plan_bytes).hexdigest())
+        events = (self.out / 'plan.jsonl').read_text(encoding='utf-8').splitlines()
+        self.assertEqual(json.loads(events[-1])['result']['response'], response.replace('@@CWD@@', staging))
+
+    def test_rewrite_staging_paths_decodes_url_encoded_paths(self):
+        mod = load_agy_plan_module()
+        staging = self.base / 'my out' / '中文' / '.staging'
+        encoded = quote(str(staging), safe='/')
+        cases = [
+            ('raw-root', f'见 {staging}/c.py。', '见 c.py。'),
+            ('encoded-root', f'[入口](file://{encoded}/app.py)', '入口（`app.py`）'),
+            ('encoded-child', f'[入口](file://{encoded}/%E6%96%87%20%E4%BB%B6.py#L3)', '入口（`文 件.py#L3`）'),
+        ]
+        for name, source, expected in cases:
+            with self.subTest(case=name):
+                self.assertEqual(mod.rewrite_staging_paths(source, staging), (expected, 1))
 
     def test_isolated_readonly_staging_protects_dirty_tracked_ignored_request_and_extra_file(self):
         # Dirty tracked modification, tracked deletion, staged new file, ignored huge artifact, extra file

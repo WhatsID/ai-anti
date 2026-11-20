@@ -601,3 +601,10 @@ rmcp::transport::worker: worker quit with fatal: Transport channel closed, when 
 - 两阶段在建 `--out` 或探测 AGY 版本前按 UTF-8 字节预检，固定上限 120 KiB。超限返回 2，建议精简草稿或改由 Claude 综合。启动时的 `E2BIG` 也返回 2，终态 `error_kind=prompt_too_large`。证据记录 `prompt_bytes` 和 `limits.max_prompt_bytes`。
 - `0` 表示完成。仅 `1` 且 `fallback_allowed=true`、`integrity_ok=true` 时可按 `on_failure` 处理。`2` 为配置、前置检查或启动参数超限，`3` 为完整性中止（含暂存清理失败或完整性核验未完成）。`130` 为 SIGINT 或无信号号的中断，`143` 为 SIGTERM。完整性问题优先于中断，其余非零码及无法核验的状态也须停止保留证据。
 - 需求和草稿在提示词副本中按子串替换仓库物理与逻辑绝对路径，原件字节保持不变。兄弟目录如 `<repo>-other` 也会变成 `<REPO_ROOT>-other`；`--instructions` 中命中仓库路径则直接拒绝。`input_sha256.request_user` 在 draft 哈希剥离附录后的正文，在 synthesize 哈希整个原文件。`prompt_sha256` 哈希实际发送的提示词。
+
+### AGY 暂存引用改写与历史耗时样本
+
+- 发布 `plan.md` 前，将已知暂存根内的 Markdown 链接改成仓库相对路径的行内代码，裸路径改成相对路径，裸暂存根改成 `<REPO_ROOT>`。匹配范围为 `out.resolve() / '.staging'`、其 realpath 与两者的 URL 编码形式，调用方的逻辑路径别名不在匹配范围内。manifest 的 `staging_path_rewritten` 告警记录次数，`plan_sha256` 对应发布内容，`plan.jsonl` 保留原始流。
+- 2026-11-20 第一次 AGY 起草的 manifest 记录请求模型和深度均为 `null`，耗时 570.983 秒。日志按 `step_index` 去重后有 49 次 `read_file`，其中 6 次报错，包含读目录错误。
+- 第二次起草的 manifest 记录请求 `gemini-4-neon` / `xhigh`（`requested_only`），耗时 567.395 秒。日志按同一口径有 48 次 `read_file`，其中 3 次因文件不存在报错。
+- 这两次的 init 工具清单都声明了 `list_dir`、`grep_search`、`find_by_name`。日志中这三项调用均为零，实际能否调用待验证。后续取证见 [FEATURE_TODOS.md](FEATURE_TODOS.md)。
