@@ -80,6 +80,9 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('Picker("评审执行器"', view)
         self.assertIn('Picker("评审模型ID"', view)
         self.assertIn('登录状态未检测', view)
+        self.assertNotIn('使用现有 Codex CLI 登录', view)
+        self.assertIn('} else if model.draft.channel == "qoder" {', view)
+        self.assertIn('使用现有 Qoder CLI 登录；登录状态未检测。当前固定 Kimi-K3.1-Pro；仅支持 Codex 主模型。', view)
         self.assertNotIn('.disabled(model.dirty)', view)
         self.assertIn('Codex 评审失败即停止', view)
         app = (ROOT/'apps/macos/Sources/AIReviewBar/App.swift').read_text()
@@ -95,7 +98,9 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('.easeInOut(duration: 0.2)', view)
         self.assertIn('$0.disablesAnimations = true', view)
         self.assertLess(view.index('Picker("协作模式"'), view.index(review))
-        self.assertLess(view.index('空主模型表示保留已有默认值'), view.index(review))
+        self.assertLess(view.index('solo 同时停用'), view.index(review))
+        for removed in ('空主模型表示保留已有默认值', '已配置回退列表', '请直接编辑 ~/.config/ai-anti/config.json'):
+            self.assertNotIn(removed, view)
         scroll = view.split('ScrollView {', 1)[1].split('            Divider()', 1)[0]
         self.assertIn('.frame(width: geometry.size.width - 8, alignment: .leading)', scroll)
         self.assertNotIn('Form {', view)
@@ -464,11 +469,22 @@ class DesktopContract(unittest.TestCase):
 
     def test_dual_plan_settings_view_and_package_contract(self):
         view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
-        start = view.index('空主模型表示保留已有默认值')
+        start = view.index('solo 同时停用')
         end = view.index('ServiceSettingsGroup("评审服务"', start)
         section = view[start:end]
         self.assertRegex(section, r'if model\.draft\.host == "claude"\s*\{\s*field\("双方案规划"\)\s*\{')
         self.assertNotIn('isSolo', section)
+        self.assertIn('Picker("双方案规划", selection: $model.draft.dualPlanEnabled)', section)
+        enable = 'Text("enable").tag(true)'
+        disable = 'Text("disable").tag(false)'
+        self.assertIn(enable, section)
+        self.assertIn(disable, section)
+        self.assertLess(section.index(enable), section.index(disable))
+        self.assertIn('.disabled(!model.draft.dualPlanError.isEmpty)', section)
+        self.assertNotIn('Toggle(', section)
+        self.assertNotIn('toggleStyle', section)
+        self.assertRegex(section, r'\}\s*else if model\.draft\.dualPlanEnabled \{\s*Text\(model\.draft\.dualPlanDetail\)')
+        self.assertEqual(section.count('dualPlanDetail'), 1)
         self.assertNotIn('if model.reviewUsesQwen {', view)
         self.assertNotIn('Qoder 暂不支持 Claude 主模型。', view)
         self.assertIn('backend/dual_plan.py', (ROOT/'apps/macos/build-app.sh').read_text())

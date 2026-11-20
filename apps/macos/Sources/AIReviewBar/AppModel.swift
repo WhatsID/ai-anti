@@ -67,7 +67,7 @@ struct Draft: Equatable {
         [dualPlanPartner == "agy" ? "AGY" : dualPlanPartner,
          dualPlanModel.isEmpty ? "AGY 默认模型" : dualPlanModel,
          dualPlanEffort.isEmpty ? "默认深度" : dualPlanEffort,
-         dualPlanSynthesizer == "agy" ? "AGY 综合" : "Claude 综合"].joined(separator: " · ")
+         dualPlanSynthesizer == "agy" ? "AGY 汇总最终方案" : "Claude 汇总最终方案"].joined(separator: " · ")
     }
     var codexModels = ModelCatalog.codex
     var implementationEnabled: Bool { mode != "solo" }

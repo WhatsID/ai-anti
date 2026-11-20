@@ -197,22 +197,21 @@ struct SettingsView: View {
                             }
                         }
                         note("solo 同时停用交叉评审和独立实施。用户当次明确指令 > 项目 .claude/relay-mode.local > 全局默认 > rules。Codex 模式仅对已加载 codex-relay 的工作流生效。")
-                        note("空主模型表示保留已有默认值；一次保存包含 Claude 与 Codex 两组已编辑字段。")
                     }.frame(maxWidth: .infinity, alignment: .leading)
                     if model.draft.host == "claude" {
                         field("双方案规划") {
-                            HStack(spacing: 6) {
-                                Toggle("双方案规划", isOn: $model.draft.dualPlanEnabled).toggleStyle(.switch)
-                                    .disabled(!model.draft.dualPlanError.isEmpty)
-                                if !model.draft.dualPlanError.isEmpty {
-                                    Text("：配置无效").foregroundStyle(.red)
-                                } else if model.draft.dualPlanEnabled {
-                                    Text("：" + model.draft.dualPlanDetail).lineLimit(1).truncationMode(.tail)
-                                }
-                            }
+                            Picker("双方案规划", selection: $model.draft.dualPlanEnabled) {
+                                Text("enable").tag(true)
+                                Text("disable").tag(false)
+                            }.disabled(!model.draft.dualPlanError.isEmpty)
                         }
-                        if !model.draft.dualPlanError.isEmpty { note(model.draft.dualPlanError) }
-                        note("协作方、模型、深度、综合方与失败处置请直接编辑 ~/.config/ai-anti/config.json 的 claude_relay.dual_plan，再重新读取配置。按 solo 运行的任务不做双方案；当次指令与会话内 /disable-dual-plan 优先。")
+                        if !model.draft.dualPlanError.isEmpty {
+                            Text("配置无效：" + model.draft.dualPlanError).font(.caption).foregroundStyle(.red)
+                                .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
+                        } else if model.draft.dualPlanEnabled {
+                            Text(model.draft.dualPlanDetail).fixedSize(horizontal: false, vertical: true)
+                                .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
+                        }
                     }
                     ServiceSettingsGroup("评审服务", summary: SettingsSummary.review(model.draft), isExpanded: $reviewExpanded) {
                         Picker("评审服务", selection: Binding(get: { model.reviewFamily }, set: { model.switchReviewFamily($0) })) {
@@ -253,8 +252,8 @@ struct SettingsView: View {
                                 note("每次新任务优先主账号；明确额度耗尽后当次任务持续使用备用。两个槽与实施共享，关闭开关保留备用密钥；不显示实时余额。")
                             }
                             note("Claude 与 Codex 共享当前 API 服务、模型及凭证；两个协议地址独立保存。切换服务保留各自草稿，未保存不写入磁盘。")
-                        } else {
-                            note(model.draft.channel == "qoder" ? "使用现有 Qoder CLI 登录；登录状态未检测。当前固定 Kimi-K3.1-Pro；仅支持 Codex 主模型。" : "使用现有 Codex CLI 登录；登录状态未检测。")
+                        } else if model.draft.channel == "qoder" {
+                            note("使用现有 Qoder CLI 登录；登录状态未检测。当前固定 Kimi-K3.1-Pro；仅支持 Codex 主模型。")
                         }
                         field("评审执行器") {
                             Picker("评审执行器", selection: .constant(model.draft.channel)) {
@@ -268,7 +267,6 @@ struct SettingsView: View {
                         }
                         if model.executorMigrationPending { note("保存后 Qwen 评审改用 Responses 地址") }
                         if model.draft.host == "claude" {
-                            note("已配置回退列表：" + (model.claudeFallbacks.isEmpty ? "无" : model.claudeFallbacks.joined(separator: " → ")))
                             if model.draft.channel == "codex" && model.claudeFallbacks.contains("qwen") {
                                 note("Qwen 评审经 Codex CLI · Responses 执行")
                             }

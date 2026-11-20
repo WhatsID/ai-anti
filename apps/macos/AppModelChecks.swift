@@ -517,7 +517,7 @@ import Combine
         model.discard()
 
         assert(!model.dirty && !model.draft.dualPlanEnabled && model.draft.dualPlanError.isEmpty)
-        assert(model.draft.dualPlanDetail == "AGY · gemini-4-neon · xhigh · Claude 综合")
+        assert(model.draft.dualPlanDetail == "AGY · gemini-4-neon · xhigh · Claude 汇总最终方案")
         model.draft.dualPlanEnabled = true
         assert(model.dirty)
         model.save()
@@ -540,11 +540,20 @@ import Combine
                "Menu mode saves must omit dual_plan_enabled")
         front.complete(.success(state))
 
+        model.draft.dualPlanEnabled = false
+        model.save()
+        let disabledSave = front.requests.last?["values"] as! [String: Any]
+        assert(disabledSave["dual_plan_enabled"] as? Bool == false && disabledSave["dual_plan"] == nil)
+        values["dual_plan_enabled"] = false
+        state["values"] = values
+        front.complete(.success(state))
+        assert(!model.saved.dualPlanEnabled && !model.draft.dualPlanEnabled && !model.dirty)
+
         values["dual_plan"] = ["model": NSNull(), "effort": NSNull(), "synthesizer": "agy", "on_failure": "fallback"]
         state["values"] = values
         model.refresh(); front.complete(.success(state))
         assert(model.draft.dualPlanModel.isEmpty && model.draft.dualPlanEffort.isEmpty)
-        assert(model.draft.dualPlanDetail == "AGY · AGY 默认模型 · 默认深度 · AGY 综合")
+        assert(model.draft.dualPlanDetail == "AGY · AGY 默认模型 · 默认深度 · AGY 汇总最终方案")
 
         let planError = "claude_relay.dual_plan.effort 无效"
         values["dual_plan_enabled"] = false; values["dual_plan_error"] = planError
