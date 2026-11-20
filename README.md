@@ -23,16 +23,16 @@ different stances:
 The point is not more models doing more work, but a second model with a different stance finding
 the mistakes the first one cannot see — before they turn into hidden defects or late rework.
 
-## Two main paths
+## Relay paths
 
-Two relay paths are supported: Claude → Codex and Codex → Claude/Qwen. The left side is the primary
-model that leads (plans, adjudicates, does the final check); the right side reviews or takes over
-implementation.
+The first model leads the work, adjudicates findings and does the final check. The relay path
+determines which model reviews or implements.
 
 | Direction | Entry points | What happens |
 |-----------|--------------|--------------|
 | Claude → Codex | `/codex-review plan <plan.md>`, `/codex-review diff`, `/codex-implement <plan.md>` | Claude Code leads. Codex reviews in a read-only sandbox, implements with a configured model in an isolated worktree, and can take over after an implementer API failure |
 | Codex → Claude/Qwen | `$claude-review`, `$codex-relay` | Codex leads; the selected Claude/Qwen model reviews a plan (two stages) or a scoped diff under fail-closed checks; `$codex-relay` runs the full relay |
+| AGY → Codex → AGY | `agy-relay`, `codex-review` | AGY writes a single plan. Codex reviews it read-only and implements in an isolated Git worktree. AGY independently reviews the changes and runs acceptance checks. |
 
 ## Four relay modes
 
@@ -94,15 +94,15 @@ credentials required by your chosen path: [Claude Code](https://docs.anthropic.c
 and/or [Codex CLI](https://github.com/openai/codex). Qwen Responses review uses Codex plus the
 configured API credential; it does not require Claude login.
 
-A full relay additionally needs native independent agents in the primary tool, an explicitly
-selected implementation model and observable runtime evidence. A standalone CLI does not
-automatically supply the complete relay. Listed model IDs do not imply access for every account.
+A full relay needs the selected path's independent implementation route and observable runtime
+evidence. Set the implementation model as required by that route and use a model your account can access.
 
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
 cd ~/ai-anti
 ./install.sh                 # Claude Code side: commands, subagents, CLAUDE.md import
 ./install.sh --with-codex    # optional: Codex user-level entry and ~/.agents/skills
+./install.sh --with-agy      # optional: AGY native plugin
 ./install.sh --status        # read-only health check
 ```
 
@@ -121,6 +121,15 @@ when needed. `--with-codex` installs the skills and an owned instruction block t
 explicitly reads `adapters/codex/AGENTS.global.md`. User content outside the block is
 preserved byte for byte. Reinstallation inherits optional components and upgrades
 legacy manifests; reinstall after moving the source checkout to refresh its paths.
+
+For AGY, install `--with-agy` and open a new AGY session. The plugin at
+`~/.gemini/config/plugins/ai-anti` loads the shared workflow entry and provides `agy-relay` for
+the full relay and `codex-review` for standalone plan review. Set `agy_relay.review` and
+`agy_relay.implementation` in `~/.config/ai-anti/config.json` as shown in the configuration
+example. AGY uses its own model and effort settings and shares `review.timeout` and
+`review.idle_timeout`. Implementation requires an explicit Codex model and stops on failure for
+the user's decision. `./install.sh --without-agy` removes the owned link and installer-created empty directories.
+See [AGY compatibility and validation scope](docs/COMPATIBILITY.md#2026-11-20-agy-led-relay).
 
 A nonempty `AGENTS.override.md` shadows the entry, so installation stops and asks you
 to resolve it manually. Unsafe instruction files or path ancestors and damaged markers

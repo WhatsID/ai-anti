@@ -13,7 +13,7 @@ import time
 SKILLS = Path(__file__).resolve().parents[2] / 'codex' / 'skills'
 sys.path[:0] = [str(SKILLS / skill / 'scripts') for skill in ('claude-review', 'codex-relay')]
 
-from ai_anti_config import ConfigError, claude_implementation, load, review_limits
+from ai_anti_config import ConfigError, agy_implementation, claude_implementation, load, review_limits
 from implementation import CAP, digest, interrupt, write
 from implementation_protocol import validate
 from review_codex import parse_version_output
@@ -52,9 +52,9 @@ def run(args):
     head = git(workspace, '--verify', 'HEAD^{commit}')
 
     config = load(args.config)
-    selected = claude_implementation(config)
+    selected = agy_implementation(config) if args.relay == 'agy' else claude_implementation(config)
     if selected is None:
-        raise ConfigError('claude_relay.implementation must explicitly select codex')
+        raise ConfigError(args.relay + '_relay.implementation must explicitly select codex')
     model = selected['model']
     effort = selected['effort']
     timeout, idle = review_limits(config, args.timeout, args.idle_timeout)
@@ -67,7 +67,7 @@ def run(args):
     saved_prompt.write_bytes(prompt_bytes)
     log = out / 'implementation.jsonl'
     stderr = out / 'implementation.stderr.txt'
-    evidence = dict(provider='codex', requested_model=model, requested_effort=effort,
+    evidence = dict(relay=args.relay, provider='codex', requested_model=model, requested_effort=effort,
                     model_evidence='requested_only',
                     cli_version=None, prompt_sha256=digest(saved_prompt), workspace=str(workspace),
                     head=head, duration_seconds=0, exit_code=None, log=log.name, log_sha256=None,
@@ -112,6 +112,7 @@ def main():
     for name in ('workspace', 'prompt', 'out'):
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--config', type=Path)
+    parser.add_argument('--relay', choices=('claude', 'agy'), default='claude')
     parser.add_argument('--timeout', type=int)
     parser.add_argument('--idle-timeout', type=int)
     try:

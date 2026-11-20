@@ -37,6 +37,18 @@
     "implementation_provider": "codex",
     "token_plan_implementation_model": "glm-5.3"
   },
+  "agy_relay": {
+    "review": {
+      "provider": "codex",
+      "model": "gpt-6.2-astra",
+      "effort": "xhigh"
+    },
+    "implementation": {
+      "provider": "codex",
+      "model": "gpt-6.2-sol",
+      "effort": "high"
+    }
+  },
   "plugins": {
     "qwen": {
       "claude_executor": "claude",

@@ -18,12 +18,13 @@
 | Qwen Responses 经 Codex | Codex 0.163.0 | 2026-10-20 合成 plan 两阶段；未验证新版业务 diff 或用户级入口全流程，模型证据仍为 requested_only |
 | Codex → Qoder | Qoder CLI 1.1.74 / 1.1.77，实际 Kimi-K3.1-Pro | 1.1.77 正式 bug-review 双阶段；新版 plan/diff 仅离线覆盖，旧版历史证据归属见下文 |
 | Claude 主导 → AGY 双方案规划 | AGY CLI 1.5.13 | 本机 `--mode plan --sandbox --output-format stream-json` 探针、生产 `agy_plan.py` 的真实 `draft`/`synthesize` 探针均已完成，并有离线全路径单测。`model_evidence=requested_only` |
+| AGY 主导 → Codex → AGY | AGY CLI 1.5.13，Codex CLI 0.169.1 | 插件静态校验、隔离 `HOME` 发现、合成只读 `codex_review.py plan` 与 `codex_implement.py --relay agy` 真实探针均通过；AGY 新交互会话端到端遵循闭环待用户授权安装后验证。`model_evidence=requested_only` |
 | Codex 用户级入口 / 共享方法 | Codex 0.160.0 | 有限跨项目发现、隔离接力与方法样本；不是任意任务遵循保证 |
 | Claude 普通登录主导完整链路 | 待补验 | 历史 Login expired；Qwen bare 鉴权不能代替普通登录验收 |
 | DeepSeek | 历史端点 / 离线能力 | 不代表当前配置、桌面外部调用或完整接力通过 |
 
-安装健康、模型遵循与完整接力是三类证据。完整接力还依赖主工具原生独立代理、
-显式实施模型及可观察 runtime 证据；普通 CLI 不自动提供全部能力。
+安装健康、模型遵循与完整接力是三类证据。完整接力还依赖所选路径的独立实施能力、
+所需模型配置及可观察的运行证据。
 主模型和实施者的 runtime metadata 只支持该宿主运行身份；供应方内部模型路由是另一边界，
 不能从 requested model 推断 actual model。历史模型 ID 不保证任意用户有权使用。
 
@@ -608,3 +609,16 @@ rmcp::transport::worker: worker quit with fatal: Transport channel closed, when 
 - 2026-11-20 第一次 AGY 起草的 manifest 记录请求模型和深度均为 `null`，耗时 570.983 秒。日志按 `step_index` 去重后有 49 次 `read_file`，其中 6 次报错，包含读目录错误。
 - 第二次起草的 manifest 记录请求 `gemini-4-neon` / `xhigh`（`requested_only`），耗时 567.395 秒。日志按同一口径有 48 次 `read_file`，其中 3 次因文件不存在报错。
 - 这两次的 init 工具清单都声明了 `list_dir`、`grep_search`、`find_by_name`。日志中这三项调用均为零，实际能否调用待验证。后续取证见 [FEATURE_TODOS.md](FEATURE_TODOS.md)。
+
+## 2026-11-20 AGY-led relay
+
+- AGY 1.5.13 的隔离用户目录探针确认默认插件路径
+  `~/.gemini/config/plugins/ai-anti` 支持目录软链。候选原生插件通过
+  `agy plugin validate --strict --json`，识别一份规则、两个技能，零错误与零警告。
+- 离线验证使用替身 CLI 和隔离目录，覆盖单方案评审的 R3 预检、只读启动参数、后置门禁、
+  安装生命周期与精确链接所有权。Codex 评审和实施只记录请求模型和思考深度。
+- 主模型在隔离目录独立执行三项真实探针：
+  1. 隔离 `HOME` 运行 `install.sh --with-agy`，真实 `agy plugin list --json` 识别 `ai-anti` 插件、`AGENTS.md` 与 `agy-relay`/`codex-review`，`--without-agy` 精确清理空目录；
+  2. 临时 Git 仓库调用生产 `codex_review.py plan`（`codex 0.169.1`、`gpt-6.2-astra`、`low`）完成合成方案评审，退出码 `0`、`completed=true`、`failed_command_count=0`、零 MCP 事件（保留 `code_mode_host` 供只读命令读取材料，禁用外部连接器，提示词用 `cat -- <路径>` 完整读 request）；
+  3. 临时关联工作树调用生产 `codex_implement.py --relay agy`（`codex 0.169.1`、`gpt-6.2-sol`、`low`）完成合成实施，退出码 `0`、`completed=true`、`relay="agy"`，主树未改动。
+- AGY 新交互会话端到端模型遵循闭环待用户授权安装后验证。

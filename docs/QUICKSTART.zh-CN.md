@@ -10,6 +10,7 @@
 |---|---|---|
 | Claude Code | 默认安装 | 默认使用 Codex CLI，需相应工具与账号可用 |
 | Codex | `--with-codex` | 默认使用 Claude CLI；也可配置 Qwen |
+| AGY | `--with-agy` | Codex CLI 评审与实施，AGY 独立终审 |
 | 两种工具都使用 | `--with-codex` | 按当前主导工具选择各自评审通道 |
 
 小任务不一定触发评审。先安装入口、确认能读取，再接通所选评审通道。
@@ -35,6 +36,9 @@ cd ~/ai-anti
 
 安装器维护 Claude 用户级入口；Codex 选项另外维护 `${CODEX_HOME:-~/.codex}/AGENTS.md`
 和 `~/.agents/skills`。不需要在每个项目复制这套文件，也不会自动创建用户配置。
+使用 AGY 时运行 `./install.sh --with-agy`，插件位于 `~/.gemini/config/plugins/ai-anti`。
+编辑配置示例中的 `agy_relay` 节选定评审与实施模型，然后开启新 AGY 会话，按需使用
+`agy-relay` 或 `codex-review`。只移除 AGY 插件时运行 `./install.sh --without-agy`。
 已有项目的业务约定继续留在项目内。移动 ai-anti 源码目录后，在新位置重跑安装。
 
 默认模式为 `rules`：小任务直接做，重大任务和高风险改动走接力。

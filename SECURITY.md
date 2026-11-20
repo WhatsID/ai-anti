@@ -87,6 +87,12 @@ ai-anti user configuration or business repositories. Conflicting objects, malfor
 and unsafe markers fail before installation writes. Uninstall removes only its owned objects,
 using the manifest and ownership checks; it never uses `rm -rf`.
 
+AGY opt-in creates the native plugin link at `~/.gemini/config/plugins/ai-anti` and any missing
+parent directories. Removal requires an exact match to the recorded link target and removes only
+installer-created directories that are empty. AGY-led Codex plan review sends the authorized
+materials to Codex with read-only execution and external connectors disabled in the launch arguments.
+The reviewer discards reports when the log shows a connector call or an unrecovered required read failure.
+
 Status checks a bounded source list and installed routing without repair. Optional `--project`
 uses timed Git plumbing rather than project scripts/hooks and reads relevant configuration
 keys, not secret files. Status is report-only: exit 0 does not mean healthy, authenticated or

@@ -123,6 +123,48 @@ def claude_implementation(data):
     return {'provider': 'codex', 'model': model, 'effort': _codex_effort(data, key + '.effort')}
 
 
+def _agy_object(value, key, allowed):
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ConfigError('ai-anti config: ' + key + ' must be an object')
+    unknown = value.keys() - allowed
+    if unknown:
+        raise ConfigError('ai-anti config: ' + key + ' has unknown keys: '
+                          + ', '.join(sorted(map(repr, unknown))))
+    return value
+
+
+def agy_relay_section(data):
+    return _agy_object(lookup(data, 'agy_relay'), 'agy_relay', {'review', 'implementation'})
+
+
+def _agy_codex(data, route):
+    key = 'agy_relay.' + route
+    value = _agy_object((agy_relay_section(data) or {}).get(route), key, {'provider', 'model', 'effort'})
+    reviewing = route == 'review'
+    if value is None:
+        return {'provider': 'codex', 'model': None, 'effort': None} if reviewing else None
+    provider = value.get('provider')
+    if provider != 'codex' and not (reviewing and provider is None):
+        raise ConfigError('ai-anti config: ' + key + '.provider must be codex')
+    model = value.get('model')
+    if not (reviewing and model is None):
+        if not isinstance(model, str) or not model or any(c.isspace() for c in model):
+            raise ConfigError('ai-anti config: ' + key + '.model must be a non-empty string without whitespace')
+    return {'provider': 'codex', 'model': model, 'effort': _codex_effort(data, key + '.effort')}
+
+
+def agy_review(data):
+    """Select the independent AGY review route, with Codex defaults."""
+    return _agy_codex(data, 'review')
+
+
+def agy_implementation(data):
+    """Select the explicitly configured AGY implementation route, if any."""
+    return _agy_codex(data, 'implementation')
+
+
 def claude_qwen_executor(data):
     """Select the Claude-led Qwen executor independently of codex_relay."""
     key = 'plugins.qwen.claude_executor'

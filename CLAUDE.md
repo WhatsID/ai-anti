@@ -19,6 +19,7 @@
     `adapters/claude-code/hooks/`
   - `adapters/codex/skills/claude-review/`、`adapters/codex/tests/`
   - `adapters/codex/skills/codex-relay/`
+  - `adapters/agy/`
   - `core/CLI_DISCIPLINE.md`、`core/REVIEW_PRINCIPLES.md`、`core/DESIGN_RATIONALE.md`
   - `plugins/`、`tests/`、`scripts/`、`.github/`
   - `apps/macos/backend/`、`apps/macos/Sources/AIReviewBar/Bridge.swift`、
@@ -49,7 +50,7 @@
 
 ## 硬边界
 
-- 不执行部署、不推送、不改任何真实数据库；`install.sh` 只写 `~/.claude`、`~/.agents/skills`，以及可选的 `${CODEX_HOME:-~/.codex}/AGENTS.md` 自有块。
+- 不执行部署、不推送、不改任何真实数据库；`install.sh` 只写 `~/.claude`、`~/.agents/skills`，以及可选的 `${CODEX_HOME:-~/.codex}/AGENTS.md` 自有块和 `~/.gemini/config/plugins/ai-anti` 托管链接及所需目录。
 - 安装器的破坏性动作只允许 `rm`（单个已知对象）与 `rmdir`（空目录），**禁止 `rm -rf`**。
 - 凭证不入库：用户级密钥放 `~/.config/ai-anti/secrets.json`，仓库内只写查找接口。
 - 发布公开版前跑 `scripts/export_public.sh`，导出树必须通过 `scripts/check_hygiene.sh`。

@@ -18,14 +18,15 @@ AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验�
 
 这套机制重点不是让更多模型分担更多工作，而是让立场不同的第二个模型去找第一个模型看不见的错，避免单模型盲区导致的隐藏问题或后期返工。
 
-## 两条主路径
+## 接力路径
 
-目前支持两条接力路径：Claude → Codex 与 Codex → Claude/Qwen。箭头左边是主导的主模型（出方案、裁决、终审），右边是评审或接手实施的模型。
+箭头左边是主导的主模型（出方案、裁决、终审），其余模型按路径承担评审或实施。
 
 | 方向 | 入口 | 做什么 |
 |------|------|--------|
 | Claude → Codex | `/codex-review plan <方案.md>`、`/codex-review diff`、`/codex-implement <方案.md>` | Claude Code 主导。Codex 在只读沙箱里评审，可按配置用指定 Codex 模型在隔离工作树实施，也可在实施子代理因 API 故障受阻时接手 |
 | Codex → Claude/Qwen | `$claude-review`、`$codex-relay` | Codex 主导；选定的 Claude/Qwen 模型在 fail-closed 检查下评审方案（两阶段）或指定范围的 diff；`$codex-relay` 跑完整接力 |
+| AGY → Codex → AGY | `agy-relay`、`codex-review` | AGY 起草单方案，Codex 只读评审并在隔离工作树实施，AGY 独立审查增量并运行验收 |
 
 ## 四级接力档位
 
@@ -67,14 +68,15 @@ AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验�
 [Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和/或
 [Codex CLI](https://github.com/openai/codex)，以及所需登录或 API 凭证。
 Qwen Responses 评审需要 Codex 与所配置 API 凭证，不要求 Claude 登录。
-完整接力还需主工具原生独立代理、显式实施模型及可观察 runtime 证据；普通 CLI
-不自动具备完整接力能力。文中的模型 ID 不代表任意用户都有使用权限。
+完整接力还需所选路径的独立实施通道与可观察运行证据。按通道要求配置实施模型，
+并选用账号有权访问的模型。
 
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
 cd ~/ai-anti
 ./install.sh                 # Claude Code 侧：命令、子代理、CLAUDE.md 导入
 ./install.sh --with-codex    # 可选：Codex 用户级入口及 ~/.agents/skills 技能
+./install.sh --with-agy      # 可选：AGY 原生插件
 ./install.sh --status        # 只读体检
 ```
 
@@ -90,6 +92,14 @@ Claude Code 的用户级 `@import` 与 Codex 的用户级指令共同读取
 `./install.sh --with-codex` 同时安装技能及 `${CODEX_HOME:-~/.codex}/AGENTS.md`
 自有标记块，显式读取 `adapters/codex/AGENTS.global.md`，块外用户内容按字节保留。
 普通重装继承组件并升级旧 manifest；源仓库移动后重装刷新路径。
+
+AGY 用户运行 `./install.sh --with-agy` 后启动新 AGY 会话。默认插件路径为
+`~/.gemini/config/plugins/ai-anti`，由插件加载共享工作流入口。用 `agy-relay` 跑完整接力，
+用 `codex-review` 单独审方案。参考配置示例，在 `~/.config/ai-anti/config.json` 中设置
+独立的 `agy_relay.review` 与 `agy_relay.implementation`，超时仍共用 `review.timeout` 和
+`review.idle_timeout`。实施须显式指定 Codex 模型，失败即停并请用户裁决。
+`./install.sh --without-agy` 收回托管链接与由安装器创建的空目录。
+参见 [AGY 兼容性与验证边界](docs/COMPATIBILITY.md#2026-11-20-agy-led-relay)。
 非空 `AGENTS.override.md` 会遮蔽入口，安装器拒绝安装，不自动改写它。
 `AGENTS.md`、override 或路径祖先中的不安全对象、损坏标记也会在写入前拒绝。
 

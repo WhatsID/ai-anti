@@ -1,0 +1,112 @@
+---
+name: agy-relay
+description: 由 AGY 起草单份方案、委派 Codex 评审与实施，再由 AGY 独立终审。
+---
+
+# AGY 主导接力
+
+从已安装插件的规则解析机制根。实际读取 core/WORKFLOW_ENTRY.md、core/WORKFLOW_CONTINUITY.md、
+core/REVIEW_PRINCIPLES.md 与 core/CLI_DISCIPLINE.md。按项目规则与共享模式确定是否进入本流程。
+由 AGY 负责方案、裁决、需求核对、终审与汇报。方案阶段止于待实施，明确授权后才启动实施。
+按共享方法读取适用的规划、设计和测试正文。记录阶段、产物、指纹、用户裁决和未覆盖项，
+产物放 <scratchpad> 或项目指定的本地任务目录。
+
+## 第 1 步：起草单方案，冻结基线
+
+读取项目入口、范围规则、历史与现状。用以下命令确认主树根、提交、分支与脏状态；
+symbolic-ref 退出 1 时记录 detached，其他失败明确报告。
+
+```bash
+git -C "$repo" rev-parse --show-toplevel
+git -C "$repo" rev-parse --verify 'HEAD^{commit}'
+git -C "$repo" symbolic-ref -q HEAD
+git -C "$repo" status --short
+```
+
+同时记录 Git 仓库身份（git rev-parse --path-format=absolute --git-common-dir）。
+按项目方案目录保存 YYYYMMDD-slug.md 与同名 .request.md。按 R2 逐字收录用户各轮需求、
+约束与裁决，推断放在附录。列出改动文件、风险、验收命令与部署规模。记录目标路径中
+已有的用户脏输入并确认哪些纳入范围。用 hashlib.sha256(path.read_bytes()).hexdigest()
+记录每个既有常规文件的当前字节指纹；计划新增路径须通过 os.path.lexists(path) 为假
+验证并标记 absent。记录预期删除的既有目标指纹。未确认的重叠脏输入先报告。
+
+## 第 2 步：Codex 只读评审
+
+读取 codex-review 技能。按 R3 在发起评审前核对必要材料、路径、规模、配置与输出目录。
+每一轮使用仓库外新目录，提示词和完整日志留证。
+
+```bash
+python3 "$mechanism/adapters/agy/scripts/codex_review.py" plan \
+  --repo "$repo" --plan "$plan" --scale "$scale" --out "$review_out" < /dev/null
+```
+
+需要时用 --files 加入仓库内相对文件；总材料至多 2 MiB。--prepare-only 仅准备材料。
+独立评审依 R4 先读 request，再列独立清单并读取方案。0 仍须核对 completed=true，
+2 表示预检失败，1 表示失败，130/143 表示中断。实际读取 warnings.json，对照
+review_raw.jsonl 逐条核对 failed_command。对 request 或方案的读取失败须有后续成功读取证据；
+未读到 request 或方案，整轮作废。连接器事件使整轮作废。保留尝试日志与版本警告。
+暂态重试由共享入口管理。
+
+## 第 3 步：R6 分诊定稿与 3b 需求核对
+
+逐条列出原意见、具体失败场景、严重度与裁决。按 R6 将意见分为必修、登记、驳回，
+记录登记位置或驳回依据。只在架构被整个推翻或出现 blocker 级新事实时启动第二轮，
+最多两轮。第二轮后必修仍无法解决即停止并请用户裁决。
+
+第 3b 步逐项向用户列明定稿相对 request 的用户可见差异，包括范围、行为、默认值、
+权限和验收口径。逐项确认并写入任务记录。没有差异时明确记录。核对实施授权；
+尚未取得授权时，保持待实施。新增需求须按 R2 补入 request 并按共享规则核对轮次。
+
+## 第 4 步：固定 Codex 在隔离工作树实施
+
+核对冻结的主树身份、HEAD、ref、文件指纹与 absent，再创建仓库外的 linked worktree。
+
+```bash
+git -C "$repo" worktree add --detach "$candidate" "$frozen_head"
+```
+
+把已确认纳入任务的主树脏输入逐个带入候选，包括已有用户新增文件或删除。
+在候选树仅暂存这些路径，核对 git diff --cached 后做本地临时基线提交。此提交仅用于
+候选树，执行前遵循用户授权及项目提交纪律。无脏输入时沿用冻结 HEAD。
+记录候选基线的完整 SHA。真正由任务新增的路径继续标记 absent。
+把定稿、request、允许改动的逐文件清单、测试方法和工作树限制写入提示词文件；
+主树中的本地产物使用明确绝对路径。提示词规定实施者仅在候选树内改动。
+
+```bash
+python3 "$mechanism/adapters/claude-code/scripts/codex_implement.py" \
+  --relay agy --workspace "$candidate" --prompt "$implement_prompt" \
+  --out "$implement_out" < /dev/null
+```
+
+从 agy_relay.implementation 读取显式 provider=codex 与固定 model。检查退出码、
+manifest/status、实际候选树状态与 relay=agy。配置缺失、失败或中断即停，保留证据和候选，
+请用户裁决。禁止自动重试、换模型或 AGY 自动接管。
+
+## 第 5 步：AGY 独立终审与逐文件落回
+
+AGY 对照候选基线独立读取全部增量。用 git status --short、git diff <候选基线>，
+逐个读未跟踪或被忽略的任务文件，核对实际增删与定稿范围。独立运行验证并比较第 3b 步
+确认的差异，发现新增用户可见差异先停并请用户确认。Codex 实施的增量由 AGY 终审，
+不再交给 Codex 评审。completed 只表示实施协议完成。
+
+落回前完整重跑第 1 步的仓库身份、顶层根、HEAD 和 attached ref/detached 检查，
+逐文件比较当前字节 SHA-256；计划新增路径用 os.path.lexists 检查仍为假，包含悬空链接。
+同时确认目标路径及祖先仍指向冻结的位置。任何变化或重叠立即停止，保留主树与候选树现场，
+不覆盖、不 reset、不 checkout。全数通过且落回已获授权后，逐文件将候选的已验收新增、
+修改和删除落回。保留既有用户改动与暂存区状态，复核落回的文件与验证结果。
+核对候选没有未带回的用户内容后才回收工作树；回收失败报告路径。
+
+## 第 6 步：汇报
+
+汇报需求及第 3b 步裁决、逐条评审意见与分诊、实际通道和请求模型/深度、修改文件与理由、
+验证命令与结果、版本或工具警告、未覆盖项、产物路径，以及落回和工作树处置状态。
+对用户跳过项或失败门禁明示证据。不得将安装探针、离线替身或 requested_only 记录当作
+真实新会话遵循、真实模型身份或终审通过的证据。
+
+## AGY 后台与沙箱纪律
+
+遵循 core/CLI_DISCIPLINE.md。非交互入口 stdin 接 /dev/null，保留完整磁盘日志，
+后台查询实际任务状态、进程及产物增长，直到取得退出码和终态证据。停滞时核对总预算、
+空闲预算和重试等待，按共享纪律处理；写入口没有自动重试。确认上一次写进程已经结束，
+才可在新的用户裁决下另开实施。遵守 AGY 宿主沙箱与联网授权，不绕过批准；
+只读评审禁外部连接器，workspace-write 实施只能在获准的隔离工作树内执行。

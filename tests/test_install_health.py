@@ -322,6 +322,23 @@ class HealthTests(unittest.TestCase):
         self.manifest.write_text(json.dumps(data))
         self.assertIn('托管路由未登记', self.run_install('--status'))
 
+    def test_agy_manifest_type_and_optional_status(self):
+        self.run_install('--with-codex')
+        original = json.loads(self.manifest.read_text())
+        self.assertNotIn('agy_plugin', original)
+        self.assertNotIn('警告 agy', self.run_install('--status'))
+        record = {'installed': True, 'path': str(self.home / '.gemini/config/plugins/ai-anti'),
+                  'target': str(self.repo / 'adapters/agy/plugin'), 'created_dirs': []}
+        for invalid in (None, [], dict(record, installed=1), dict(record, path=7),
+                        dict(record, target=None), dict(record, created_dirs={}), dict(record, created_dirs=[7])):
+            with self.subTest(invalid=invalid):
+                self.manifest.write_text(json.dumps(dict(original, agy_plugin=invalid)))
+                before = self.snapshot()
+                output = self.run_install('--status')
+                self.assertIn('AGY 插件 manifest 损坏', output)
+                self.assertNotIn('警告 agy', output)
+                self.assertEqual(self.snapshot(), before)
+
     def test_enabled_hook_source(self):
         self.run_install('--with-hook')
         source = self.repo / 'adapters/claude-code/hooks/session-start.sh'

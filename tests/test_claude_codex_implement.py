@@ -67,10 +67,12 @@ class ClaudeCodexImplement(unittest.TestCase):
         return subprocess.run(['git', '-C', str(self.repo), *args], check=True,
                               capture_output=True, text=True).stdout.strip()
 
-    def invoke(self, workspace=None, out=None, **extra_env):
+    def invoke(self, workspace=None, out=None, relay=None, **extra_env):
         args = [sys.executable, str(ENTRY), '--workspace', str(workspace or self.worktree),
                 '--prompt', str(self.prompt), '--out', str(out or self.out),
                 '--config', str(self.config), '--timeout', '10', '--idle-timeout', '3']
+        if relay is not None:
+            args.extend(('--relay', relay))
         return subprocess.run(args, env=dict(self.env, **extra_env), capture_output=True, text=True, timeout=15)
 
     def manifest(self):
@@ -82,6 +84,7 @@ class ClaudeCodexImplement(unittest.TestCase):
         manifest = self.manifest()
         self.assertEqual(manifest, json.loads((self.out / 'status.json').read_text()))
         self.assertEqual(manifest['provider'], 'codex')
+        self.assertEqual(manifest['relay'], 'claude')
         self.assertEqual(manifest['requested_model'], 'gpt-6.2-sol')
         self.assertIsNone(manifest['requested_effort'])
         self.assertEqual(manifest['model_evidence'], 'requested_only')
@@ -118,6 +121,30 @@ class ClaudeCodexImplement(unittest.TestCase):
                                   'gpt-6.2-sol', '-c', 'model_reasoning_effort="high"',
                                   '-C', str(self.worktree), '--', self.prompt.read_text()]])
         self.assertEqual(self.manifest()['requested_effort'], 'high')
+
+    def test_agy_implementation_uses_only_the_agy_route(self):
+        self.config.write_text(json.dumps({
+            'agy_relay': {'implementation': {'provider': 'codex', 'model': 'agy-fixture', 'effort': 'xhigh'}},
+            'claude_relay': {'implementation': {'provider': 'claude', 'model': 'ignored'}},
+        }))
+        result = self.invoke(relay='agy')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = self.manifest()
+        self.assertEqual(manifest, json.loads((self.out / 'status.json').read_text()))
+        self.assertEqual((manifest['relay'], manifest['requested_model'], manifest['requested_effort']),
+                         ('agy', 'agy-fixture', 'xhigh'))
+        args = json.loads(self.calls.read_text())
+        self.assertEqual(args[args.index('--model') + 1], 'agy-fixture')
+        self.assertIn('model_reasoning_effort="xhigh"', args)
+        self.assertEqual((self.repo / 'target.txt').read_text(), 'original')
+
+    def test_agy_missing_implementation_stops_before_codex_starts(self):
+        result = self.invoke(relay='agy')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('agy_relay.implementation must explicitly select codex', result.stderr)
+        self.assertFalse(self.out.exists())
+        self.assertFalse(self.calls.exists())
+        self.assertFalse(self.calls.with_suffix('.version').exists())
 
     def test_invalid_effort_stops_before_codex_starts(self):
         self.configure_effort('XHIGH')
@@ -201,3 +228,7 @@ class ClaudeImplementationConfig(unittest.TestCase):
                       *({'provider': 'codex', 'model': model} for model in ('', 'a b', 'a\nb', 4))):
             with self.subTest(value=value), self.assertRaises(ConfigError):
                 claude_implementation({'claude_relay': {'implementation': value}})
+
+
+if __name__ == '__main__':
+    unittest.main()

@@ -220,6 +220,19 @@ class DesktopContract(unittest.TestCase):
                 self.assertEqual(config['review']['codex_effort'], 'xhigh')
                 self.assertEqual(config['claude_relay']['implementation']['effort'], 'high')
 
+    def test_app_save_preserves_agy_relay(self):
+        store = Store(self.root)
+        agy_relay = {
+            'review': {'provider': 'codex', 'model': 'agy-review-model', 'effort': 'xhigh'},
+            'implementation': {'provider': 'codex', 'model': 'agy-implementation-model', 'effort': 'high'},
+        }
+        atomic(store.paths['ai'], json.dumps({'agy_relay': agy_relay}).encode())
+        state = store.read()
+        saved = store.save(dict(state['values'], mode='auto', reviewer_model='gpt-6.2-astra'), state['fingerprints'])
+        self.assertEqual(saved['values']['mode'], 'auto')
+        self.assertEqual(saved['values']['reviewer_model'], 'gpt-6.2-astra')
+        self.assertEqual(json.loads(store.raw('ai'))['agy_relay'], agy_relay)
+
     def test_app_save_and_switch_off_codex_preserves_claude_dual_plan(self):
         store = Store(self.root)
         dual_plan = {

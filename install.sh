@@ -7,8 +7,9 @@
 #   - 每个成功安装的对象记入所有权 manifest（~/.claude/ai-anti.manifest.json）；
 #   - fail-closed：目标已存在且不属于本工具（不是指向本仓库的符号链接）一律报错
 #     停止，不覆盖不合并；
-#   - 可选组件（hook、插件、Codex skill）的所有权随普通重装继承，只有 --uninstall 或
-#     显式的 --without-hook / --remove-plugin / --without-codex 才取消并移除；
+#   - 可选组件（hook、插件、Codex skill、AGY 插件）的所有权随普通重装继承，只有 --uninstall 或
+#     显式的 --without-hook / --remove-plugin / --without-codex / --without-agy 才取消并移除；
+#   - AGY 插件链接按默认路径和原始目标精确认领，使用独立的 manifest 节；
 #   - SessionStart hook 按对象认领：只增删 command 等于本工具命令的那一个对象，
 #     同条目里用户自己的对象与属性原样保留；
 #   - --uninstall 只移除 manifest 中仍指向本仓库的对象与自己的标记块；
@@ -32,6 +33,10 @@ CODEX_HOME_DIR=${CODEX_HOME:-$HOME/.codex}
 CODEX_GLOBAL_MD="$REPO/adapters/codex/AGENTS.global.md"
 CODEX_ENTRY_META=""
 CODEX_SKILLS="claude-review codex-relay bug-review"
+AGY_PLUGINS_DIR="$HOME/.gemini/config/plugins"
+AGY_PLUGIN_PATH="$AGY_PLUGINS_DIR/ai-anti"
+AGY_PLUGIN_SRC="$REPO/adapters/agy/plugin"
+AGY_CREATED_DIRS=""
 PY=${AI_ANTI_PYTHON:-python3}
 TAB=$(printf '\t')
 NL='
@@ -44,13 +49,15 @@ usage() {
   cat <<'EOF'
 ai-anti 用户级安装器
 
-  ./install.sh                      安装/刷新；已安装的可选组件（hook、插件、Codex skill）原样保留
+  ./install.sh                      安装/刷新；已安装的可选组件（hook、插件、Codex skill、AGY 插件）原样保留
   ./install.sh --with-hook          同上，并把 SessionStart 播报 hook 注入用户级 settings.json
   ./install.sh --without-hook       移除本工具注入的 SessionStart hook
   ./install.sh --with-plugin NAME   安装评审插件 plugins/NAME（可重复）
   ./install.sh --remove-plugin NAME 移除评审插件 NAME 的托管链接（可重复）
   ./install.sh --with-codex         安装 Codex 用户入口及 skill（claude-review、codex-relay、bug-review）
   ./install.sh --without-codex      移除 Codex 入口自有块及 skill 托管链接
+  ./install.sh --with-agy           安装 AGY 原生插件
+  ./install.sh --without-agy        移除托管的 AGY 原生插件
   ./install.sh --uninstall          按 manifest 精确卸载
   ./install.sh --status --project DIR  可选只读项目根/模式/基线诊断
   ./install.sh --status             只报告当前安装状态与 CLI 版本，不做任何改动
@@ -62,6 +69,7 @@ ai-anti 用户级安装器
   ~/.claude/CLAUDE.md       -> 标记块内一行 @import 指向 CLAUDE.global.md
   ${CODEX_HOME:-~/.codex}/AGENTS.md -> 自有标记块，显式读取 AGENTS.global.md
   ~/.agents/skills/<skill>  -> adapters/codex/skills/<skill>（仅 --with-codex）
+  ~/.gemini/config/plugins/ai-anti -> adapters/agy/plugin（仅 --with-agy）
   ~/.claude/ai-anti.manifest.json  所有权清单（卸载依据）
 
 用户配置 ~/.config/ai-anti/config.json 由用户自己维护，本脚本不创建也不改写。
@@ -85,6 +93,7 @@ ACTION=""
 PROJECT=""
 WITH_HOOK=""       # 空＝继承 manifest；1＝安装；0＝移除
 WITH_CODEX=""
+WITH_AGY=""
 ADD_PLUGINS=""
 DEL_PLUGINS=""
 INSTALL_OPTS=0
@@ -110,6 +119,12 @@ while [ $# -gt 0 ]; do
     --without-codex)
       [ "$WITH_CODEX" != 1 ] || die "--with-codex 与 --without-codex 不能同用"
       WITH_CODEX=0; INSTALL_OPTS=1 ;;
+    --with-agy)
+      [ "$WITH_AGY" != 0 ] || die "--with-agy 与 --without-agy 不能同用"
+      WITH_AGY=1; INSTALL_OPTS=1 ;;
+    --without-agy)
+      [ "$WITH_AGY" != 1 ] || die "--with-agy 与 --without-agy 不能同用"
+      WITH_AGY=0; INSTALL_OPTS=1 ;;
     --with-plugin|--remove-plugin)
       [ $# -ge 2 ] || die "$1 需要插件名"
       check_plugin_name "$2"
@@ -584,15 +599,116 @@ except (OSError, ValueError, KeyError, TypeError) as exc:
 PY
 }
 
+# AGY ownership is separate from the repository-wide link policy.
+agy_is_installed() {
+  [ -f "$MANIFEST" ] || { echo 0; return; }
+  "$PY" - "$MANIFEST" <<'PY'
+import json, os, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, ValueError):
+    data = {}  # Existing installer/status paths handle unreadable manifests.
+if not isinstance(data, dict) or "agy_plugin" not in data:
+    print(0)
+    sys.exit(0)
+node = data["agy_plugin"]
+if (not isinstance(node, dict) or type(node.get("installed")) is not bool
+        or any(not isinstance(node.get(key), str) or not os.path.isabs(node[key])
+               for key in ("path", "target"))
+        or not isinstance(node.get("created_dirs"), list)
+        or any(not isinstance(path, str) or not os.path.isabs(path) for path in node["created_dirs"])):
+    print("agy_plugin manifest 类型错误", file=sys.stderr)
+    sys.exit(1)
+print(int(node["installed"]))
+PY
+}
+
+agy_ancestors_safe() {
+  local path
+  for path in "$HOME/.gemini" "$HOME/.gemini/config" "$AGY_PLUGINS_DIR"; do
+    [ ! -L "$path" ] && { [ ! -e "$path" ] || [ -d "$path" ]; } || return 1
+  done
+}
+
+agy_link_matches() {
+  [ -L "$AGY_PLUGIN_PATH" ] && "$PY" - "$AGY_PLUGIN_PATH" "$1" <<'PY'
+import os, sys
+try:
+    sys.exit(os.readlink(sys.argv[1]) != sys.argv[2])
+except OSError:
+    sys.exit(1)
+PY
+}
+
+preflight_agy() {
+  agy_ancestors_safe || die "AGY 插件祖先目录有符号链接或非目录对象，未做任何改动"
+  if [ "$1" = 1 ]; then
+    [ "$(manifest_field agy_plugin.path)" = "$AGY_PLUGIN_PATH" ] &&
+      { agy_link_matches "$(manifest_field agy_plugin.target)" || agy_link_matches "$AGY_PLUGIN_SRC"; } && return 0
+  else
+    { [ ! -e "$AGY_PLUGIN_PATH" ] && [ ! -L "$AGY_PLUGIN_PATH" ]; } && return 0
+    agy_link_matches "$AGY_PLUGIN_SRC" && return 0
+  fi
+  die "AGY 插件路径无法精确认领：${AGY_PLUGIN_PATH}，未做任何改动"
+}
+
+install_agy() {
+  local path
+  preflight_agy "$1"
+  if [ "$1" = 1 ]; then
+    AGY_CREATED_DIRS=$(manifest_agy_dirs)
+  fi
+  for path in "$HOME/.gemini" "$HOME/.gemini/config" "$AGY_PLUGINS_DIR"; do
+    if [ ! -d "$path" ]; then
+      mkdir -- "$path"
+      AGY_CREATED_DIRS="$AGY_CREATED_DIRS$NL$path"
+    fi
+  done
+  if ! agy_link_matches "$AGY_PLUGIN_SRC"; then
+    if [ -L "$AGY_PLUGIN_PATH" ]; then rm -- "$AGY_PLUGIN_PATH"; fi
+    ln -s "$AGY_PLUGIN_SRC" "$AGY_PLUGIN_PATH"
+  fi
+  info "AGY 插件已就位：$AGY_PLUGIN_PATH"
+}
+
+manifest_agy_dirs() {
+  "$PY" - "$MANIFEST" <<'PY'
+import json, sys
+with open(sys.argv[1], encoding="utf-8") as handle:
+    print("\n".join(json.load(handle)["agy_plugin"]["created_dirs"]))
+PY
+}
+
+remove_agy() {
+  local path owned_dirs
+  if [ "$(manifest_field agy_plugin.path)" != "$AGY_PLUGIN_PATH" ] || ! agy_ancestors_safe; then
+    info "跳过 AGY 插件移除：登记路径不匹配或祖先目录已改变"
+    return 0
+  fi
+  if agy_link_matches "$(manifest_field agy_plugin.target)"; then
+    rm -- "$AGY_PLUGIN_PATH"
+    info "已移除 AGY 插件链接：$AGY_PLUGIN_PATH"
+  fi
+  owned_dirs=$(manifest_agy_dirs)
+  for path in "$AGY_PLUGINS_DIR" "$HOME/.gemini/config" "$HOME/.gemini"; do
+    if in_list "$path" "$owned_dirs"; then rmdir "$path" 2>/dev/null || true; fi
+  done
+}
+
 # Shared source contract: bounded explicit list, never follow FIFO/non-regular input.
 check_sources() {
-  "$PY" - "$REPO" "$1" "$MODE" <<'PY'
+  "$PY" - "$REPO" "$1" "$2" "$MODE" <<'PY'
 import os, pathlib, stat, sys
 root = pathlib.Path(sys.argv[1])
 names = ["core/" + n + ".md" for n in ("WORKFLOW_ENTRY", "PLANNING", "DESIGN", "RETRO", "DEBUGGING", "TESTING", "BUG_REVIEW", "REVIEW_PRINCIPLES", "CLI_DISCIPLINE")]
 names += ["adapters/claude-code/CLAUDE.global.md", "adapters/claude-code/agents/implementer.md", "adapters/claude-code/commands/codex-implement.md", "adapters/claude-code/commands/bug-review.md", "adapters/claude-code/commands/disable-dual-plan.md"]
 if sys.argv[2] == "1":
     names += ["adapters/codex/AGENTS.global.md"] + ["adapters/codex/skills/" + n + "/SKILL.md" for n in ("claude-review", "codex-relay", "bug-review")]
+if sys.argv[3] == "1":
+    names += ["adapters/agy/plugin/" + n for n in ("plugin.json", "rules/AGENTS.md",
+              "skills/agy-relay/SKILL.md", "skills/codex-review/SKILL.md")]
+    names += ["adapters/agy/scripts/codex_review.py"]
 errors = 0
 for name in names:
     path = root / name
@@ -602,7 +718,7 @@ for name in names:
         if not os.access(path, os.R_OK) or not path.read_text(encoding="utf-8").strip():
             raise ValueError("unreadable or empty")
     except (OSError, UnicodeError, ValueError) as exc:
-        print(("🔴 " if sys.argv[3] == "status" else "") + "错误 共享源缺口：%s (%s)" % (path, exc))
+        print(("🔴 " if sys.argv[4] == "status" else "") + "错误 共享源缺口：%s (%s)" % (path, exc))
         errors += 1
 sys.exit(bool(errors))
 PY
@@ -611,9 +727,12 @@ PY
 do_install() {
   prev_hook=$(manifest_field hook.injected)
   prev_codex=$(manifest_field codex_skills.installed)
+  prev_agy=$(agy_is_installed) || die "AGY manifest 预检失败，未做任何改动"
   EFF_HOOK=${WITH_HOOK:-${prev_hook:-0}}
   EFF_CODEX=${WITH_CODEX:-${prev_codex:-0}}
-  check_sources "$EFF_CODEX" || die "源完整性预检失败，未做任何改动"
+  EFF_AGY=${WITH_AGY:-$prev_agy}
+  check_sources "$EFF_CODEX" "$EFF_AGY" || die "源完整性预检失败，未做任何改动"
+  if [ "$EFF_AGY" = 1 ]; then preflight_agy "$prev_agy"; fi
   resolve_plugins
   plan_links
   MANIFEST_REPO=$(manifest_field repo)
@@ -660,6 +779,7 @@ do_install() {
   released=0
   while IFS= read -r dest; do
     [ -n "$dest" ] || continue
+    [ "$dest" != "$AGY_PLUGIN_PATH" ] || continue
     grep -Fxq -- "$dest" "$WORK/newdests" && continue
     [ -e "$dest" ] || [ -L "$dest" ] || continue
     if release_link "$dest" "$old_repo"; then
@@ -704,6 +824,12 @@ do_install() {
     codex_entry write "$CODEX_ENTRY_META"
   else
     codex_entry remove
+  fi
+
+  if [ "$EFF_AGY" = 1 ]; then
+    install_agy "$prev_agy"
+  elif [ "$prev_agy" = 1 ]; then
+    remove_agy
   fi
 
   write_manifest "$created_claude_md" "$EFF_HOOK" "$settings_created"
@@ -754,6 +880,7 @@ write_manifest() {
   LINKS_FILE="$LINKS" NEWDIRS_FILE="$NEWDIRS" \
   CREATED_CLAUDE_MD="$1" HOOK_INJECTED="$2" SETTINGS_CREATED="$3" \
   CODEX_ENTRY_META="$CODEX_ENTRY_META" PLUGINS="$EFF_PLUGINS" CODEX="$EFF_CODEX" AGENTS_SKILLS_DIR="$AGENTS_SKILLS_DIR" HOOK_SH="$HOOK_SH" \
+  AGY="$EFF_AGY" AGY_PATH="$AGY_PLUGIN_PATH" AGY_SRC="$AGY_PLUGIN_SRC" AGY_DIRS="$AGY_CREATED_DIRS" \
   "$PY" - <<'PY'
 import json, os, shlex, time
 
@@ -799,6 +926,13 @@ manifest = {
         "dir": os.environ["AGENTS_SKILLS_DIR"],
     },
 }
+if os.environ["AGY"] == "1":
+    manifest["agy_plugin"] = {
+        "installed": True,
+        "path": os.environ["AGY_PATH"],
+        "target": os.environ["AGY_SRC"],
+        "created_dirs": [path for path in os.environ["AGY_DIRS"].splitlines() if path],
+    }
 with open(os.environ["MANIFEST_PATH"], "w", encoding="utf-8") as handle:
     json.dump(manifest, handle, ensure_ascii=False, indent=2)
     handle.write("\n")
@@ -815,6 +949,7 @@ do_uninstall() {
 
   manifest_repo=$(manifest_field repo)
   [ -n "$manifest_repo" ] || die "manifest 缺 repo 字段——已停止，未删除任何对象"
+  prev_agy=$(agy_is_installed) || die "AGY manifest 预检失败，未删除任何对象"
   # 预检：删除任何对象之前确认 settings.json 与 CLAUDE.md 标记块都能处理
   if [ "$(manifest_field hook.injected)" = "1" ]; then
     assert_settings_ok
@@ -827,6 +962,7 @@ do_uninstall() {
   manifest_links > "$WORK/tolink"
   while IFS= read -r dest; do
     [ -n "$dest" ] || continue
+    [ "$dest" != "$AGY_PLUGIN_PATH" ] || continue
     [ -e "$dest" ] || [ -L "$dest" ] || continue
     if release_link "$dest" "$manifest_repo"; then
       removed=$((removed + 1))
@@ -837,6 +973,7 @@ do_uninstall() {
   info "已移除 $removed 个托管链接，跳过 $skipped 个"
 
   codex_entry remove
+  if [ "$prev_agy" = 1 ]; then remove_agy; fi
   remove_marker_block "$CLAUDE_DIR/CLAUDE.md"
 
   if [ "$(manifest_field hook.injected)" = "1" ]; then
@@ -911,13 +1048,17 @@ PY
 report_versions() {
   claude_v=""
   codex_v=""
+  agy_v=""
   if command -v claude >/dev/null 2>&1; then
     claude_v=$(claude --version < /dev/null 2>&1 || true)
   fi
   if command -v codex >/dev/null 2>&1; then
     codex_v=$(codex --version < /dev/null 2>&1 || true)
   fi
-  CLAUDE_V="$claude_v" CODEX_V="$codex_v" "$PY" - "$COMPAT" <<'PY'
+  if [ "$1" = 1 ] && command -v agy >/dev/null 2>&1; then
+    agy_v=$(agy --version < /dev/null 2>&1 || true)
+  fi
+  CLAUDE_V="$claude_v" CODEX_V="$codex_v" AGY_V="$agy_v" "$PY" - "$COMPAT" "$1" <<'PY'
 import json, os, re, sys
 
 try:
@@ -928,7 +1069,9 @@ except (OSError, ValueError, KeyError, TypeError, AttributeError):
     print("🟡   警告 版本清单 %s 无法读取" % sys.argv[1])
     sys.exit(1)
 problems = 0
-for label, env in (("claude", "CLAUDE_V"), ("codex", "CODEX_V")):
+probes = [("claude", "CLAUDE_V"), ("codex", "CODEX_V")]
+if sys.argv[2] == "1": probes.append(("agy", "AGY_V"))
+for label, env in probes:
     text = os.environ[env].strip()
     match = re.search(r"[0-9]+\.[0-9]+\.[0-9]+", text)
     if not text:
@@ -1146,10 +1289,23 @@ do_status() {
   printf '%s\n' "$installation_report" | sed '/^Codex 检查标志：/d'
   codex=0
   if printf '%s\n' "$installation_report" | grep -Fxq "Codex 检查标志：1"; then codex=1; fi
-  check_sources "$codex" || { problems=$((problems + 1)); failures=1; }
+  agy=0
+  if ! agy=$(agy_is_installed); then
+    echo "🔴 错误 AGY 插件 manifest 损坏"
+    problems=$((problems + 1)); failures=1
+  elif [ "$agy" = 1 ]; then
+    if agy_ancestors_safe && [ "$(manifest_field agy_plugin.path)" = "$AGY_PLUGIN_PATH" ] &&
+        [ "$(manifest_field agy_plugin.target)" = "$AGY_PLUGIN_SRC" ] && agy_link_matches "$AGY_PLUGIN_SRC"; then
+      echo "🟢 AGY 插件：已安装（${AGY_PLUGIN_PATH}）"
+    else
+      echo "🔴 错误 AGY 插件链接目标错误或缺失：$AGY_PLUGIN_PATH"
+      problems=$((problems + 1)); failures=1
+    fi
+  fi
+  check_sources "$codex" "$agy" || { problems=$((problems + 1)); failures=1; }
   if [ "$codex" = 1 ]; then codex_entry status || { problems=$((problems + 1)); failures=1; }; fi
   echo "CLI 版本（实测清单 compat.json）："
-  report_versions || problems=$((problems + 1))
+  report_versions "$agy" || problems=$((problems + 1))
   if [ -n "$PROJECT" ]; then report_project || { problems=$((problems + 1)); failures=1; }; else echo "提示 plain --status 不解析 relay/defaults；需要时加 --project DIR"; fi
   if [ "$problems" = 0 ]; then echo "🟢 状态：全部正常";
   elif [ "$failures" = 1 ]; then echo "🔴 状态：有 ${problems} 项需要留意";
