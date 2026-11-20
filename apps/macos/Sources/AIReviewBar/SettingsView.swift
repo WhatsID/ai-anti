@@ -227,12 +227,9 @@ struct SettingsView: View {
                                 .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
                         }
                     }
-                    if model.draft.host == "agy" {
-                        note("AGY 主模型由 AGY 设置管理；评审与独立实施使用 Codex。")
-                        if !model.draft.agyRelayError.isEmpty {
-                            Text("AGY 接力配置无效：" + model.draft.agyRelayError).font(.caption).foregroundStyle(.red)
-                                .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
-                        }
+                    if model.draft.host == "agy" && !model.draft.agyRelayError.isEmpty {
+                        Text("AGY 接力配置无效：" + model.draft.agyRelayError).font(.caption).foregroundStyle(.red)
+                            .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
                     }
                     ServiceSettingsGroup("评审服务", summary: SettingsSummary.review(model.draft), isExpanded: $reviewExpanded) {
                         Picker("评审服务", selection: Binding(get: { model.reviewFamily }, set: { model.switchReviewFamily($0) })) {
