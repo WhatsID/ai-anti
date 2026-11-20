@@ -21,7 +21,7 @@ Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停�
 | 权威文件 | 最小写入 |
 |---|---|
 | `~/.config/ai-anti/config.json` | `relay.default_mode`、`review.codex_model`、`desktop.primary_host`、已有 review/codex_relay/plugins.qwen 配置 |
-| `claude_relay.dual_plan`（同一 `config.json`） | Claude 主模型的开关只修改 `enabled`（缺失时为关闭），首次开启时补齐默认配置。其余字段只在开启时显示摘要，通过配置文件编辑。 |
+| `claude_relay.dual_plan`（同一 `config.json`） | Claude 主模型的开关只修改 `enabled`（缺失时为关闭），首次开启时补齐默认配置。开启时显示协作方、模型、深度和综合方摘要；失败处置在配置文件中查看和编辑。 |
 | Claude `settings.json` | 只改顶层 `model`，保留 permissions、MCP 等 |
 | Codex `config.toml` | 只替换简单顶层单行 model 或在文件开头插入，前后 tomllib 验证其他语义一致 |
 | ai-anti `secrets.json` | 新密钥时更新对应 `model_services.<服务>.value`，保留未知键、0600，并将用户级路径置首 |

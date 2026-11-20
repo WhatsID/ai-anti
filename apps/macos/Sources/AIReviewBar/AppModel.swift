@@ -62,14 +62,12 @@ struct Draft: Equatable {
     var dualPlanModel = ""
     var dualPlanEffort = ""
     var dualPlanSynthesizer = "claude"
-    var dualPlanOnFailure = "stop"
     var dualPlanError = ""
     var dualPlanDetail: String {
         [dualPlanPartner == "agy" ? "AGY" : dualPlanPartner,
          dualPlanModel.isEmpty ? "AGY 默认模型" : dualPlanModel,
          dualPlanEffort.isEmpty ? "默认深度" : dualPlanEffort,
-         dualPlanSynthesizer == "agy" ? "AGY 综合" : "Claude 综合",
-         dualPlanOnFailure == "fallback" ? "允许时回退单方案" : "失败即停止"].joined(separator: " · ")
+         dualPlanSynthesizer == "agy" ? "AGY 综合" : "Claude 综合"].joined(separator: " · ")
     }
     var codexModels = ModelCatalog.codex
     var implementationEnabled: Bool { mode != "solo" }
@@ -349,7 +347,6 @@ struct Draft: Equatable {
             d.dualPlanModel = plan["model"] as? String ?? ""
             d.dualPlanEffort = plan["effort"] as? String ?? ""
             d.dualPlanSynthesizer = plan["synthesizer"] as? String ?? "claude"
-            d.dualPlanOnFailure = plan["on_failure"] as? String ?? "stop"
         }
         d.codexModels = v["codex_models"] as? [String] ?? ModelCatalog.codex
         executorMigrationPending = text("qwen_executor") == "claude" || text("claude_qwen_executor") == "claude"

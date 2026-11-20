@@ -517,7 +517,7 @@ import Combine
         model.discard()
 
         assert(!model.dirty && !model.draft.dualPlanEnabled && model.draft.dualPlanError.isEmpty)
-        assert(model.draft.dualPlanDetail == "AGY · gemini-4-neon · xhigh · Claude 综合 · 失败即停止")
+        assert(model.draft.dualPlanDetail == "AGY · gemini-4-neon · xhigh · Claude 综合")
         model.draft.dualPlanEnabled = true
         assert(model.dirty)
         model.save()
@@ -544,7 +544,7 @@ import Combine
         state["values"] = values
         model.refresh(); front.complete(.success(state))
         assert(model.draft.dualPlanModel.isEmpty && model.draft.dualPlanEffort.isEmpty)
-        assert(model.draft.dualPlanDetail == "AGY · AGY 默认模型 · 默认深度 · AGY 综合 · 允许时回退单方案")
+        assert(model.draft.dualPlanDetail == "AGY · AGY 默认模型 · 默认深度 · AGY 综合")
 
         let planError = "claude_relay.dual_plan.effort 无效"
         values["dual_plan_enabled"] = false; values["dual_plan_error"] = planError
