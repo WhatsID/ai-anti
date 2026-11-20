@@ -30,6 +30,7 @@ from ai_anti_config import (
     DUAL_PLAN_SYNTHESIZERS,
     claude_dual_plan,
 )
+from plan_staging import plan_overlay, prepare_staging
 from review_runner import RunError
 
 
@@ -38,6 +39,23 @@ def load_agy_plan_module():
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module
+
+
+SNAPSHOT_CAPTURE = '''
+if os.environ.get('FIXTURE_SNAPSHOT_CAPTURE'):
+    import hashlib
+    from pathlib import Path
+    snapshot = {}
+    for path in Path.cwd().rglob('*'):
+        if path.is_symlink():
+            entry = ['symlink', os.readlink(path)]
+        elif path.is_dir():
+            entry = ['dir']
+        else:
+            entry = ['file', hashlib.sha256(path.read_bytes()).hexdigest()]
+        snapshot[path.relative_to(Path.cwd()).as_posix()] = entry
+    Path(os.environ['FIXTURE_SNAPSHOT_CAPTURE']).write_text(json.dumps(snapshot))
+'''
 
 
 FAKE_AGY = """import json, os, pathlib, signal, stat, subprocess, sys, time
@@ -50,6 +68,7 @@ if sys.argv[1:] == ['--version']:
     print(os.environ.get('FIXTURE_AGY_VERSION', 'agy 1.5.13'))
     sys.exit(0)
 
+""" + SNAPSHOT_CAPTURE + """
 cwd = pathlib.Path.cwd()
 record = {
     'argv': sys.argv[1:],
@@ -301,7 +320,264 @@ class ClaudeDualPlanConfigTests(unittest.TestCase):
                     claude_dual_plan(cfg)
 
 
-class AgyPlanTests(unittest.TestCase):
+class SnapshotOmissionsTests:
+    declaration = '.ai-anti/plan-snapshot-exclude'
+
+    def write_snapshot_file(self, rel, data):
+        path = self.repo / rel
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        return path
+
+    def commit_snapshot_paths(self, *paths):
+        self.git('add', '--', *paths)
+        self.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture.invalid', 'commit', '-qm', 'snapshot fixture')
+
+    def assert_snapshot_bytes(self, snapshot, rel, content):
+        self.assertEqual(snapshot[rel], ['file', hashlib.sha256(content).hexdigest()])
+
+    def test_snapshot_excluded_directory_is_absent_and_total_fits(self):
+        self.write_snapshot_file('data/[bulk]/raw.bin', b'R' * 10000)
+        self.write_snapshot_file('data/bulk/keep.txt', b'keep')
+        self.write_snapshot_file('data/[bulk]-next/keep.txt', b'sibling')
+        self.write_snapshot_file('exact.bin', b'exact')
+        self.write_snapshot_file('exact.bin.bak', b'keep')
+        self.commit_snapshot_paths('data', 'exact.bin', 'exact.bin.bak')
+        args = ('--max-snapshot-bytes', '2048')
+        rejected, _ = self.run_snapshot(2, args)
+        self.assertIn('exceeds --max-snapshot-bytes', rejected['error'])
+        self.assertFalse(self.out.exists())
+
+        declaration = b' # comment\n\n ./data/[bulk]/ \n exact.bin\n'
+        self.write_snapshot_file(self.declaration, b'# committed comment\n')
+        self.commit_snapshot_paths(self.declaration)
+        self.write_snapshot_file(self.declaration, declaration)
+        self.write_snapshot_file('data/[bulk]/raw.bin', b'D' * 11000)
+        self.write_snapshot_file('data/[bulk]/staged.txt', b'staged')
+        self.git('add', '--', 'data/[bulk]/staged.txt')
+        evidence, snapshot = self.run_snapshot(0, args)
+        self.assertNotIn('data/[bulk]', snapshot)
+        self.assertNotIn('data/[bulk]/raw.bin', snapshot)
+        self.assertNotIn('data/[bulk]/staged.txt', snapshot)
+        self.assertNotIn('exact.bin', snapshot)
+        for rel, data in [('data/bulk/keep.txt', b'keep'), ('data/[bulk]-next/keep.txt', b'sibling'),
+                          ('exact.bin.bak', b'keep'), (self.declaration, declaration)]:
+            self.assert_snapshot_bytes(snapshot, rel, data)
+        omitted = evidence['snapshot_omissions']
+        self.assertEqual(omitted['excluded_prefixes'], ['data/[bulk]/', 'exact.bin'])
+        self.assertEqual((omitted['omitted_files'], omitted['omitted_bytes']), (3, 11011))
+        self.assertLessEqual(omitted['planned_bytes'], 2048)
+        self.assertEqual(omitted['declaration_sha256'], hashlib.sha256(declaration).hexdigest())
+        self.assertIn('snapshot_omissions', {item['kind'] for item in evidence['warnings']})
+        prompt = (self.out / 'prompt.txt').read_text()
+        self.assertIn('Snapshot omissions', prompt)
+        self.assertIn('data/[bulk]/', prompt)
+        self.assertIn('exact.bin', prompt)
+
+        extra = 'data/[bulk]/nested/explicit.bin'
+        self.write_snapshot_file(extra, b'explicit')
+        self.out = self.base / 'out-excluded-extra'
+        _, snapshot = self.run_snapshot(0, (*args, '--extra-file', extra))
+        self.assertIn('data/[bulk]/nested', snapshot)
+        self.assert_snapshot_bytes(snapshot, extra, b'explicit')
+        self.assertNotIn('data/[bulk]/raw.bin', snapshot)
+        self.assertNotIn('data/[bulk]/staged.txt', snapshot)
+
+    def test_snapshot_file_limit_uses_final_versions_and_cli_wins(self):
+        small, big = b'x' * 100, b'y' * 200
+        for rel, data in [('grow.bin', small), ('shrink.bin', big), ('steady.bin', big),
+                          ('dirty/rename-old.bin', big), ('gone.bin', big)]:
+            self.write_snapshot_file(rel, data)
+        link = self.repo / 'long-link'
+        link.symlink_to('x' * 151)
+        self.write_snapshot_file(self.declaration, b'max-file-bytes 150\nexcluded/\n')
+        self.commit_snapshot_paths('grow.bin', 'shrink.bin', 'steady.bin', 'dirty', 'gone.bin', 'long-link',
+                                   self.declaration)
+        self.write_snapshot_file('grow.bin', big)
+        self.write_snapshot_file('shrink.bin', small)
+        self.git('mv', 'dirty/rename-old.bin', 'dirty/rename-new.bin')
+        (self.repo / 'gone.bin').unlink()
+        self.write_snapshot_file('excluded/explicit.bin', big)
+        args = ('--extra-file', 'excluded/explicit.bin')
+        evidence, snapshot = self.run_snapshot(0, args)
+        expected = [['dirty/rename-new.bin', 200], ['grow.bin', 200], ['steady.bin', 200]]
+        for rel, _ in expected:
+            self.assertNotIn(rel, snapshot)
+        self.assertNotIn('dirty/rename-old.bin', snapshot)
+        self.assertNotIn('gone.bin', snapshot)
+        self.assert_snapshot_bytes(snapshot, 'shrink.bin', small)
+        self.assert_snapshot_bytes(snapshot, 'excluded/explicit.bin', big)
+        self.assertIn('excluded', snapshot)
+        self.assertEqual(snapshot['long-link'], ['symlink', 'x' * 151])
+        omitted = evidence['snapshot_omissions']
+        self.assertEqual(omitted['oversize'], expected)
+        self.assertEqual((omitted['omitted_files'], omitted['omitted_bytes']), (3, 600))
+        self.assertEqual((omitted['max_file_bytes'], omitted['max_file_bytes_source']), (150, 'declaration'))
+        self.assertEqual(evidence['limits']['max_file_bytes'], 150)
+        self.assertIn('grow.bin', (self.out / 'prompt.txt').read_text())
+
+        self.out = self.base / 'out-cli'
+        evidence, snapshot = self.run_snapshot(0, (*args, '--max-file-bytes', '200'))
+        omitted = evidence['snapshot_omissions']
+        self.assertEqual((omitted['max_file_bytes'], omitted['max_file_bytes_source']), (200, 'cli'))
+        self.assertEqual(evidence['limits']['max_file_bytes'], 200)
+        self.assertEqual(omitted['omitted_files'], 0)
+        self.assert_snapshot_bytes(snapshot, 'grow.bin', big)
+        self.assert_snapshot_bytes(snapshot, 'dirty/rename-new.bin', big)
+        self.assert_snapshot_bytes(snapshot, 'steady.bin', big)
+
+    def test_snapshot_untracked_and_ignored_declarations_stay_out_of_prompt(self):
+        for ignored in (False, True):
+            with self.subTest(ignored=ignored):
+                self.out = self.base / f'out-ignored-{ignored}'
+                marker = f'untracked-content-{ignored}'
+                self.write_snapshot_file(self.declaration, f'{marker}/\nmax-file-bytes 1048576\n'.encode())
+                if ignored:
+                    self.write_snapshot_file('.git/info/exclude', (self.declaration + '\n').encode())
+                    self.git('check-ignore', '--', self.declaration)
+                evidence, snapshot = self.run_snapshot(0)
+                self.assertNotIn(self.declaration, snapshot)
+                self.assertNotIn(marker, (self.out / 'prompt.txt').read_text())
+                self.assertNotIn('Snapshot omissions', (self.out / 'prompt.txt').read_text())
+                self.assertEqual(evidence['snapshot_omissions']['excluded_prefixes'], [])
+                self.assertIsNone(evidence['snapshot_omissions']['declaration_sha256'])
+                self.assertIn('snapshot_exclude_untracked', {item['kind'] for item in evidence['warnings']})
+
+        self.git('add', '-f', '--', self.declaration)
+        self.git('-c', 'user.name=Fixture', '-c', 'user.email=fixture.invalid', 'commit', '-qm', 'track declaration')
+        self.git('rm', '--cached', '--', self.declaration)
+        self.write_snapshot_file(self.declaration, b'../invalid-untracked-replacement\n')
+        self.out = self.base / 'out-index-deleted'
+        evidence, snapshot = self.run_snapshot(0)
+        self.assertNotIn(self.declaration, snapshot)
+        self.assertIn('snapshot_exclude_untracked', {item['kind'] for item in evidence['warnings']})
+
+    def test_snapshot_invalid_tracked_declaration_exits_two(self):
+        path = self.write_snapshot_file(self.declaration, b'# safe\n')
+        self.commit_snapshot_paths(self.declaration)
+        for raw, expected in [(b'../escape\n', 'path traversal'), (b'/absolute\n', 'relative'),
+                              (b'C:/absolute\n', 'relative'), (b'a\\b\n', 'backslash'),
+                              (b'max-file-bytes 0\n', 'positive integer'),
+                              (b'max-file-bytes\n', 'positive integer'),
+                              (b'max-file-bytes 1\nmax-file-bytes 2\n', 'duplicate'),
+                              (b'#' * (64 * 1024 + 1), '65536'), (b'\xff', 'UTF-8')]:
+            with self.subTest(expected=expected):
+                path.write_bytes(raw)
+                evidence, _ = self.run_snapshot(2)
+                self.assertIn(expected, evidence['error'])
+        path.unlink()
+        path.symlink_to(self.request)
+        evidence, _ = self.run_snapshot(2)
+        self.assertIn('symlink', evidence['error'])
+        path.unlink()
+        path.mkdir()
+        evidence, _ = self.run_snapshot(2)
+        self.assertIn('regular file', evidence['error'])
+        path.rmdir()
+        evidence, _ = self.run_snapshot(2, ('--max-file-bytes', '-1'))
+        self.assertIn('--max-file-bytes must be a positive integer', evidence['error'])
+        self.assertFalse(self.out.exists())
+        self.assertFalse(self.calls.exists())
+
+    def test_snapshot_omission_notice_caps_samples_and_uses_utf8_budget(self):
+        paths = [f'bulky/文件-{i:03}.bin' for i in range(102)]
+        for rel in paths:
+            self.write_snapshot_file(rel, b'x' * 200)
+        self.write_snapshot_file(self.declaration, b'max-file-bytes 150\n')
+        self.commit_snapshot_paths('bulky', self.declaration)
+        self.request.write_text('request')
+        evidence, _ = self.run_snapshot(0)
+        prompt = (self.out / 'prompt.txt').read_text()
+        self.assertIn(paths[99], prompt)
+        self.assertNotIn(paths[100], prompt)
+        self.assertIn('2 more oversize files', prompt)
+        base_bytes = len(prompt.split('\nSnapshot omissions:', 1)[0].encode('utf-8'))
+        available = 260
+        extra_bytes = 122880 - base_bytes - available
+        self.request.write_text('request' + '甲' * (extra_bytes // 3) + 'x' * (extra_bytes % 3))
+        self.out = self.base / 'out-tight-budget'
+        tight, _ = self.run_snapshot(0)
+        prompt_bytes = (self.out / 'prompt.txt').read_bytes()
+        self.assertLessEqual(len(prompt_bytes), 122880)
+        self.assertGreater(len(prompt_bytes), 122880 - available)
+        self.assertIn(b'Snapshot omissions:', prompt_bytes)
+        self.assertNotIn(paths[99], prompt_bytes.decode('utf-8'))
+        self.assertEqual(tight['prompt_bytes'], len(prompt_bytes))
+        self.assertEqual(tight['snapshot_omissions']['oversize'], [[path, 200] for path in paths])
+        self.assertEqual(evidence['snapshot_omissions'], tight['snapshot_omissions'])
+
+        summary = next(line for line in prompt.splitlines() if line.startswith('Snapshot omissions:'))
+        summary_bytes = len(summary.encode('utf-8')) + 2
+        self.request.write_text(self.request.read_text() + 'x' * (available - summary_bytes))
+        self.out = self.base / 'out-summary-only'
+        summary_only, _ = self.run_snapshot(0)
+        self.assertEqual(summary_only['prompt_bytes'], 122880)
+        self.assertTrue((self.out / 'prompt.txt').read_text().endswith(summary + '\n'))
+
+        self.request.write_text(self.request.read_text() + 'x')
+        self.out = self.base / 'out-summary-too-large'
+        rejected, _ = self.run_snapshot(2)
+        self.assertIn('exceeds the limit with the snapshot omissions summary', rejected['error'])
+        self.assertFalse(self.out.exists())
+
+    def test_snapshot_overlay_growth_during_copy_exits_two(self):
+        source = self.write_snapshot_file('grows-during-copy.bin', b'head')
+        self.write_snapshot_file(self.declaration, b'max-file-bytes 150\n')
+        self.commit_snapshot_paths(source.name, self.declaration)
+        source.write_bytes(b'a' * 100)
+        command = self.command()
+        spec = importlib.util.spec_from_file_location('snapshot_wrapper_under_test', command[1])
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        open_path = Path.open
+
+        def grow_after_stat(path, *args, **kwargs):
+            if path == source and args == ('rb',):
+                with open_path(path, 'ab') as handle:
+                    handle.write(b'b' * 100)
+            return open_path(path, *args, **kwargs)
+
+        stdout = io.StringIO()
+        with mock.patch.object(sys, 'argv', command[1:]), mock.patch.dict(os.environ, self.env), \
+             mock.patch.object(Path, 'open', grow_after_stat), redirect_stdout(stdout), redirect_stderr(io.StringIO()):
+            self.assertEqual(module.main(), 2)
+        summary = json.loads(stdout.getvalue())
+        self.assertIn('working tree changed during snapshot preparation', summary['error'])
+        self.assertIn('--max-file-bytes', summary['error'])
+        self.assertFalse(summary['fallback_allowed'])
+        self.assertFalse(self.calls.exists())
+        self.assertFalse((self.out / '.staging').exists())
+
+    def test_snapshot_without_declaration_preserves_head_and_dirty_bytes(self):
+        large = b'L' * (1024 * 1024 + 5)
+        self.write_snapshot_file('nested/large.bin', large)
+        self.commit_snapshot_paths('nested')
+        self.write_snapshot_file(self.snapshot_tracked, b'dirty tracked bytes\n')
+        evidence, snapshot = self.run_snapshot(0)
+        self.assert_snapshot_bytes(snapshot, 'nested/large.bin', large)
+        self.assert_snapshot_bytes(snapshot, self.snapshot_tracked, b'dirty tracked bytes\n')
+        self.assertEqual(set(snapshot), set(self.snapshot_head_paths) | {'nested', 'nested/large.bin'})
+        self.assertNotIn('Snapshot omissions', (self.out / 'prompt.txt').read_text())
+        omitted = evidence['snapshot_omissions']
+        self.assertEqual((omitted['omitted_files'], omitted['omitted_bytes']), (0, 0))
+        self.assertEqual((omitted['max_file_bytes'], omitted['max_file_bytes_source']), (None, 'default'))
+
+    def test_snapshot_staged_declaration_can_exclude_every_head_path(self):
+        declaration = ('\n'.join((*self.snapshot_head_paths, '.ai-anti/', 'max-file-bytes 1')) + '\n').encode()
+        self.write_snapshot_file(self.declaration, declaration)
+        self.git('add', '--', self.declaration)
+        deletes, overlays, _, omissions = plan_overlay(self.repo, [], 2048)
+        staging = self.base / 'all-head-excluded'
+        self.assertEqual(prepare_staging(self.repo, staging, deletes, overlays, 2048, omissions), len(declaration))
+        self.assertEqual({path.relative_to(staging).as_posix() for path in staging.rglob('*')},
+                         {'.ai-anti', self.declaration})
+        self.assertEqual((staging / self.declaration).read_bytes(), declaration)
+
+
+class AgyPlanTests(SnapshotOmissionsTests, unittest.TestCase):
+    snapshot_tracked = 'app.py'
+    snapshot_head_paths = ('.gitignore', 'app.py', 'deleted.txt')
+
     def setUp(self):
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
@@ -392,6 +668,19 @@ class AgyPlanTests(unittest.TestCase):
         if extra_env:
             env.update(extra_env)
         return subprocess.run(cmd, env=env, capture_output=True, text=True, timeout=20)
+
+    def run_snapshot(self, code, args=()):
+        capture = self.base / 'snapshot-tree.json'
+        capture.unlink(missing_ok=True)
+        result = self.invoke(extra_args=args, extra_env={'FIXTURE_SNAPSHOT_CAPTURE': str(capture)})
+        self.assertEqual(result.returncode, code, (result.stdout, result.stderr))
+        if code:
+            summary = json.loads(result.stdout)
+            self.assertFalse(summary['fallback_allowed'])
+            return summary, None
+        argv = json.loads(self.calls.read_text().splitlines()[-1])['argv']
+        self.assertEqual(argv[-1], '--print=' + (self.out / 'prompt.txt').read_text())
+        return self.load_manifest(), json.loads(capture.read_text())
 
     def invoke_main(self, mod):
         stdout, stderr = io.StringIO(), io.StringIO()

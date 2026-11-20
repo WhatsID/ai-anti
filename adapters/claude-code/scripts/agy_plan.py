@@ -25,8 +25,9 @@ from review_runner import RunError, execute
 from plan_staging import (
     CAP, MAX_PROMPT_BYTES, SEMVER_RE, assemble_prompt, capture_integrity_state, diff_integrity_state,
     digest_bytes, digest_file, interruption_signal, is_cleanup_failure, make_tree_readonly,
-    plan_overlay, planning_parser, prepare_materials, prepare_staging, remove_tree_readonly_safe,
-    rewrite_staging_paths, run_git, validate_prompt, write_json, write_plan_atomic,
+    omission_notice, plan_overlay, planning_parser, prepare_materials, prepare_staging,
+    remove_tree_readonly_safe, repo_path_variants, rewrite_staging_paths, run_git, validate_prompt,
+    write_json, write_plan_atomic,
 )
 
 
@@ -310,7 +311,6 @@ def run(args, signal_state=None):
     timeout, idle = review_limits(config, args.timeout, args.idle_timeout)
 
     payload, input_paths, input_sha256, extra_files, warnings = prepare_materials(args, repo, assemble_prompt)
-    print_arg = '--print=' + payload
     prompt_bytes = validate_prompt(payload).encode('utf-8')
     if len(prompt_bytes) > MAX_PROMPT_BYTES:
         raise ConfigError(
@@ -318,7 +318,14 @@ def run(args, signal_state=None):
             'shorten the drafts or synthesize with Claude'
         )
 
-    delete_set, overlay_files, dirty_paths = plan_overlay(repo, extra_files, args.max_snapshot_bytes)
+    delete_set, overlay_files, dirty_paths, omissions = plan_overlay(
+        repo, extra_files, args.max_snapshot_bytes, args.max_file_bytes, warnings=warnings,
+    )
+    payload += omission_notice(
+        omissions, MAX_PROMPT_BYTES - len(prompt_bytes), repo_path_variants(repo, args.repo), warnings,
+    )
+    prompt_bytes = payload.encode('utf-8')
+    print_arg = '--print=' + payload
 
     # 9. Create --out and isolated read-only staging snapshot
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -350,6 +357,7 @@ def run(args, signal_state=None):
         'stderr_log': stderr_path.name,
         'stderr_sha256': None,
         'warnings': warnings,
+        'snapshot_omissions': omissions,
         'tool_warnings': [],
         'on_failure': dual['on_failure'],
         'fallback_allowed': False,
@@ -364,6 +372,7 @@ def run(args, signal_state=None):
             'idle_timeout': idle,
             'max_output_bytes': CAP,
             'max_snapshot_bytes': args.max_snapshot_bytes,
+            'max_file_bytes': omissions['max_file_bytes'],
             'max_prompt_bytes': MAX_PROMPT_BYTES,
         },
     }
@@ -450,7 +459,7 @@ def run(args, signal_state=None):
     try:
         prompt_path.write_bytes(prompt_bytes)
         os.chmod(prompt_path, 0o600)
-        prepare_staging(repo, staging, delete_set, overlay_files, args.max_snapshot_bytes)
+        prepare_staging(repo, staging, delete_set, overlay_files, args.max_snapshot_bytes, omissions, extra_files)
         make_tree_readonly(staging)
         pre_integrity = capture_integrity_state(repo, dirty_paths, extra_files, input_paths, staging)
     except BaseException:

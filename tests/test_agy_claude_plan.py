@@ -14,6 +14,7 @@ import time
 import unittest
 from contextlib import redirect_stdout
 from unittest.mock import patch
+from test_claude_agy_plan import SNAPSHOT_CAPTURE, SnapshotOmissionsTests
 
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / 'adapters/agy/scripts/claude_plan.py'
@@ -55,6 +56,7 @@ assert argv[0] == '-p'
 assert not cwd.stat().st_mode & stat.S_IWUSR
 assert not (cwd / 'tracked.txt').stat().st_mode & stat.S_IWUSR
 assert not os.path.lexists(cwd / '.git')
+''' + SNAPSHOT_CAPTURE + r'''
 observed = {path.name: path.read_text() for path in cwd.glob('*.txt') if path.is_file()}
 (base / 'snapshot.json').write_text(json.dumps(observed))
 if fixture.get('mutation'):
@@ -151,7 +153,10 @@ class ConfigTests(unittest.TestCase):
             self.assertEqual(read_sizes, [9])
 
 
-class ClaudePlanTests(unittest.TestCase):
+class ClaudePlanTests(SnapshotOmissionsTests, unittest.TestCase):
+    snapshot_tracked = 'tracked.txt'
+    snapshot_head_paths = ('safe-link', 'tracked.txt')
+
     def setUp(self):
         temp = tempfile.TemporaryDirectory(prefix='agy-claude-plan-test-')
         self.addCleanup(temp.cleanup)
@@ -227,6 +232,17 @@ class ClaudePlanTests(unittest.TestCase):
 
     def call_args(self):
         return [json.loads(line) for line in self.calls.read_text().splitlines()]
+
+    def run_snapshot(self, code, args=()):
+        capture = self.base / 'snapshot-tree.json'
+        capture.unlink(missing_ok=True)
+        with patch.dict(self.env, FIXTURE_SNAPSHOT_CAPTURE=str(capture)):
+            evidence = self.invoke(code, extra=args)
+        if code:
+            self.assertFalse(evidence['fallback_allowed'])
+            return evidence, None
+        self.assertEqual(self.call_args()[-1][1], (self.out / 'prompt.txt').read_text())
+        return evidence, json.loads(capture.read_text())
 
     def test_draft_restricts_cli_and_snapshots_approved_materials(self):
         before = self.git('status', '--porcelain=v1', '-z')

@@ -36,6 +36,7 @@ git -C "$repo" status --short
 `agy_dual_plan`，读取 `~/.config/ai-anti/config.json`。配置损坏或字段无效即停并报告。
 优先级为**用户当次明确指令 > 本会话临时禁用状态 > `agy_relay.dual_plan.enabled` > 默认关闭**。
 关闭时由 AGY 独立起草并保存方案。沿用同任务仍有效的方案时按 `core/WORKFLOW_CONTINUITY.md` 续接。
+封装器自动读取项目仓库根目录下受跟踪的 `.ai-anti/plan-snapshot-exclude`，默认无规划快照排除。
 
 - 「本次不用双方案」「本次开启双方案」「本次由 Claude 综合」只覆盖当前一次规划，
   方案落盘或规划中止时即消费。

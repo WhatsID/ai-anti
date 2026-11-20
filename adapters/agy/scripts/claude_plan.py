@@ -20,9 +20,9 @@ from ai_anti_config import ConfigError, agy_dual_plan, agy_dual_plan_defaults, l
 from plan_staging import (
     CAP, MAX_PROMPT_BYTES, SEMVER_RE, assemble_prompt,
     capture_integrity_state, diff_integrity_state, digest_bytes, digest_file, git_env,
-    interruption_signal, is_cleanup_failure, make_tree_readonly, plan_overlay, planning_parser,
-    prepare_materials, prepare_staging, remove_tree_readonly_safe, rewrite_staging_paths,
-    run_git, validate_prompt, write_json, write_plan_atomic,
+    interruption_signal, is_cleanup_failure, make_tree_readonly, omission_notice, plan_overlay,
+    planning_parser, prepare_materials, prepare_staging, remove_tree_readonly_safe, repo_path_variants,
+    rewrite_staging_paths, run_git, validate_prompt, write_json, write_plan_atomic,
 )
 from review_runner import ALLOWED, MODEL_FAMILIES, RunError, blocks, builtin_plugins_only, execute
 
@@ -305,7 +305,13 @@ def run(args, signal_state):
             f'assembled prompt ({len(prompt_bytes)} bytes) exceeds the limit ({MAX_PROMPT_BYTES} bytes); '
             'shorten the drafts or synthesize with AGY'
         )
-    deletes, overlays, dirty = plan_overlay(repo, extras, args.max_snapshot_bytes)
+    deletes, overlays, dirty, omissions = plan_overlay(
+        repo, extras, args.max_snapshot_bytes, args.max_file_bytes, warnings=warnings,
+    )
+    prompt += omission_notice(
+        omissions, MAX_PROMPT_BYTES - len(prompt_bytes), repo_path_variants(repo, args.repo), warnings,
+    )
+    prompt_bytes = prompt.encode('utf-8')
 
     started = time.monotonic()
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
@@ -318,11 +324,13 @@ def run(args, signal_state):
         'prompt_bytes': len(prompt_bytes), 'prompt_sha256': digest_bytes(prompt_bytes),
         'plan_file': None, 'plan_sha256': None, 'log': log.name, 'log_sha256': None,
         'stderr_log': stderr.name, 'stderr_sha256': None, 'warnings': warnings, 'tool_warnings': [],
+        'snapshot_omissions': omissions,
         'on_failure': dual['on_failure'], 'fallback_allowed': False, 'integrity_ok': True,
         'duration_seconds': 0, 'cli_exit_code': None, 'exit_code': None,
         'status': 'running', 'completed': False,
         'limits': {'timeout': timeout, 'idle_timeout': idle, 'max_output_bytes': CAP,
-                   'max_snapshot_bytes': args.max_snapshot_bytes, 'max_prompt_bytes': MAX_PROMPT_BYTES},
+                   'max_snapshot_bytes': args.max_snapshot_bytes, 'max_file_bytes': omissions['max_file_bytes'],
+                   'max_prompt_bytes': MAX_PROMPT_BYTES},
     }
 
     def write_evidence():
@@ -336,7 +344,7 @@ def run(args, signal_state):
         prompt_path = out / 'prompt.txt'
         prompt_path.write_bytes(prompt_bytes)
         prompt_path.chmod(0o600)
-        prepare_staging(repo, staging, deletes, overlays, args.max_snapshot_bytes)
+        prepare_staging(repo, staging, deletes, overlays, args.max_snapshot_bytes, omissions, extras)
         make_tree_readonly(staging)
         before = capture_integrity_state(repo, dirty, extras, inputs, staging)
         for path, (kind, _) in before['staging'].items():

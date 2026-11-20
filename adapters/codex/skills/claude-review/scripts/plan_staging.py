@@ -23,6 +23,9 @@ CAP = 8 * 1024 * 1024
 MAX_PROMPT_BYTES = 120 * 1024
 MAX_INPUT_READ_BYTES = 2 * 1024 * 1024
 DEFAULT_MAX_SNAPSHOT_BYTES = 128 * 1024 * 1024
+SNAPSHOT_EXCLUDE_PATH = '.ai-anti/plan-snapshot-exclude'
+MAX_SNAPSHOT_EXCLUDE_BYTES = 64 * 1024
+MAX_OVERSIZE_PROMPT_SAMPLES = 100
 SEMVER_RE = re.compile(r'\b([0-9]+\.[0-9]+\.[0-9]+)\b')
 R2_APPENDIX_PREFIX = '## 附录：非需求'
 
@@ -44,7 +47,9 @@ def digest_file(path):
 
 
 def write_json(path, value):
-    path.write_text(json.dumps(value, ensure_ascii=False, indent=2) + '\n', encoding='utf-8')
+    # Git paths can contain undecodable bytes represented by surrogate escapes.
+    data = json.dumps(value, ensure_ascii=False, indent=2) + '\n'
+    path.write_bytes(data.encode('utf-8', errors='backslashreplace'))
     os.chmod(path, 0o600)
 
 
@@ -149,6 +154,57 @@ def read_regular_utf8(path, label, max_bytes=MAX_INPUT_READ_BYTES):
     return raw, text
 
 
+def load_snapshot_excludes(repo):
+    path = repo / SNAPSHOT_EXCLUDE_PATH
+    try:
+        path.lstat()
+    except (FileNotFoundError, NotADirectoryError):
+        return [], None, None, False
+    tracked = subprocess.run(
+        ['git', '-C', str(repo), 'ls-files', '-z', '--error-unmatch', '--', SNAPSHOT_EXCLUDE_PATH],
+        env=git_env(), stdin=subprocess.DEVNULL, capture_output=True, timeout=30,
+    )
+    if tracked.returncode not in (0, 1):
+        detail = tracked.stderr.decode('utf-8', errors='replace').strip()
+        raise ConfigError(f'git ls-files failed for {SNAPSHOT_EXCLUDE_PATH}: {detail}')
+    if tracked.returncode == 1 or os.fsencode(SNAPSHOT_EXCLUDE_PATH) not in tracked.stdout.split(b'\0'):
+        return [], None, None, True
+
+    path = assert_no_symlink_components(repo, SNAPSHOT_EXCLUDE_PATH, 'snapshot exclusion declaration')
+    raw, body = read_regular_utf8(path, 'snapshot exclusion declaration', MAX_SNAPSHOT_EXCLUDE_BYTES)
+    prefixes = {}
+    limit = None
+    for lineno, line in enumerate(body.splitlines(), 1):
+        line = line.strip()
+        if not line or line.startswith('#'):
+            continue
+        label = f'{SNAPSHOT_EXCLUDE_PATH} line {lineno}'
+        directive = line.split(maxsplit=1)
+        if directive[0] == 'max-file-bytes':
+            if limit is not None:
+                raise ConfigError(f'{label}: duplicate max-file-bytes directive')
+            try:
+                if len(directive) == 2 and re.fullmatch('[0-9]+', directive[1]):
+                    limit = int(directive[1])
+            except ValueError as exc:
+                raise ConfigError(f'{label}: max-file-bytes must be a positive integer') from exc
+            if not limit:
+                raise ConfigError(f'{label}: max-file-bytes must be a positive integer')
+            continue
+        if '\\' in line:
+            raise ConfigError(f'invalid {label}: backslash rejected')
+        if re.match(r'^[A-Za-z]:/', line):
+            raise ConfigError(f'invalid {label}: must be relative')
+        suffix = '/' if line.endswith('/') else ''
+        prefixes[normalize_relpath(line, label) + suffix] = None
+    return list(prefixes), limit, digest_bytes(raw), False
+
+
+def is_excluded(rel, prefixes):
+    return any(rel.startswith(prefix) if prefix.endswith('/')
+               else rel == prefix or rel.startswith(prefix + '/') for prefix in prefixes)
+
+
 def strip_r2_appendix(text):
     """Truncate R2 `## 附录：非需求...` appendix lines and everything after."""
     kept = []
@@ -215,11 +271,11 @@ def rewrite_staging_paths(text, staging):
     return text, links + bare_paths
 
 
-def parse_head_sizes(repo):
+def parse_head_entries(repo):
     raw = run_git(repo, 'ls-tree', '-r', '-l', '-z', 'HEAD', binary=True)
-    sizes = {}
+    entries = {}
     if not raw:
-        return sizes
+        return entries
     for record in raw.decode('utf-8', errors='surrogateescape').split('\0'):
         if not record:
             continue
@@ -229,12 +285,12 @@ def parse_head_sizes(repo):
         fields = meta.split()
         if len(fields) < 4:
             continue
-        obj_type, size_str = fields[1], fields[3]
-        if obj_type != 'blob' or size_str == '-':
-            continue
+        mode, obj_type, _, size_str = fields
         rel = normalize_relpath(path, 'git HEAD path')
-        sizes[rel] = int(size_str)
-    return sizes
+        # Gitlinks can produce archive directories but have no blob bytes.
+        size = int(size_str) if obj_type == 'blob' else None
+        entries[rel] = (size, mode != '120000')
+    return entries
 
 
 def collect_overlay_plan(repo, porcelain_entries, extra_files):
@@ -269,7 +325,6 @@ def collect_overlay_plan(repo, porcelain_entries, extra_files):
             overlay_files[rel] = ('reg', src)
         elif stat.S_ISLNK(st.st_mode):
             target = os.readlink(src)
-            validate_staging_symlink(rel, target)
             delete_set.discard(rel)
             overlay_files[rel] = ('symlink', target)
         elif stat.S_ISDIR(st.st_mode):
@@ -311,16 +366,14 @@ def validate_staging_symlink(rel_posix, target):
             resolved.append(part)
 
 
-def compute_planned_bytes(head_sizes, delete_set, overlay_files):
-    planned = dict(head_sizes)
-    for rel in delete_set:
-        planned.pop(rel, None)
+def final_snapshot_files(head_entries, delete_set, overlay_files):
+    planned = {rel: info for rel, info in head_entries.items() if info[0] is not None and rel not in delete_set}
     for rel, (kind, payload) in overlay_files.items():
         if kind == 'reg':
-            planned[rel] = payload.lstat().st_size
+            planned[rel] = (payload.lstat().st_size, True)
         elif kind == 'symlink':
-            planned[rel] = len(payload.encode('utf-8', errors='surrogateescape'))
-    return sum(planned.values())
+            planned[rel] = (len(payload.encode('utf-8', errors='surrogateescape')), False)
+    return planned
 
 
 def remove_tree_readonly_safe(root_path):
@@ -366,16 +419,17 @@ def make_tree_readonly(root_path):
     os.chmod(root_path, stat.S_IMODE(mode) & ~0o222)
 
 
-def prepare_staging(repo, staging, delete_set, overlay_files, max_snapshot_bytes):
-    staging.mkdir(mode=0o700, parents=False, exist_ok=False)
-    skip_from_archive = delete_set | set(overlay_files.keys())
+def extract_snapshot_archive(repo, staging, skip_from_archive, max_snapshot_bytes, excluded_prefixes):
     written_bytes = 0
+    command = ['git', '-C', str(repo), 'archive', '--format=tar', 'HEAD']
+    if excluded_prefixes:
+        command += ['--', '.', *(':(exclude,literal)' + prefix for prefix in excluded_prefixes)]
 
     # A regular file lets us wait with a timeout without blocking on stderr.
     archive_stderr = tempfile.TemporaryFile()
     try:
         proc = subprocess.Popen(
-            ['git', '-C', str(repo), 'archive', '--format=tar', 'HEAD'],
+            command,
             env=git_env(),
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
@@ -465,6 +519,20 @@ def prepare_staging(repo, staging, delete_set, overlay_files, max_snapshot_bytes
     finally:
         proc.stdout.close()
         archive_stderr.close()
+    return written_bytes
+
+
+def prepare_staging(repo, staging, delete_set, overlay_files, max_snapshot_bytes, omissions, extra_files=()):
+    staging.mkdir(mode=0o700, parents=False, exist_ok=False)
+    written_bytes = 0
+    if not omissions['archive_empty']:
+        written_bytes = extract_snapshot_archive(
+            repo, staging, delete_set | set(overlay_files), max_snapshot_bytes, omissions['excluded_prefixes'],
+        )
+    uncapped = set(extra_files)
+    if omissions['declaration_sha256'] is not None:
+        uncapped.add(SNAPSHOT_EXCLUDE_PATH)
+    max_file_bytes = omissions['max_file_bytes']
 
     # Apply deletions (for any directories/files that might remain)
     for rel in sorted(delete_set):
@@ -486,13 +554,22 @@ def prepare_staging(repo, staging, delete_set, overlay_files, max_snapshot_bytes
         dest.parent.mkdir(parents=True, exist_ok=True)
         if kind == 'reg':
             st = payload.lstat()
+            file_limit = max_file_bytes if rel not in uncapped else None
+            growth_error = (f'working tree changed during snapshot preparation: {rel} '
+                            f'exceeds --max-file-bytes ({file_limit})')
+            if file_limit is not None and st.st_size > file_limit:
+                raise ConfigError(growth_error)
             if written_bytes + st.st_size > max_snapshot_bytes:
                 raise ConfigError('snapshot size exceeds --max-snapshot-bytes during overlay')
+            member_written = 0
             with payload.open('rb') as src_f, dest.open('wb') as dst_f:
                 while True:
                     chunk = src_f.read(65536)
                     if not chunk:
                         break
+                    member_written += len(chunk)
+                    if file_limit is not None and member_written > file_limit:
+                        raise ConfigError(growth_error)
                     written_bytes += len(chunk)
                     if written_bytes > max_snapshot_bytes:
                         raise ConfigError('snapshot size exceeds --max-snapshot-bytes during overlay')
@@ -754,12 +831,48 @@ def prepare_materials(args, repo, assemble_prompt):
     return payload, input_paths, input_sha256, extra_files, warnings
 
 
-def plan_overlay(repo, extra_files, max_snapshot_bytes):
+def plan_overlay(repo, extra_files, max_snapshot_bytes, max_file_bytes=None, *, warnings=None):
+    prefixes, declaration_limit, declaration_sha256, untracked = load_snapshot_excludes(repo)
+    if max_file_bytes is not None:
+        if type(max_file_bytes) is not int or max_file_bytes <= 0:
+            raise ConfigError('--max-file-bytes must be a positive integer')
+        limit_source = 'cli'
+    else:
+        max_file_bytes = declaration_limit
+        limit_source = 'declaration' if declaration_limit is not None else 'default'
+
     status_raw = run_git(repo, 'status', '--porcelain=v1', '-z', binary=True)
     porcelain_entries = parse_porcelain_z(status_raw)
     delete_set, overlay_files = collect_overlay_plan(repo, porcelain_entries, extra_files)
-    head_sizes = parse_head_sizes(repo)
-    planned_bytes = compute_planned_bytes(head_sizes, delete_set, overlay_files)
+    head_entries = parse_head_entries(repo)
+    exempt = set(extra_files)
+    if declaration_sha256 is not None:
+        # Keep the declaration visible in the snapshot, including when it excludes its parent.
+        exempt.add(SNAPSHOT_EXCLUDE_PATH)
+        if is_excluded(SNAPSHOT_EXCLUDE_PATH, prefixes):
+            overlay_files[SNAPSHOT_EXCLUDE_PATH] = ('reg', repo / SNAPSHOT_EXCLUDE_PATH)
+    elif untracked and SNAPSHOT_EXCLUDE_PATH not in exempt:
+        # A staged removal may leave an untracked replacement at a former HEAD path.
+        delete_set.add(SNAPSHOT_EXCLUDE_PATH)
+        overlay_files.pop(SNAPSHOT_EXCLUDE_PATH, None)
+
+    planned = final_snapshot_files(head_entries, delete_set, overlay_files)
+    planned_bytes = omitted_files = omitted_bytes = 0
+    oversize = []
+    for rel, (size, regular) in planned.items():
+        excluded = rel not in exempt and is_excluded(rel, prefixes)
+        too_large = rel not in exempt and regular and max_file_bytes is not None and size > max_file_bytes
+        if excluded or too_large:
+            delete_set.add(rel)
+            overlay_files.pop(rel, None)
+            omitted_files += 1
+            omitted_bytes += size
+            if too_large and not excluded:
+                oversize.append((rel, size))
+        else:
+            if rel in overlay_files and overlay_files[rel][0] == 'symlink':
+                validate_staging_symlink(rel, overlay_files[rel][1])
+            planned_bytes += size
     if planned_bytes > max_snapshot_bytes:
         raise ConfigError(
             f'snapshot size ({planned_bytes} bytes) exceeds --max-snapshot-bytes ({max_snapshot_bytes})'
@@ -773,7 +886,69 @@ def plan_overlay(repo, extra_files, max_snapshot_bytes):
         if raw_orig is not None:
             dirty_paths.add(normalize_relpath(raw_orig, 'renamed path'))
 
-    return delete_set, overlay_files, dirty_paths
+    if warnings is not None:
+        if untracked:
+            warnings.append({'kind': 'snapshot_exclude_untracked', 'path': SNAPSHOT_EXCLUDE_PATH})
+        if prefixes or omitted_files:
+            warnings.append({'kind': 'snapshot_omissions', 'omitted_files': omitted_files,
+                             'omitted_bytes': omitted_bytes})
+    omissions = {
+        'excluded_prefixes': prefixes,
+        'oversize': sorted(oversize),
+        'omitted_files': omitted_files,
+        'omitted_bytes': omitted_bytes,
+        'declaration_sha256': declaration_sha256,
+        'max_file_bytes': max_file_bytes,
+        'max_file_bytes_source': limit_source,
+        'planned_bytes': planned_bytes,
+        # An archive with every HEAD path excluded can contain only a PAX header.
+        'archive_empty': bool(prefixes) and all(is_excluded(rel, prefixes) for rel in head_entries),
+    }
+    return delete_set, overlay_files, dirty_paths, omissions
+
+
+def omission_notice(omissions, byte_budget, repo_paths, warnings):
+    prefixes, oversize = omissions['excluded_prefixes'], omissions['oversize']
+    if not prefixes and not oversize:
+        return ''
+    summary = (
+        f"\nSnapshot omissions: {omissions['omitted_files']} files ({omissions['omitted_bytes']} bytes), "
+        f'{len(prefixes)} declared exclusion paths, {len(oversize)} files over the single-file limit. '
+        'Mark needed material as unread for the primary model to verify. Do not infer its contents.\n'
+    )
+    remaining = byte_budget - len(summary.encode('utf-8'))
+    if remaining < 0:
+        raise ConfigError('assembled prompt exceeds the limit with the snapshot omissions summary; shorten the materials')
+
+    def remainder(paths, files):
+        if paths or files:
+            return f'... {paths} more exclusion paths; {files} more oversize files.\n'
+        return ''
+
+    parts = [summary]
+    paths_left, files_left = len(prefixes), len(oversize)
+    for reason, entries in (
+        ('Excluded path', ((path, None) for path in prefixes)),
+        ('Oversize file', oversize[:MAX_OVERSIZE_PROMPT_SAMPLES]),
+    ):
+        for path, size in entries:
+            path_warnings = []
+            display_path = redact_repo_path(path, repo_paths, 'snapshot_omissions', path_warnings)
+            quoted = json.dumps(display_path, ensure_ascii=False).encode('utf-8', errors='backslashreplace').decode('utf-8')
+            row = f'- {reason}: {quoted}' + (f' ({size} bytes)\n' if size is not None else '\n')
+            next_paths = paths_left - (size is None)
+            next_files = files_left - (size is not None)
+            cost = len(row.encode('utf-8'))
+            if cost + len(remainder(next_paths, next_files)) > remaining:
+                break
+            parts.append(row)
+            warnings.extend(path_warnings)
+            remaining -= cost
+            paths_left, files_left = next_paths, next_files
+    tail = remainder(paths_left, files_left)
+    if len(tail) <= remaining:
+        parts.append(tail)
+    return ''.join(parts)
 
 
 def planning_parser(description):
@@ -791,4 +966,5 @@ def planning_parser(description):
     parser.add_argument('--timeout', type=int)
     parser.add_argument('--idle-timeout', type=int)
     parser.add_argument('--max-snapshot-bytes', type=int, default=DEFAULT_MAX_SNAPSHOT_BYTES)
+    parser.add_argument('--max-file-bytes', type=int)
     return parser
