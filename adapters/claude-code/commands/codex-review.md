@@ -62,7 +62,9 @@ readonly(["codex", "exec", "--json", "--sandbox", "read-only", *model_args, *eff
 两种显式模式（参数不匹配任何模式时，按最接近的意图选择并告知用户你的理解；路径含空格时加引号传入）：
 
 `plan`：按 R3 fail closed 派生并检查 sibling request；检查通过后，提示词运行时注入 R1、R4、R6、R7、R8、R10 原文和项目覆写的部署规模口径。提示词还给出仓库根、request、方案和 scratchpad
-路径，要求按 R4 的顺序审查。写入 `<scratchpad>/review_prompt.txt` 后按上面的受限 argv 调用运行。
+路径，要求按 R4 的顺序审查。先用 `cat -- <路径>` 完整读取 request，按 R4 独立列出清单后，再用
+`cat -- <路径>` 完整读取方案。读取失败后用确切路径完整重读，避免 macOS BSD 不兼容的 `sed ... --` 或截读命令。
+写入 `<scratchpad>/review_prompt.txt` 后按上面的受限 argv 调用运行。
 统一读取 `review.timeout` / `review.idle_timeout`（默认1800/900秒，上限3600/900）；无输出 idle 可先终止。
 
 

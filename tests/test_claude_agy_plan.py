@@ -791,6 +791,27 @@ class AgyPlanTests(unittest.TestCase):
                 self.assertFalse((self.out / '.staging').exists())
 
     def test_draft_success_strips_r2_appendix_handles_leading_dash_and_hashes_evidence(self):
+        expected_user_req = (
+            '- Requirement starting with dash\n'
+            'Please add dual-plan support.\n\n'
+            '## 第 2 轮（用户原话）\n'
+            '> 第二类的三项都修一下\n\n'
+            '> [助手上轮提问/清单原文（仅作指代上下文，非主模型推断）]\n'
+            '> ### 第二类\n'
+            '> 1. 核对读取顺序\n'
+            '> 2. 补齐需求上下文\n'
+            '> 3. 补齐环境探针事实\n\n'
+        )
+        self.request.write_text(
+            expected_user_req + '## 附录：非需求（主模型推断，可质疑）\n'
+            '- Secret Claude inference that AGY must never see.\n', encoding='utf-8',
+        )
+        instructions = (
+            'Deployment scale: single-user local CLI.\n'
+            '只读探针：agy 1.5.13，支持 --sandbox，退出状态 0。\n'
+            '目录：<REPO_ROOT>/adapters/agy/。含凭证 URL：<已脱敏>。'
+        )
+        self.instructions.write_text(instructions + '\n', encoding='utf-8')
         self.write_config(model='agy-plan-model', effort='high')
         result = self.invoke(stage='draft', extra_args=['--instructions', str(self.instructions)])
         self.assertEqual(result.returncode, 0, result.stderr)
@@ -816,14 +837,13 @@ class AgyPlanTests(unittest.TestCase):
         self.assertFalse((self.out / '.staging').exists())
 
         prompt_text = (self.out / 'prompt.txt').read_text(encoding='utf-8')
-        self.assertIn('- Requirement starting with dash', prompt_text)
-        self.assertIn('single-user local CLI', prompt_text)
+        self.assertIn(f'<<<BEGIN_USER_REQUEST>>>\n{expected_user_req.strip()}\n<<<END_USER_REQUEST>>>', prompt_text)
+        self.assertIn(f'<<<BEGIN_INSTRUCTIONS>>>\n{instructions}\n<<<END_INSTRUCTIONS>>>', prompt_text)
         self.assertNotIn('## 附录：非需求', prompt_text)
         self.assertNotIn('Secret Claude inference', prompt_text)
         self.assertNotIn(str(self.repo), prompt_text)
         self.assert_read_only_self_check_rules(prompt_text)
 
-        expected_user_req = '- Requirement starting with dash\nPlease add dual-plan support.\n\n'
         self.assertEqual(
             manifest['input_sha256']['request_user'],
             hashlib.sha256(expected_user_req.encode('utf-8')).hexdigest(),

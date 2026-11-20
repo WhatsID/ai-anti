@@ -152,8 +152,11 @@ def probe_version(cli, repo, out, env):
 # Complex shell expressions can mask an individual read failure with a zero exit.
 READER_OPTIONS = {
     'cat': r'-[benstuv]+', 'head': r'-[1-9][0-9]*', 'tail': r'-[1-9][0-9]*',
-    'nl': r'(?!)', 'sed': r'-n', 'grep': r'-[EinFv]+', 'rg': r'-[inFN]+',
+    'nl': r'-(?:b[atn]|n(?:ln|rn|rz)|v[0-9]+|i[0-9]+|w[1-9][0-9]*|s[^-]+)',
+    'sed': r'-n', 'grep': r'-[EinFv]+', 'rg': r'-[inFN]+', 'awk': r'-F[^-]+',
 }
+FULL_AWK_PROGRAMS = ('{print}', '{ print }', '{print $0}', '{ print $0 }', '1')
+READER_METACHARACTERS = r'[;&|<>$`\n#*?\[\]~]'
 
 
 def read_paths(command, repo):
@@ -163,7 +166,7 @@ def read_paths(command, repo):
             args = shlex.split(args[2])
     except ValueError:
         return set()
-    if not args or any(re.search(r'[;&|<>$`\n#*?\[\]~]', arg) for arg in args):
+    if not args or re.search(READER_METACHARACTERS, args[0]):
         return set()
     reader = Path(args[0]).name
     if reader not in READER_OPTIONS:
@@ -171,23 +174,35 @@ def read_paths(command, repo):
     rest = iter(args[1:])
     operand = next(rest, None)
     while operand and operand.startswith('-'):
+        if re.search(READER_METACHARACTERS, operand):
+            return set()
         if operand == '--':
             operand = next(rest, None)
             break
         if reader in ('head', 'tail') and operand == '-n':
             if not re.fullmatch(r'[+]?[1-9][0-9]*', next(rest, '')):
                 return set()
+        elif reader == 'awk' and operand == '-F':
+            separator = next(rest, '')
+            if not separator or re.search(READER_METACHARACTERS, separator):
+                return set()
         elif not re.fullmatch(READER_OPTIONS[reader], operand):
             return set()
         operand = next(rest, None)
-    if reader in ('sed', 'grep', 'rg'):
-        if operand is None or (reader == 'sed' and not re.fullmatch(r'(?:[0-9]+(?:,[0-9]+)?)?p', operand)):
+    if reader in ('sed', 'grep', 'rg', 'awk'):
+        if operand is None:
+            return set()
+        if reader == 'sed' and not re.fullmatch(r'(?:[0-9]+(?:,[0-9]+)?)?p', operand):
+            return set()
+        if reader == 'awk' and operand.strip() not in FULL_AWK_PROGRAMS:
+            return set()
+        if reader in ('sed', 'grep', 'rg') and re.search(READER_METACHARACTERS, operand):
             return set()
         operand = next(rest, None)
     if operand is None:
         return set()
     paths = [operand, *rest]
-    if any(path.startswith('-') for path in paths):
+    if any(path.startswith('-') or re.search(r'[;&|<>$`\n#*?\[\]~=]', path) for path in paths):
         return set()
     return {Path(os.path.abspath(repo / path)) for path in paths}
 

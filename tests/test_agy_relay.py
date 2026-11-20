@@ -351,6 +351,64 @@ class PlanReviewTests(unittest.TestCase):
         self.assertTrue(evidence['completed'])
         self.assertEqual(evidence['failed_command_count'], 2)
 
+    def test_full_nl_and_awk_reads_recover_required_material(self):
+        content = self.request.read_bytes()
+        numbered = b''.join(f'{number:6d}\t'.encode() + line
+                            for number, line in enumerate(content.splitlines(keepends=True), 1))
+        cases = (
+            (['/usr/bin/nl', '-ba'], numbered),
+            (['/usr/bin/nl', '-ba', '--'], numbered),
+            (['/usr/bin/awk', '{print}'], content),
+            (['/usr/bin/awk', '--', '{print}'], content),
+            (['/usr/bin/awk', '{print $0}'], content),
+            (['/usr/bin/awk', '-F:', '{print}'], content),
+            (['/usr/bin/awk', '-F', ':', '{ print }'], content),
+            (['/usr/bin/awk', '{ print $0 }'], content),
+            (['/usr/bin/awk', '1'], content),
+        )
+        failed = command_event('failed', 'cat -- ' + shlex.quote(self.request.name), 1)
+        for index, (args, expected) in enumerate(cases):
+            with self.subTest(args=args):
+                argv = [*args, str(self.request)]
+                host = subprocess.run(argv, capture_output=True, timeout=5)
+                self.assertEqual(host.returncode, 0, host.stderr)
+                self.assertEqual(host.stdout, expected)
+                self.out = self.base / f'full-read-{index}'
+                run = self.run_review(events=[[*failed, *command_event('recovered', shlex.join(argv), 0), *REPORT]])
+                self.assertEqual(run.returncode, 0, run.stderr)
+                evidence = self.evidence()
+                self.assertTrue(evidence['completed'])
+                self.assertEqual(evidence['failed_command_count'], 1)
+
+    def test_partial_and_unsafe_awk_reads_do_not_recover_required_material(self):
+        misplaced_separator = ['{print}', '--']
+        host = subprocess.run(['/usr/bin/awk', *misplaced_separator, str(self.request)],
+                              capture_output=True, timeout=5)
+        self.assertNotEqual(host.returncode, 0)
+
+        cases = (
+            ['NR<=120 {print}'],
+            ['/^## 附录：非需求/{exit} {print}'],
+            misplaced_separator,
+            ['{system("id")}'],
+            ['{print > "out"}'],
+            ['-f', 's.awk'],
+            ['{print}', 'a=1'],
+            ['-F', '', '{print}'],
+            ['-F', '#', '{print}'],
+            ['-F$', '{print}'],
+        )
+        failed = command_event('failed', 'cat -- ' + shlex.quote(self.request.name), 1)
+        for index, args in enumerate(cases):
+            with self.subTest(args=args):
+                self.out = self.base / f'rejected-read-{index}'
+                command = shlex.join(['/usr/bin/awk', *args, str(self.request)])
+                run = self.run_review(events=[[*failed, *command_event('attempted', command, 0), *REPORT]])
+                self.assertEqual(run.returncode, 1, run.stderr)
+                evidence = self.evidence()
+                self.assertEqual(evidence['error_kind'], 'required_material_unread')
+                self.assertFalse(evidence['completed'])
+
     def test_turn_failure_and_bounded_retry(self):
         permanent = [{'type': 'turn.failed', 'error': {'type': 'authentication_error'}}]
         self.assertEqual(self.run_review(events=[permanent]).returncode, 1)
