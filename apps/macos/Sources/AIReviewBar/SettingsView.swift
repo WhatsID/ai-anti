@@ -380,9 +380,9 @@ struct SettingsView: View {
             Text(model.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             HStack(alignment: .center, spacing: 8) {
                 Button("检查配置") { model.check() }.disabled(model.busy || model.dirty || !model.loaded)
-                Button("测试评审模型…") { confirmReal = true }.disabled(isSolo || model.busy || model.dirty || !model.loaded || model.draft.host == "agy")
                 Button("重新读取配置") { if model.dirty { confirmRefresh = true } else { model.refresh() } }.disabled(model.busy)
                     .help("重新从磁盘读取 Claude、Codex 和机制默认配置，不调用模型")
+                Button("测试评审模型") { confirmReal = true }.disabled(isSolo || model.busy || model.dirty || !model.loaded || model.draft.host == "agy")
                 Button("恢复上次保存") { confirmRestore = true }.disabled(model.busy || !model.canRestore || model.dirty)
                 Spacer(minLength: 8)
                 Button("取消") { model.discard(); closeCustomEditors() }.disabled(model.busy || !model.dirty)

@@ -553,13 +553,13 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('model.draft.host == "agy" ? .constant("codex")', implementation)
         self.assertIn('custom: $customAgyImplementation', implementation)
         self.assertIn('agyImplementationEffort', implementation)
-        self.assertRegex(view, r'Button\("测试评审模型…".*\.disabled\([^\n]+\|\| model\.draft\.host == "agy"\)')
+        self.assertRegex(view, r'Button\("测试评审模型".*\.disabled\([^\n]+\|\| model\.draft\.host == "agy"\)')
         self.assertIn('model.menuHost("agy")', app)
         self.assertIn('if model.saved.host != "codex" { Button("Codex"', app)
         self.assertIn('if model.saved.host != "agy" {', app)
         self.assertIn('"$source_dir/backend/agy_relay.py"', build)
-        self.assertIn('<key>CFBundleVersion</key><string>12</string>', build)
-        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.4</string>', build)
+        self.assertIn('<key>CFBundleVersion</key><string>13</string>', build)
+        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.5</string>', build)
 
     def test_agy_dual_plan_matches_cli_validation(self):
         import ai_anti_config as cli

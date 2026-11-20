@@ -51,14 +51,9 @@ import AppKit
             Menu("协作模式：" + model.saved.mode) {
                 ForEach(model.modes, id: \.0) { item in Button(item.0 + (model.saved.mode == item.0 ? " ✓" : "")) { model.menuMode(item.0) } }
             }.disabled(model.busy || model.dirty || !model.loaded)
-            Text(model.dirty ? "未检测（设置草稿尚未保存）" : model.status)
-            if model.checking { Text("检测中 · \(model.elapsed) 秒"); Button("取消检测", action: model.cancel) }
             Text(model.message)
-            Button("检查配置") { delegate.model = model; delegate.showSettings(); model.check() }.disabled(model.busy || model.dirty || !model.loaded)
-            Button("重新读取配置", action: model.refresh).disabled(model.busy || model.dirty)
-                .help("重新从磁盘读取 Claude、Codex 和 ai-anti 默认配置，不调用模型")
             Divider()
-            Button("设置…") { delegate.model = model; delegate.showSettings() }.keyboardShortcut(",")
+            Button("设置") { delegate.model = model; delegate.showSettings() }.keyboardShortcut(",")
             Button("退出", action: model.quit).keyboardShortcut("q")
         } label: {
             Image(nsImage: Self.menuIcon)
@@ -66,7 +61,7 @@ import AppKit
                 .accessibilityLabel("AIAnti")
                 .onAppear { delegate.model = model; if CommandLine.arguments.contains("--settings") { delegate.showSettings() } }
         }
-        .commands { CommandGroup(replacing: .appSettings) { Button("设置…") { delegate.model = model; delegate.showSettings() } } }
+        .commands { CommandGroup(replacing: .appSettings) { Button("设置") { delegate.model = model; delegate.showSettings() } } }
         Settings { SettingsView(model: model).onAppear { delegate.model = model } }
     }
     init() { }

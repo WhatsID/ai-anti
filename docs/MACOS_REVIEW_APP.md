@@ -56,7 +56,7 @@ Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停�
 
 本地检查格式、组合、CLI存在/有界version、已安装入口、凭证是否可解析。它不验证登录、额度、
 当前模型可调用或所有CLI版本兼容。真实检测需用户手动确认额度消耗，不读取业务仓库。
-AGY 的「检查配置」校验插件链接与六个必需入口文件，双方案子节损坏时在启动 CLI 前报错。未指定 `--source-root` 时优先使用已安装 AGY 插件对应的源码检出。`agy --version` 与 `compat.json` 的 `tested.agy` 比对。非 `solo` 要求配置实施模型，并校验 Codex CLI 符合关联工作树实施入口的版本要求。启用双方案时额外将 `claude --version` 与 `tested.claude` 比对。AGY 和 Claude 的清单外版本只提示。`solo` 仅探测 AGY CLI 并检查插件。AGY 下桌面「测试评审模型…」停用，可从 AGY 发起评审。
+AGY 的「检查配置」校验插件链接与六个必需入口文件，双方案子节损坏时在启动 CLI 前报错。未指定 `--source-root` 时优先使用已安装 AGY 插件对应的源码检出。`agy --version` 与 `compat.json` 的 `tested.agy` 比对。非 `solo` 要求配置实施模型，并校验 Codex CLI 符合关联工作树实施入口的版本要求。启用双方案时额外将 `claude --version` 与 `tested.claude` 比对。AGY 和 Claude 的清单外版本只提示。`solo` 仅探测 AGY CLI 并检查插件。AGY 下桌面「测试评审模型」停用，可从 AGY 发起评审。
 
 Qwen 复用正式 `review.py diff --channel qwen`，临时仓库有 HEAD 和小改动，输出在仓库外，
 检查 completed、通道/执行器/协议/请求模型；Claude 分支精确匹配实际模型，Codex 分支保留 requested_only，并保留原完整读取和权限门禁。耗时可能最多30分钟，无快速探针或自动降级。

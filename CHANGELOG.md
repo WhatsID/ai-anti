@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- AIAnti 0.3.5（构建号 13）精简菜单栏下拉（移除检查配置、重新读取配置及检查结果行，菜单项「设置…」改为「设置」），设置窗口将「重新读取配置」移至「测试评审模型」左侧并移除按钮省略号。
+
 - AGY 主导接力支持可选 Claude 双方案规划与综合（`agy_relay.dual_plan`，默认关闭）。只读快照与 Claude 主导规划共享，Claude 流校验读工具路径和实际模型。
 - AIAnti 0.3.4（构建号 12）为 AGY 主模型提供双方案规划下拉与只读摘要。非 `solo` 启用时本地检查额外探测 Claude CLI 版本。双方案子节错误单独显示，其余设置仍可保存。
 - 回滚到不支持 AGY 双方案的源码前，手工删除 `config.json` 中的 `agy_relay.dual_plan`，保留 `review` 和 `implementation`。切换为关闭会保留此键，`last-save.json` 仅保留最近一次保存的备份。
