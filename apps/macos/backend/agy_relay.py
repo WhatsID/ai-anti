@@ -26,7 +26,7 @@ def _model(value, key, error):
 def _parse_route(ai, route, error):
     if ai is not None and not isinstance(ai, dict):
         raise error('ai-anti config: ' + KEY + ' parent is not an object')
-    relay = _object(ai.get(KEY) if ai is not None else None, KEY, {'review', 'implementation'}, error)
+    relay = _object(ai.get(KEY) if ai is not None else None, KEY, {'review', 'implementation', 'dual_plan'}, error)
     key = KEY + '.' + route
     value = _object((relay or {}).get(route), key, {'provider', 'model', 'effort'}, error)
     reviewing = route == 'review'

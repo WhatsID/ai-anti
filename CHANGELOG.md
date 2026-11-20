@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- AGY 主导接力支持可选 Claude 双方案规划与综合（`agy_relay.dual_plan`，默认关闭）。只读快照与 Claude 主导规划共享，Claude 流校验读工具路径和实际模型。
+- AIAnti 0.3.4（构建号 12）为 AGY 主模型提供双方案规划下拉与只读摘要。非 `solo` 启用时本地检查额外探测 Claude CLI 版本。双方案子节错误单独显示，其余设置仍可保存。
+- 回滚到不支持 AGY 双方案的源码前，手工删除 `config.json` 中的 `agy_relay.dual_plan`，保留 `review` 和 `implementation`。切换为关闭会保留此键，`last-save.json` 仅保留最近一次保存的备份。
 - AIAnti 0.3.3（构建号 11）支持 AGY 主模型、独立的 Codex 评审和实施模型设置，以及插件入口和 CLI 版本本地检查。AGY 主模型下停用桌面合成评审检测。
 - AIAnti 为 Claude 主模型新增双方案规划下拉选项（enable/disable）及只读配置摘要，选择 Codex 评审服务时隐藏 Responses 地址，移除 Codex 评审的登录未检测说明，并移除 Qoder 暂不支持 Claude 主模型的通用提示。
 - 新增 AGY 主导的单方案接力及 `--with-agy` 安装选项。Codex 使用独立 `agy_relay` 配置只读评审并在隔离工作树实施，AGY 独立终审。评审入口记录模型请求与材料证据，拒绝连接器事件及未恢复的必要材料读取失败。

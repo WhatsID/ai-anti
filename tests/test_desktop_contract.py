@@ -534,6 +534,14 @@ class DesktopContract(unittest.TestCase):
         app = (sources / 'App.swift').read_text()
         build = (ROOT / 'apps/macos/build-app.sh').read_text()
         self.assertIn('Text("AGY").tag("agy")', view)
+        plan = re.search(r'if model\.draft\.host == "agy"\s*\{\s*field\("双方案规划"\).*?'
+                         r'(?=if model\.draft\.host == "agy" &&)', view, re.S).group()
+        self.assertIn('Picker("双方案规划", selection: $model.draft.agyDualPlanEnabled)', plan)
+        self.assertLess(plan.index('Text("enable").tag(true)'), plan.index('Text("disable").tag(false)'))
+        self.assertIn('.disabled(!model.draft.agyDualPlanError.isEmpty)', plan)
+        self.assertRegex(plan, r'else if model\.draft\.agyDualPlanEnabled\s*\{\s*Text\(model\.draft\.agyDualPlanDetail\)')
+        self.assertNotIn('isSolo', plan)
+        self.assertNotIn('Toggle(', plan)
         self.assertRegex(view, r'modelPicker\("主模型 ID"[^\n]+\n\s*\.disabled\(model\.draft\.host == "agy"\)')
         self.assertIn('if model.draft.host == "agy" { return model.draft.agyReviewModel.isEmpty ? "CLI 默认" : model.draft.agyReviewModel }', view)
         review = view.split('ServiceSettingsGroup("评审服务"', 1)[1].split('ServiceSettingsGroup("实施服务"', 1)[0]
@@ -550,8 +558,38 @@ class DesktopContract(unittest.TestCase):
         self.assertIn('if model.saved.host != "codex" { Button("Codex"', app)
         self.assertIn('if model.saved.host != "agy" {', app)
         self.assertIn('"$source_dir/backend/agy_relay.py"', build)
-        self.assertIn('<key>CFBundleVersion</key><string>11</string>', build)
-        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.3</string>', build)
+        self.assertIn('<key>CFBundleVersion</key><string>12</string>', build)
+        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.4</string>', build)
+
+    def test_agy_dual_plan_matches_cli_validation(self):
+        import ai_anti_config as cli
+        import dual_plan as desktop
+        from config_store import StoreError
+
+        samples = [None, [], False, 1, '', {}, {'agy_relay': None}, {'agy_relay': []},
+                   {'agy_relay': False}, {'agy_relay': {}}, {'agy_relay': {'unknown': True}},
+                   {'agy_relay': {'review': [], 'implementation': {'typo': 0}, 'dual_plan': {'enabled': True}}}]
+        plans = [None, False, [], 7, '', {}, {'enabeld': True}, {'extra': 1, 'typo': 2}]
+        for key, choices in {
+            'enabled': (False, True, None, 0, 'false', {}),
+            'partner': ('claude', 'agy', None, False, []),
+            'model': ('sonnet', 'claude-sonnet-4-6', 'custom', None, False, [], '', 'a b', 'a\u3000b'),
+            'effort': ('low', 'medium', 'high', 'xhigh', 'max', 'ultra', 'XHIGH', None, [], 2),
+            'synthesizer': ('agy', 'claude', 'codex', None, {}, False),
+            'on_failure': ('stop', 'fallback', 'retry', None, False, []),
+        }.items():
+            plans.extend({key: value} for value in choices)
+        samples.extend({'agy_relay': {'dual_plan': plan}} for plan in plans)
+        for sample in samples:
+            with self.subTest(sample=sample):
+                try:
+                    expected = cli.agy_dual_plan(sample)
+                except cli.ConfigError as expected_error:
+                    with self.assertRaises(StoreError) as actual_error:
+                        desktop.parse_agy(sample, StoreError)
+                    self.assertEqual(str(actual_error.exception), str(expected_error))
+                else:
+                    self.assertEqual(desktop.parse_agy(sample, StoreError), expected)
 
     def test_mode_skill_scope_and_incident_notes(self):
         skill=(ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()

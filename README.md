@@ -32,7 +32,7 @@ determines which model reviews or implements.
 |-----------|--------------|--------------|
 | Claude → Codex | `/codex-review plan <plan.md>`, `/codex-review diff`, `/codex-implement <plan.md>` | Claude Code leads. Codex reviews in a read-only sandbox, implements with a configured model in an isolated worktree, and can take over after an implementer API failure |
 | Codex → Claude/Qwen | `$claude-review`, `$codex-relay` | Codex leads; the selected Claude/Qwen model reviews a plan (two stages) or a scoped diff under fail-closed checks; `$codex-relay` runs the full relay |
-| AGY → Codex → AGY | `agy-relay`, `codex-review` | AGY writes a single plan. Codex reviews it read-only and implements in an isolated Git worktree. AGY independently reviews the changes and runs acceptance checks. |
+| AGY → Codex → AGY | `agy-relay`, `codex-review` | AGY drafts the plan with optional Claude dual planning. Codex reviews it read-only and implements in an isolated Git worktree. AGY independently reviews the changes and runs acceptance checks. |
 
 ## Four relay modes
 
@@ -129,6 +129,7 @@ the full relay and `codex-review` for standalone plan review. Set `agy_relay.rev
 example. AGY uses its own model and effort settings and shares `review.timeout` and
 `review.idle_timeout`. Implementation requires an explicit Codex model and stops on failure for
 the user's decision. `./install.sh --without-agy` removes the owned link and installer-created empty directories.
+Set `agy_relay.dual_plan.enabled` to opt into an independent Claude draft. AGY or Claude can synthesize the two drafts.
 See [AGY compatibility and validation scope](docs/COMPATIBILITY.md#2026-11-20-agy-led-relay).
 
 A nonempty `AGENTS.override.md` shadows the entry, so installation stops and asks you
@@ -318,6 +319,7 @@ silently falling back.
 | `claude_relay.implementation` | Set `{"provider":"codex","model":"gpt-6.2-sol"}` to implement in an isolated worktree (CLI pin 0.169.1, live probe pending) | missing/null → implementer |
 | `claude_relay.implementation.effort` | Reasoning effort for configured Claude-led Codex implementation | missing/null → Codex CLI default |
 | `claude_relay.dual_plan` | Opt-in Claude-led dual planning with AGY (`enabled`, `partner="agy"`, optional `model`/`effort` in `low\|medium\|high\|xhigh\|max`, `synthesizer="claude"\|"agy"`, `on_failure="stop"\|"fallback"`); session override via `/disable-dual-plan` | missing/null/`enabled: false` → Claude single plan |
+| `agy_relay.dual_plan` | Opt-in AGY-led dual planning with Claude (`enabled`, `partner="claude"`, optional `model`, `effort` in `low\|medium\|high\|xhigh\|max`, `synthesizer="agy"\|"claude"`, `on_failure="stop"\|"fallback"`) | missing/null/`enabled: false` → AGY single plan |
 | `plugins.qwen.claude_executor` | Claude-led Qwen executor. Set `codex` to use Responses | `claude` |
 | `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
 | `codex_relay.implementation_provider` | Codex-led implementation: native `codex`, Token Plan (`glm-5.3` / `qwen4-max`) or Qoder subscription fixed logical `glm-5.3` | missing/null → `codex` |

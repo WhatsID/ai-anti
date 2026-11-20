@@ -14,6 +14,9 @@ import time
 import uuid
 from config_store import StoreError, model, effective_executor
 
+OPTIONAL_SAVE_KEYS = ('dual_plan_enabled', 'agy_dual_plan_enabled', 'agy_review_model', 'agy_implementation_model')
+
+
 class CheckError(StoreError):
     def __init__(self, message):
         super().__init__(message)
@@ -115,7 +118,7 @@ def agy_entry(store, root):
     plugin = root / 'adapters/agy/plugin'
     required = (plugin / 'plugin.json', plugin / 'rules/AGENTS.md',
                 plugin / 'skills/agy-relay/SKILL.md', plugin / 'skills/codex-review/SKILL.md',
-                root / 'adapters/agy/scripts/codex_review.py')
+                root / 'adapters/agy/scripts/codex_review.py', root / 'adapters/agy/scripts/claude_plan.py')
     link = store.root / '.gemini/config/plugins/ai-anti'
     try:
         valid = link.is_symlink() and link.resolve() == plugin.resolve() and all(
@@ -126,17 +129,18 @@ def agy_entry(store, root):
     if not valid:
         raise CheckError('AGY 插件未安装、入口不完整或指向其他 ai-anti 源码；请运行 install.sh --with-agy 或指定 --source-root')
 
-def agy_version(root, log):
+def planning_version(root, log, cli):
+    label = 'AGY' if cli == 'agy' else 'Claude'
     match = re.search(r'\b([0-9]+\.[0-9]+\.[0-9]+)\b', log.read_text('utf-8', errors='replace'))
     if not match:
-        raise CheckError('AGY CLI 版本输出无效')
+        raise CheckError(f'{label} CLI 版本输出无效')
     version = match.group(1)
     try:
-        tested = json.loads((root / 'compat.json').read_text('utf-8'))['tested']['agy']
+        tested = json.loads((root / 'compat.json').read_text('utf-8'))['tested'][cli]
         if not isinstance(tested, list):
             raise ValueError
     except (OSError, ValueError, KeyError, TypeError) as exc:
-        raise CheckError('AGY 实测版本清单无效') from exc
+        raise CheckError(f'{label} 实测版本清单无效') from exc
     return version, '在实测清单内' if version in tested else '未在实测清单'
 
 def review_budgets(store, root, timeout=None):
@@ -192,6 +196,9 @@ def local_agy(store, snapshot, source):
     if agy_impl and not v['agy_implementation_model']:
         raise CheckError('AGY 实施未配置 agy_relay.implementation；实施阶段会停止')
     names = {'agy'}
+    dual = agy_impl and v['agy_dual_plan_enabled']
+    if dual:
+        names.add('claude')
     if agy_impl:
         names.add('codex')
     with tempfile.TemporaryDirectory(prefix='ai-anti-local-') as temp:
@@ -201,7 +208,9 @@ def local_agy(store, snapshot, source):
             if run([cli, '--version'], temp, log) != 0:
                 raise CheckError(name + ' --version 失败；原始输出已隐藏')
             if name == 'agy':
-                version, compatibility = agy_version(root, log)
+                version, compatibility = planning_version(root, log, 'agy')
+            elif name == 'claude':
+                claude_version, claude_compat = planning_version(root, log, 'claude')
             else:
                 check_claude_codex_version(root, log)
     if store.read()['signature'] != snapshot['signature']:
@@ -209,17 +218,23 @@ def local_agy(store, snapshot, source):
     route = ('Codex · ' + v['agy_implementation_model'] + ' · 关联工作树实施（AGY 接力）'
              if agy_impl else '停用独立实施')
     reviewer = v['agy_review_model'] or 'CLI 默认'
+    dual_detail = ''
+    if dual:
+        partner_model = v['agy_dual_plan']['model'] or 'CLI 默认'
+        dual_detail = f'；双方案：Claude · {partner_model}（Claude {claude_version} {claude_compat}）'
     return result('local', 'passed', f'本地检查通过；实施：{route}；评审：Codex · {reviewer}；'
-                  f'AGY {version}（{compatibility}）；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
+                  f'AGY {version}（{compatibility}）{dual_detail}；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
 
 def local(store, source=None):
     snapshot = store.read()
     v = snapshot['values']
-    if v['host'] == 'agy' and v['agy_relay_error']:
-        raise CheckError(v['agy_relay_error'])
+    if v['host'] == 'agy':
+        for key in ('agy_dual_plan_error', 'agy_relay_error'):
+            if v[key]:
+                raise CheckError(v[key])
     if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
     # Validation builds bytes but never writes them.
-    check_values = {k: val for k, val in v.items() if k not in ('dual_plan_enabled', 'agy_review_model', 'agy_implementation_model')}
+    check_values = {k: val for k, val in v.items() if k not in OPTIONAL_SAVE_KEYS}
     store.outputs(check_values, '')
     if v['host'] == 'agy':
         return local_agy(store, snapshot, source)
@@ -338,7 +353,7 @@ def real(store, source=None, timeout=None):
     if v['mode'] == 'solo': raise CheckError('solo 模式停用交叉评审')
     if v['host'] == 'agy':
         raise CheckError('AGY 主模型暂不支持桌面端合成评审检测；请使用「检查配置」或从 AGY 发起评审')
-    check_values = {k: val for k, val in v.items() if k not in ('dual_plan_enabled', 'agy_review_model', 'agy_implementation_model')}
+    check_values = {k: val for k, val in v.items() if k not in OPTIONAL_SAVE_KEYS}
     store.outputs(check_values, '')
     root = source_root(store, source)
     timeout, idle_timeout = review_budgets(store, root, timeout)

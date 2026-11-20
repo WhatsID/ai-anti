@@ -72,7 +72,9 @@ model_services（version=1、active_api、固定 token_plan/custom_api profiles�
 
 在菜单栏或设置中选择 AGY，保存为 `desktop.primary_host = "agy"`。主模型 ID 由 AGY 设置管理。评审与独立实施固定使用 Codex，分别保存到 `agy_relay.review.model` 和 `agy_relay.implementation.model`。评审可选「CLI 默认」，实施需要指定模型，移除已保存的实施配置须手工编辑 `~/.config/ai-anti/config.json`。思考深度在设置中只读显示，保存模型时保留。配置段损坏时设置显示出错字段，修复并重新读取后可切入 AGY 或编辑接力模型。
 
-「检查配置」验证由 `install.sh --with-agy` 管理的插件链接及必需入口，并将 `agy --version` 与实测版本清单比对。清单外版本只提示。非 `solo` 还要求已配置实施模型，并按关联工作树实施入口的版本要求检查 Codex CLI。`solo` 仅检查 AGY。AGY 的桌面合成评审按钮停用，可从 AGY 发起评审。
+「双方案规划」下拉选项只保存 `agy_relay.dual_plan.enabled`。启用时显示 Claude 的模型、深度和综合方摘要。细项及失败处置在 `~/.config/ai-anti/config.json` 中编辑。该子节损坏时下拉停用并显示错误字段，其他设置仍可保存。
+
+「检查配置」验证由 `install.sh --with-agy` 管理的插件链接及必需入口，并将 `agy --version` 与实测版本清单比对。非 `solo` 还要求已配置实施模型，并按关联工作树实施入口的版本要求检查 Codex CLI。非 `solo` 且启用双方案时额外检查 `claude --version`。AGY 和 Claude 的清单外版本只提示。AGY 的桌面合成评审按钮停用，可从 AGY 发起评审。
 
 ## 离线测试
 

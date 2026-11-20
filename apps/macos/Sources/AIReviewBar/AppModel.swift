@@ -62,6 +62,18 @@ struct Draft: Equatable {
     var agyReviewEffort = ""
     var agyImplementationEffort = ""
     var agyRelayError = ""
+    var agyDualPlanEnabled = false
+    var agyDualPlanPartner = "claude"
+    var agyDualPlanModel = ""
+    var agyDualPlanEffort = ""
+    var agyDualPlanSynthesizer = "agy"
+    var agyDualPlanError = ""
+    var agyDualPlanDetail: String {
+        [agyDualPlanPartner == "claude" ? "Claude" : agyDualPlanPartner,
+         agyDualPlanModel.isEmpty ? "Claude 默认模型" : agyDualPlanModel,
+         agyDualPlanEffort.isEmpty ? "默认思考深度" : agyDualPlanEffort,
+         agyDualPlanSynthesizer == "claude" ? "Claude 汇总最终方案" : "AGY 汇总最终方案"].joined(separator: " · ")
+    }
     var dualPlanEnabled = false
     var dualPlanPartner = "agy"
     var dualPlanModel = ""
@@ -71,7 +83,7 @@ struct Draft: Equatable {
     var dualPlanDetail: String {
         [dualPlanPartner == "agy" ? "AGY" : dualPlanPartner,
          dualPlanModel.isEmpty ? "AGY 默认模型" : dualPlanModel,
-         dualPlanEffort.isEmpty ? "默认深度" : dualPlanEffort,
+         dualPlanEffort.isEmpty ? "默认思考深度" : dualPlanEffort,
          dualPlanSynthesizer == "agy" ? "AGY 汇总最终方案" : "Claude 汇总最终方案"].joined(separator: " · ")
     }
     var codexModels = ModelCatalog.codex
@@ -375,6 +387,14 @@ struct Draft: Equatable {
             d.dualPlanEffort = plan["effort"] as? String ?? ""
             d.dualPlanSynthesizer = plan["synthesizer"] as? String ?? "claude"
         }
+        d.agyDualPlanEnabled = v["agy_dual_plan_enabled"] as? Bool ?? false
+        d.agyDualPlanError = text("agy_dual_plan_error")
+        if let plan = v["agy_dual_plan"] as? [String: Any] {
+            d.agyDualPlanPartner = plan["partner"] as? String ?? "claude"
+            d.agyDualPlanModel = plan["model"] as? String ?? ""
+            d.agyDualPlanEffort = plan["effort"] as? String ?? ""
+            d.agyDualPlanSynthesizer = plan["synthesizer"] as? String ?? "agy"
+        }
         d.codexModels = v["codex_models"] as? [String] ?? ModelCatalog.codex
         executorMigrationPending = text("qwen_executor") == "claude" || text("claude_qwen_executor") == "claude"
         saved = d; draft = d; loaded = true
@@ -416,6 +436,9 @@ struct Draft: Equatable {
         var values = draft.dictionary
         if draft.dualPlanEnabled != saved.dualPlanEnabled {
             values["dual_plan_enabled"] = draft.dualPlanEnabled
+        }
+        if draft.agyDualPlanEnabled != saved.agyDualPlanEnabled {
+            values["agy_dual_plan_enabled"] = draft.agyDualPlanEnabled
         }
         if draft.agyReviewModel != saved.agyReviewModel {
             values["agy_review_model"] = draft.agyReviewModel

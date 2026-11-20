@@ -19,6 +19,7 @@ import Combine
         let snapshot: [String: Any] = ["signature": "a", "fingerprints": ["fixture": "a"], "can_restore": true,
             "values": ["host": "codex", "channel": "qwen", "mode": "rules", "primary_model": "fixture", "qwen_executor": "codex", "claude_qwen_executor": "codex", "credential_present": true, "base_url": "https://fixture.invalid/anthropic", "responses_base_url": "https://fixture.invalid/v1"]]
         checkDualPlanAndReviewAddress(snapshot)
+        checkAgyDualPlan(snapshot)
         checkAgyHost()
         let checked: [String: Any] = ["signature": "a", "message": "本地检查通过", "checked_at": "fixture", "actual_model": "fake"]
         model.refresh(); assert(model.busy)
@@ -437,10 +438,10 @@ import Combine
         assert(claude.reviewUsesQwen && claude.reviewExecutorLabel == "Codex CLI")
         let expectedPrimaryOptions = [
             ModelOption(id: "", label: "不修改（沿用当前设置）"),
+            ModelOption(id: "fable", label: "fable（别名 · 自动跟随最新 Fable）"),
             ModelOption(id: "opus", label: "opus（别名 · 自动跟随最新 Opus）"),
             ModelOption(id: "sonnet", label: "sonnet（别名 · 自动跟随最新 Sonnet）"),
             ModelOption(id: "haiku", label: "haiku（别名 · 自动跟随最新 Haiku）"),
-            ModelOption(id: "fable", label: "fable（别名 · 自动跟随最新 Fable）"),
             ModelOption(id: "claude-fable-5-1", label: "claude-fable-5-1（固定版本）"),
             ModelOption(id: "claude-opus-5-5", label: "claude-opus-5-5（固定版本）"),
             ModelOption(id: "claude-sonnet-5-5", label: "claude-sonnet-5-5（固定版本）"),
@@ -584,6 +585,53 @@ import Combine
         print("PASS: AppModel AGY host, draft isolation, incremental saves, and soft errors")
     }
 
+    @MainActor static func checkAgyDualPlan(_ snapshot: [String: Any]) {
+        let front = FakeClient()
+        let model = AppModel(foreground: front, background: FakeClient(), automatic: false)
+        var state = snapshot
+        var values = snapshot["values"] as! [String: Any]
+        values["host"] = "agy"
+        values["channel"] = "codex"
+        state["values"] = values
+        model.refresh(); front.complete(.success(state))
+        assert(!model.draft.agyDualPlanEnabled && model.draft.agyDualPlanError.isEmpty)
+        assert(model.draft.agyDualPlanDetail == "Claude · Claude 默认模型 · 默认思考深度 · AGY 汇总最终方案")
+
+        values["agy_dual_plan"] = ["partner": "claude", "model": "haiku", "effort": "high", "synthesizer": "claude"]
+        state["values"] = values
+        model.refresh(); front.complete(.success(state))
+        assert(model.draft.agyDualPlanDetail == "Claude · haiku · high · Claude 汇总最终方案")
+        for enabled in [true, false] {
+            model.draft.agyDualPlanEnabled = enabled
+            assert(model.dirty)
+            model.save()
+            let payload = front.requests.last?["values"] as! [String: Any]
+            assert(payload["agy_dual_plan_enabled"] as? Bool == enabled)
+            assert(payload["dual_plan_enabled"] == nil && payload["agy_dual_plan"] == nil)
+            values["agy_dual_plan_enabled"] = enabled
+            state["values"] = values
+            front.complete(.success(state))
+            assert(model.saved.agyDualPlanEnabled == enabled && !model.dirty)
+        }
+
+        let error = "agy_relay.dual_plan.effort 无效"
+        values["agy_dual_plan_error"] = error
+        values.removeValue(forKey: "agy_dual_plan")
+        state["values"] = values
+        model.refresh(); front.complete(.success(state))
+        assert(model.draft.agyDualPlanError == error && model.draft.agyRelayError.isEmpty)
+        model.draft.mode = "auto"
+        model.save()
+        let ordinary = front.requests.last?["values"] as! [String: Any]
+        assert(ordinary["mode"] as? String == "auto" && ordinary["agy_dual_plan_enabled"] == nil)
+        front.complete(.success(state))
+        model.menuMode("solo")
+        let menu = front.requests.last?["values"] as! [String: Any]
+        assert(menu["mode"] as? String == "solo" && menu["agy_dual_plan_enabled"] == nil)
+        front.complete(.success(state))
+        print("PASS: AppModel AGY dual-plan settings, summaries, and isolated save payloads")
+    }
+
     @MainActor static func checkDualPlanAndReviewAddress(_ snapshot: [String: Any]) {
         let front = FakeClient()
         let model = AppModel(foreground: front, background: FakeClient(), automatic: false)
@@ -645,7 +693,7 @@ import Combine
         state["values"] = values
         model.refresh(); front.complete(.success(state))
         assert(model.draft.dualPlanModel.isEmpty && model.draft.dualPlanEffort.isEmpty)
-        assert(model.draft.dualPlanDetail == "AGY · AGY 默认模型 · 默认深度 · AGY 汇总最终方案")
+        assert(model.draft.dualPlanDetail == "AGY · AGY 默认模型 · 默认思考深度 · AGY 汇总最终方案")
 
         let planError = "claude_relay.dual_plan.effort 无效"
         values["dual_plan_enabled"] = false; values["dual_plan_error"] = planError

@@ -88,3 +88,14 @@ AGY 主导的方案评审使用 `adapters/agy/scripts/codex_review.py plan`。�
 AGY 实施复用 `adapters/claude-code/scripts/codex_implement.py --relay agy`。从文件传入
 提示词，在隔离关联工作树内有界执行。按本纪律持续监控后台进程并保留完整输出。
 失败或中断即停，保留候选树与证据交用户裁决。独立终审由 AGY 完成。
+
+## AGY 主导调用 Claude 规划入口适用说明
+
+`adapters/agy/scripts/claude_plan.py` 在独立只读快照中使用 `claude -p --safe-mode --restricted`，
+只开放 Read、Glob、Grep，不传 `--add-dir`。启动前检查所需参数，使用 stdin DEVNULL、
+脱敏后的提示词和完整文件日志，沿用共享总时长、空闲预算与 8 MiB 输出上限。
+校验工具集合、读路径、实际模型和快照完整性。退出码 1 且证据同时允许降级、确认完整性时，
+才由调用方按 `on_failure` 决定。调用无自动重试。
+
+CLI 工具限制与快照权限不能提供操作系统级硬沙箱。同用户文件的隔离取决于宿主边界，
+见 [SECURITY.md](../SECURITY.md)。遵守宿主联网与沙箱授权。

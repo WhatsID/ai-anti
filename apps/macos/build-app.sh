@@ -31,8 +31,8 @@ cat > "$app/Contents/Info.plist" <<'PLIST'
 <key>CFBundleName</key><string>AIAnti</string>
 <key>CFBundleDisplayName</key><string>AIAnti</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
-<key>CFBundleVersion</key><string>11</string>
-<key>CFBundleShortVersionString</key><string>0.3.3</string>
+<key>CFBundleVersion</key><string>12</string>
+<key>CFBundleShortVersionString</key><string>0.3.4</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>LSUIElement</key><true/>
 <key>NSHighResolutionCapable</key><true/>

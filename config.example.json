@@ -47,6 +47,14 @@
       "provider": "codex",
       "model": "gpt-6.2-sol",
       "effort": "high"
+    },
+    "dual_plan": {
+      "enabled": false,
+      "partner": "claude",
+      "model": null,
+      "effort": null,
+      "synthesizer": "agy",
+      "on_failure": "stop"
     }
   },
   "plugins": {

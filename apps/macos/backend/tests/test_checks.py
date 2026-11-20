@@ -23,8 +23,8 @@ class CheckTests(unittest.TestCase):
         self.temp.cleanup()
     def script(self, text):
         p = self.root/'fake.py'; p.write_text(text); return p
-    def api_store(self, host='codex'):
-        store = Store(self.root/'home')
+    def api_store(self, host='codex', *, home='home'):
+        store = Store(self.root / home)
         snap = store.read(); v = snap['values']
         v.update(host=host, channel='qwen', qwen_model='qwen-fixture', qwen_executor='codex', base_url='https://example.invalid/anthropic', responses_base_url='https://example.invalid/v1')
         store.save(v, snap['fingerprints'], 'fixture-token')
@@ -72,6 +72,7 @@ class CheckTests(unittest.TestCase):
         required = [checkout / AGY_PLUGIN / name for name in (
             'plugin.json', 'rules/AGENTS.md', 'skills/agy-relay/SKILL.md', 'skills/codex-review/SKILL.md')]
         required.append(checkout / 'adapters/agy/scripts/codex_review.py')
+        required.append(checkout / 'adapters/agy/scripts/claude_plan.py')
         for path in required:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('fixture')
@@ -88,7 +89,7 @@ class CheckTests(unittest.TestCase):
         with self.assertRaisesRegex(checks.CheckError, '入口不完整'):
             checks.agy_entry(store, checkout)
         script.unlink()
-        script.symlink_to(ROOT / 'adapters/agy/scripts/codex_review.py')
+        script.symlink_to(ROOT / 'adapters/agy/scripts/claude_plan.py')
         with self.assertRaisesRegex(checks.CheckError, '入口不完整'):
             checks.agy_entry(store, checkout)
         script.unlink()
@@ -140,7 +141,7 @@ class CheckTests(unittest.TestCase):
                 checks.local(store)
             discover.assert_not_called()
             run.assert_not_called()
-        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"},"relay":{"default_mode":"solo"}}')
+        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"},"relay":{"default_mode":"solo"},"agy_relay":{"dual_plan":{"enabled":true}}}')
 
         def version_only(argv, cwd, log):
             self.assertEqual(argv, ['agy', '--version'])
@@ -151,6 +152,70 @@ class CheckTests(unittest.TestCase):
             reply = checks.local(store)
         discover.assert_called_once_with('agy')
         self.assertIn('实施：停用独立实施；评审：Codex · CLI 默认', reply['message'])
+
+    def test_agy_local_probes_claude_only_when_dual_plan_enabled(self):
+        store = Store(self.root / 'home')
+        self.agy_link(store, ROOT)
+        dual = {'enabled': True, 'model': 'haiku'}
+        data = {'desktop': {'primary_host': 'agy'}, 'agy_relay': {
+            'implementation': {'provider': 'codex', 'model': 'impl-id'}, 'dual_plan': dual}}
+        versions = {'agy': '1.5.13', 'codex': 'codex-cli 0.169.1', 'claude': 'Claude Code 2.1.326'}
+
+        def fake_run(argv, cwd, log):
+            self.assertEqual(argv[1:], ['--version'])
+            log.write_text(versions[argv[0]])
+            return 4 if versions[argv[0]] == 'nonzero' else 0
+
+        atomic(store.paths['ai'], json.dumps(data).encode())
+        with patch('checks.discover', side_effect=lambda name: name), patch('checks.run', side_effect=fake_run):
+            self.assertIn('双方案：Claude · haiku（Claude 2.1.326 在实测清单内）', checks.local(store)['message'])
+            dual.pop('model')
+            atomic(store.paths['ai'], json.dumps(data).encode())
+            versions['claude'] = '9.8.7'
+            self.assertIn('双方案：Claude · CLI 默认（Claude 9.8.7 未在实测清单）', checks.local(store)['message'])
+            for version, error in (('garbage', 'Claude CLI 版本输出无效'), ('nonzero', 'claude --version 失败')):
+                versions['claude'] = version
+                with self.assertRaisesRegex(checks.CheckError, error):
+                    checks.local(store)
+            dual['enabled'] = False
+            atomic(store.paths['ai'], json.dumps(data).encode())
+            versions.pop('claude')
+            self.assertNotIn('双方案', checks.local(store)['message'])
+
+    def test_bad_agy_dual_plan_stops_agy_before_any_cli(self):
+        store = Store(self.root / 'home')
+        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"},"agy_relay":{"dual_plan":{"enabled":1}}}')
+        with patch('checks.discover') as discover, patch('checks.run') as run:
+            with self.assertRaisesRegex(checks.CheckError, r'agy_relay\.dual_plan\.enabled'):
+                checks.local(store, ROOT)
+        discover.assert_not_called()
+        run.assert_not_called()
+
+    def test_bad_agy_dual_plan_does_not_block_claude_or_codex_checks(self):
+        evidence = dict(status='completed', completed=True, mode='diff', channel='qwen',
+                        executor='codex', wire_api='responses', requested_model='qwen-fixture',
+                        actual_model=None, model_evidence='requested_only')
+
+        def fake_run(argv, cwd, log, **kwargs):
+            if '--qwen-executor' in argv:
+                out = Path(argv[argv.index('--out') + 1])
+                out.mkdir()
+                for name in ('status', 'manifest'):
+                    (out / (name + '.json')).write_text(json.dumps(evidence))
+            return 0
+
+        for host in ('claude', 'codex'):
+            with self.subTest(host=host):
+                store = self.api_store(host, home=host)
+                data = json.loads(store.raw('ai'))
+                data['agy_relay'] = {'dual_plan': {'enabled': 'bad'}}
+                atomic(store.paths['ai'], json.dumps(data).encode())
+                values = store.read()['values']
+                self.assertEqual(values['agy_relay_error'], '')
+                self.assertIn('agy_relay.dual_plan.enabled', values['agy_dual_plan_error'])
+                with patch('checks.discover', return_value='/usr/bin/true'), patch('checks.run', side_effect=fake_run):
+                    self.assertEqual(checks.local(store, ROOT)['state'], 'passed')
+                    self.assertEqual(checks.real(store, ROOT)['state'], 'passed')
 
     def test_local_isolates_soft_errors_across_hosts(self):
         store = Store(self.root / 'home')

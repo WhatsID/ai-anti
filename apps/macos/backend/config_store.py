@@ -226,6 +226,14 @@ class Store:
         values['dual_plan'] = plan or dict(dual_plan.DEFAULTS)
         values['dual_plan_enabled'] = values['dual_plan']['enabled']
         values['dual_plan_error'] = plan_error
+        agy_plan, agy_plan_error = None, ''
+        try:
+            agy_plan = dual_plan.parse_agy(ai, StoreError)
+        except StoreError as exc:
+            agy_plan_error = str(exc)
+        values['agy_dual_plan'] = agy_plan or dict(dual_plan.AGY_DEFAULTS)
+        values['agy_dual_plan_enabled'] = values['agy_dual_plan']['enabled']
+        values['agy_dual_plan_error'] = agy_plan_error
         agy_error = ''
         try:
             agy_cfg = agy_relay.parse(ai, StoreError)
@@ -393,6 +401,8 @@ class Store:
                     del ai['claude_relay']
         if 'dual_plan_enabled' in values:
             dual_plan.apply_enabled(ai, values['dual_plan_enabled'], StoreError)
+        if 'agy_dual_plan_enabled' in values:
+            dual_plan.apply_agy_enabled(ai, values['agy_dual_plan_enabled'], StoreError)
         urls = {key: endpoint(values.get(key, qwen.get(key, ''))) for key in ('base_url', 'responses_base_url')}
         channels = review.get('channels', ['codex', 'same-family'])
         if not isinstance(channels, list) or not all(isinstance(c,str) for c in channels):

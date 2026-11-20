@@ -227,6 +227,21 @@ struct SettingsView: View {
                                 .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
                         }
                     }
+                    if model.draft.host == "agy" {
+                        field("双方案规划") {
+                            Picker("双方案规划", selection: $model.draft.agyDualPlanEnabled) {
+                                Text("enable").tag(true)
+                                Text("disable").tag(false)
+                            }.disabled(!model.draft.agyDualPlanError.isEmpty)
+                        }
+                        if !model.draft.agyDualPlanError.isEmpty {
+                            Text("配置无效：" + model.draft.agyDualPlanError).font(.caption).foregroundStyle(.red)
+                                .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
+                        } else if model.draft.agyDualPlanEnabled {
+                            Text(model.draft.agyDualPlanDetail).fixedSize(horizontal: false, vertical: true)
+                                .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
+                        }
+                    }
                     if model.draft.host == "agy" && !model.draft.agyRelayError.isEmpty {
                         Text("AGY 接力配置无效：" + model.draft.agyRelayError).font(.caption).foregroundStyle(.red)
                             .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)

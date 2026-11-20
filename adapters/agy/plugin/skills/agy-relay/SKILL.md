@@ -1,6 +1,6 @@
 ---
 name: agy-relay
-description: 由 AGY 起草单份方案、委派 Codex 评审与实施，再由 AGY 独立终审。
+description: 由 AGY 起草方案（可选 Claude 双方案规划）、委派 Codex 评审与实施，再由 AGY 独立终审。
 ---
 
 # AGY 主导接力
@@ -11,7 +11,7 @@ core/REVIEW_PRINCIPLES.md 与 core/CLI_DISCIPLINE.md。按项目规则与共享�
 按共享方法读取适用的规划、设计和测试正文。记录阶段、产物、指纹、用户裁决和未覆盖项，
 产物放 <scratchpad> 或项目指定的本地任务目录。
 
-## 第 1 步：起草单方案，冻结基线
+## 第 1 步：冻结基线并起草方案
 
 读取项目入口、范围规则、历史与现状。用以下命令确认主树根、提交、分支与脏状态；
 symbolic-ref 退出 1 时记录 detached，其他失败明确报告。
@@ -29,6 +29,56 @@ git -C "$repo" status --short
 已有的用户脏输入并确认哪些纳入范围。用 hashlib.sha256(path.read_bytes()).hexdigest()
 记录每个既有常规文件的当前字节指纹；计划新增路径须通过 os.path.lexists(path) 为假
 验证并标记 absent。记录预期删除的既有目标指纹。未确认的重叠脏输入先报告。
+
+### 双方案规划分支
+
+从机制根的 `adapters/codex/skills/claude-review/scripts` 导入 `ai_anti_config.load` 和
+`agy_dual_plan`，读取 `~/.config/ai-anti/config.json`。配置损坏或字段无效即停并报告。
+优先级为**用户当次明确指令 > 本会话临时禁用状态 > `agy_relay.dual_plan.enabled` > 默认关闭**。
+关闭时由 AGY 独立起草并保存方案。沿用同任务仍有效的方案时按 `core/WORKFLOW_CONTINUITY.md` 续接。
+
+- 「本次不用双方案」「本次开启双方案」「本次由 Claude 综合」只覆盖当前一次规划，
+  方案落盘或规划中止时即消费。
+- 只有用户明确声明「本会话禁用双方案」才跨任务保留，直到「本会话恢复双方案」清除会话覆写，
+  恢复遵循全局配置。覆写只存在会话上下文中。长会话压缩后以当次指令或用户重新声明为准。
+- **1a**：完成项目入口读取、基线冻结和脏文件确认后，先按 R2 逐字写入同名
+  `.request.md`。将已确认纳入任务的必要未跟踪文件固定为一组仓库相对路径，
+  以重复的 `--extra-file` 参数在 draft 和 synthesize 两次调用复用。
+- **任务目录**：新任务使用 `<scratchpad>/dual-plan/<YYYYMMDD>-<slug>/`，重名追加
+  `-2`、`-3` 等。每次调用都选从未存在的 `--out`，保留既有产物和失败证据。
+- **1b**：AGY 依 `core/PLANNING.md` 独立起草，完成出稿前初步验证并附自查记录，
+  写入任务目录的 `plan-agy.md`。同时后台启动并监控 Claude draft。可选
+  `--instructions` 仅传部署规模、规划格式、共享方法要点及脱敏后的客观只读探针事实。
+  AGY 草稿和设计倾向须留到综合阶段。执行器在独立起草时剥离 R2 非需求附录，并在只读快照内运行。
+  配置触发时采用默认 `--trigger config`，用户当次消息启用时用 `--trigger user-message`，
+  两种触发均须校验原配置。
+
+  ```bash
+  python3 "$mechanism/adapters/agy/scripts/claude_plan.py" --repo "$repo" --stage draft \
+    --request "$request" --out "$draft_out" "${extra_args[@]}" "${trigger_args[@]}" < /dev/null
+  ```
+
+- **1c**：综合方按**用户当次点名 > 合法配置的 `synthesizer` > `agy`** 决定。核对
+  Claude draft 退出码为 0，且 manifest/status 均表明已完成、完整性通过，从实际成功的
+  `--out` 取 `plan.md`。由 AGY 综合时，将该稿与 `plan-agy.md` 按 R1 核对。
+  由 Claude 综合时，`claude_draft` 指向这份实际成功的稿件，复用 1a 的 `extra_args`；
+  当次触发双方案或当次点名 Claude 综合时用 `--trigger user-message`。综合输出核验
+  manifest/status、R1 与仓库事实。遇到实质产品方向或用户可见交互分歧，停下请用户裁决。
+
+  ```bash
+  python3 "$mechanism/adapters/agy/scripts/claude_plan.py" --repo "$repo" --stage synthesize \
+    --request "$request" --agy-draft "$task_dir/plan-agy.md" --claude-draft "$claude_draft" \
+    --out "$synthesis_out" "${extra_args[@]}" "${trigger_args[@]}" < /dev/null
+  ```
+
+- **失败处置**：只有退出码为 1 且 manifest/status 可核验 `fallback_allowed=true` 和
+  `integrity_ok=true` 才按 `on_failure` 处理。`stop` 默认停止并保留证据。
+  `fallback` 使用 `plan-agy.md` 经落盘前复核后落盘，在送审和汇报注明失败阶段与原因。
+  退出码 2、3、130、143、其他非零码或无法核验证据时，停止并保留现场。
+- **落盘前复核**：AGY 对拟落盘综合稿或降级稿逐项检查关键设计与代码或探针证据，
+  对照需求原文排查遗漏，检查 manifest 的警告，清理失效暂存引用。无法静态成立的主张
+  补最小反例或保留为待验证。在综合记录中保留验证证据和自查记录，再保存到第 1 步确定的
+  方案路径，随后进入第 2 步。
 
 ## 第 2 步：Codex 只读评审
 
@@ -100,6 +150,8 @@ AGY 对照候选基线独立读取全部增量。用 git status --short、git di
 
 汇报需求及第 3b 步裁决、逐条评审意见与分诊、实际通道和请求模型/深度、修改文件与理由、
 验证命令与结果、版本或工具警告、未覆盖项、产物路径，以及落回和工作树处置状态。
+双方案规划注明协作方 Claude、请求模型和实际模型（`actual_model`）、请求深度、综合方及
+实际调用目录。当次消息触发时注明来源。临时禁用或降级时注明原因，降级另注明失败阶段。
 对用户跳过项或失败门禁明示证据。不得将安装探针、离线替身或 requested_only 记录当作
 真实新会话遵循、真实模型身份或终审通过的证据。
 

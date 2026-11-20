@@ -143,7 +143,8 @@ class StoreTests(unittest.TestCase):
         raw = b'{ "desktop" : {"primary_host": "agy"}, "agy_relay": [] }\n'
         self.write('ai', raw)
         snap = self.snapshot()
-        values = {k: v for k, v in snap['values'].items() if k not in ('agy_review_model', 'agy_implementation_model')}
+        values = {k: v for k, v in snap['values'].items()
+                  if k not in ('agy_review_model', 'agy_implementation_model', 'agy_dual_plan_enabled')}
         saved = self.store.save(dict(values, host='claude'), snap['fingerprints'])
         backup = self.store.desktop / 'last-save.json'
         record = json.loads(backup.read_bytes())
@@ -158,6 +159,50 @@ class StoreTests(unittest.TestCase):
         restored = self.store.restore(saved['fingerprints'])
         self.assertEqual(restored['values']['host'], 'agy')
         self.assertTrue(restored['values']['agy_relay_error'])
+        self.assertEqual(self.store.raw('ai'), raw)
+
+    def test_agy_dual_plan_updates_only_enabled_and_creates_defaults(self):
+        defaults = {'enabled': False, 'partner': 'claude', 'model': None, 'effort': None,
+                    'synthesizer': 'agy', 'on_failure': 'stop'}
+        review = {'provider': 'codex', 'model': 'review-id'}
+        implementation = {'provider': 'codex', 'model': 'implementation-id', 'effort': 'high'}
+        relay = {'review': review, 'implementation': implementation}
+        self.write('ai', {'agy_relay': relay})
+        self.assertEqual(self.values()['agy_dual_plan'], defaults)
+        self.save(host='agy', agy_dual_plan_enabled=False)
+        self.assertEqual(json.loads(self.store.raw('ai'))['agy_relay'], relay)
+        enabled = self.save(agy_dual_plan_enabled=True)
+        self.assertIs(enabled['values']['agy_dual_plan_enabled'], True)
+        self.assertEqual(json.loads(self.store.raw('ai'))['agy_relay'],
+                         dict(relay, dual_plan=dict(defaults, enabled=True)))
+
+        plan = dict(defaults, enabled=True, model='haiku', effort='xhigh', synthesizer='claude', on_failure='fallback')
+        self.write('ai', {'agy_relay': dict(relay, dual_plan=plan)})
+        disabled = self.save(agy_dual_plan_enabled=False)
+        self.assertIs(disabled['values']['agy_dual_plan_enabled'], False)
+        self.assertEqual(json.loads(self.store.raw('ai'))['agy_relay'],
+                         dict(relay, dual_plan=dict(plan, enabled=False)))
+        for invalid in (0, 'true', None):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(StoreError, 'agy_dual_plan_enabled'):
+                self.save(agy_dual_plan_enabled=invalid)
+
+    def test_agy_dual_plan_error_isolated_and_restore_keeps_raw_bytes(self):
+        raw = b'{ "agy_relay" : {"review":{"model":"review-id"},"dual_plan":{"enabeld":true}} }\n'
+        self.write('ai', raw)
+        snapshot = self.snapshot()
+        values = dict(snapshot['values'], host='agy', mode='auto')
+        self.assertIs(values.pop('agy_dual_plan_enabled'), False)
+        self.assertIn('agy_relay.dual_plan has unknown keys', values['agy_dual_plan_error'])
+        self.assertEqual(values['agy_relay_error'], '')
+        self.assertEqual(values['agy_review_model'], 'review-id')
+        with self.assertRaisesRegex(StoreError, 'agy_relay.dual_plan'):
+            self.store.save(dict(values, agy_dual_plan_enabled=True), snapshot['fingerprints'])
+        self.assertEqual(self.store.raw('ai'), raw)
+        saved = self.store.save(values, snapshot['fingerprints'])
+        self.assertEqual(saved['values']['host'], 'agy')
+        self.assertEqual(json.loads(self.store.raw('ai'))['agy_relay'], json.loads(raw)['agy_relay'])
+        restored = self.store.restore(saved['fingerprints'])
+        self.assertEqual(restored['values']['agy_dual_plan_error'], values['agy_dual_plan_error'])
         self.assertEqual(self.store.raw('ai'), raw)
 
     def test_dual_plan_absent_or_null_reads_disabled(self):

@@ -18,6 +18,9 @@ class ConfigError(ValueError):
 ALIAS = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:-]*')
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
 AGY_EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
+CLAUDE_EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
+AGY_DUAL_PLAN_PARTNERS = ('claude',)
+AGY_DUAL_PLAN_SYNTHESIZERS = ('agy', 'claude')
 DUAL_PLAN_PARTNERS = ('agy',)
 DUAL_PLAN_SYNTHESIZERS = ('claude', 'agy')
 DUAL_PLAN_ON_FAILURE = ('stop', 'fallback')
@@ -136,7 +139,7 @@ def _agy_object(value, key, allowed):
 
 
 def agy_relay_section(data):
-    return _agy_object(lookup(data, 'agy_relay'), 'agy_relay', {'review', 'implementation'})
+    return _agy_object(lookup(data, 'agy_relay'), 'agy_relay', {'review', 'implementation', 'dual_plan'})
 
 
 def _agy_codex(data, route):
@@ -236,3 +239,37 @@ def claude_dual_plan(data):
         'synthesizer': synthesizer,
         'on_failure': on_failure,
     }
+
+
+def agy_dual_plan_defaults():
+    return {
+        'enabled': False, 'partner': 'claude', 'model': None, 'effort': None,
+        'synthesizer': 'agy', 'on_failure': 'stop',
+    }
+
+
+def agy_dual_plan(data):
+    """Validate AGY-led planning independently of review and implementation."""
+    key = 'agy_relay.dual_plan'
+    result = agy_dual_plan_defaults()
+    value = _agy_object((agy_relay_section(data) or {}).get('dual_plan'), key, result.keys())
+    if value is None:
+        return None
+
+    prefix = 'ai-anti config: ' + key
+    enabled = value.get('enabled', False)
+    if type(enabled) is not bool:
+        raise ConfigError(prefix + '.enabled must be a boolean')
+    result['enabled'] = enabled
+    for field, allowed in (('partner', AGY_DUAL_PLAN_PARTNERS), ('effort', CLAUDE_EFFORTS),
+                           ('synthesizer', AGY_DUAL_PLAN_SYNTHESIZERS), ('on_failure', DUAL_PLAN_ON_FAILURE)):
+        selected = value.get(field)
+        if selected is not None:
+            if not isinstance(selected, str) or selected not in allowed:
+                raise ConfigError(f'{prefix}.{field} must be one of ' + ', '.join(allowed))
+            result[field] = selected
+    model = value.get('model')
+    if model is not None and (not isinstance(model, str) or not model or any(c.isspace() for c in model)):
+        raise ConfigError(prefix + '.model must be a non-empty string without whitespace')
+    result['model'] = model
+    return result

@@ -17,7 +17,7 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / 'adapters/agy/scripts/codex_review.py'
 sys.path.insert(0, str(ROOT / 'adapters/codex/skills/claude-review/scripts'))
-from ai_anti_config import ConfigError, agy_implementation, agy_relay_section, agy_review
+from ai_anti_config import ConfigError, agy_dual_plan, agy_implementation, agy_relay_section, agy_review
 
 FAKE_CODEX = r'''
 import json, os, pathlib, sys, time
@@ -88,6 +88,20 @@ class ConfigTests(unittest.TestCase):
         for missing in ({}, {'provider': 'codex'}, {'model': 'known'}, {'provider': None, 'model': 'known'}):
             with self.assertRaisesRegex(ConfigError, '^ai-anti config: agy_relay[.]implementation'):
                 agy_implementation({'agy_relay': {'implementation': missing}})
+
+    def test_dual_plan_does_not_affect_codex_routes(self):
+        relay = {'review': {'model': 'review-model'},
+                 'implementation': {'provider': 'codex', 'model': 'impl-model'}}
+        config = {'agy_relay': relay}
+        review, implementation = agy_review(config), agy_implementation(config)
+        for value in ({'enabled': True}, {'enabeld': True}, 'malformed'):
+            relay['dual_plan'] = value
+            with self.subTest(value=value):
+                self.assertEqual(agy_relay_section(config)['dual_plan'], value)
+                self.assertEqual(agy_review(config), review)
+                self.assertEqual(agy_implementation(config), implementation)
+        with self.assertRaisesRegex(ConfigError, 'agy_relay.dual_plan'):
+            agy_dual_plan(config)
 
 
 class PlanReviewTests(unittest.TestCase):

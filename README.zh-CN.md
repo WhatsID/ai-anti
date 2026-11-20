@@ -26,7 +26,7 @@ AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验�
 |------|------|--------|
 | Claude → Codex | `/codex-review plan <方案.md>`、`/codex-review diff`、`/codex-implement <方案.md>` | Claude Code 主导。Codex 在只读沙箱里评审，可按配置用指定 Codex 模型在隔离工作树实施，也可在实施子代理因 API 故障受阻时接手 |
 | Codex → Claude/Qwen | `$claude-review`、`$codex-relay` | Codex 主导；选定的 Claude/Qwen 模型在 fail-closed 检查下评审方案（两阶段）或指定范围的 diff；`$codex-relay` 跑完整接力 |
-| AGY → Codex → AGY | `agy-relay`、`codex-review` | AGY 起草单方案，Codex 只读评审并在隔离工作树实施，AGY 独立审查增量并运行验收 |
+| AGY → Codex → AGY | `agy-relay`、`codex-review` | AGY 起草方案，可选 Claude 双方案规划。Codex 只读评审并在隔离工作树实施，AGY 独立审查增量并运行验收 |
 
 ## 四级接力档位
 
@@ -98,6 +98,7 @@ AGY 用户运行 `./install.sh --with-agy` 后启动新 AGY 会话。默认插�
 用 `codex-review` 单独审方案。参考配置示例，在 `~/.config/ai-anti/config.json` 中设置
 独立的 `agy_relay.review` 与 `agy_relay.implementation`，超时仍共用 `review.timeout` 和
 `review.idle_timeout`。实施须显式指定 Codex 模型，失败即停并请用户裁决。
+启用 `agy_relay.dual_plan.enabled` 后，可让 Claude 独立起草，由 AGY 或 Claude 综合两稿。
 `./install.sh --without-agy` 收回托管链接与由安装器创建的空目录。
 参见 [AGY 兼容性与验证边界](docs/COMPATIBILITY.md#2026-11-20-agy-led-relay)。
 非空 `AGENTS.override.md` 会遮蔽入口，安装器拒绝安装，不自动改写它。
@@ -257,6 +258,7 @@ Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独
 | `claude_relay.implementation` | Claude 主导时设为 `{"provider":"codex","model":"gpt-6.2-sol"}`，在隔离工作树固定模型实施（CLI 钉 0.169.1，真实探针待验） | 缺失/null → implementer |
 | `claude_relay.implementation.effort` | Claude 主导时按配置调用 Codex 实施的思考深度 | 缺失/null → Codex CLI 默认 |
 | `claude_relay.dual_plan` | Claude 主导可选 AGY 双方案规划（`enabled`、`partner="agy"`、可选 `model`/`effort` 取 `low\|medium\|high\|xhigh\|max`、`synthesizer="claude"\|"agy"`、`on_failure="stop"\|"fallback"`）；会话级临时禁用命令 `/disable-dual-plan` | 缺失/null/`enabled: false` → Claude 单方案 |
+| `agy_relay.dual_plan` | AGY 主导可选 Claude 双方案规划（`enabled`、`partner="claude"`、可选 `model`、`effort` 取 `low\|medium\|high\|xhigh\|max`、`synthesizer="agy"\|"claude"`、`on_failure="stop"\|"fallback"`） | 缺失/null/`enabled: false` → AGY 单方案 |
 | `plugins.qwen.claude_executor` | Claude 主导的 Qwen 执行器，可显式选 `codex` 走 Responses | `claude` |
 | `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
 | `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅固定逻辑 `glm-5.3` | 缺失/null → `codex` |

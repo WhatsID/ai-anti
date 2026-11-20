@@ -22,6 +22,7 @@ Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停�
 |---|---|
 | `~/.config/ai-anti/config.json` | `relay.default_mode`、`review.codex_model`、`desktop.primary_host`、已有 review/codex_relay/plugins.qwen 配置 |
 | `claude_relay.dual_plan`（同一 `config.json`） | Claude 主模型的下拉选项只修改 `enabled`（缺失时为关闭），首次选择 `enable` 时补齐默认配置。选择 `enable` 时下方显示协作方、模型、深度和综合方摘要；失败处置在配置文件中查看和编辑。 |
+| `agy_relay.dual_plan`（同一 `config.json`） | AGY 主模型下拉只修改 `enabled`，首次启用补齐默认配置并显示只读摘要。默认关闭，协作方固定为 Claude，`model`、`effort` 为 null 时由 CLI 选择，`synthesizer` 默认 `agy`，`on_failure` 默认 `stop`。其余字段在配置文件中编辑。 |
 | `agy_relay`（同一 `config.json`） | Codex 评审和实施的模型 ID 分别写入 `review.model` 和 `implementation.model`，保存保留已有的 `provider` 和 `effort`。空评审模型移除 `review.model`，使用 CLI 默认；移除已保存的实施配置须手工编辑配置。 |
 | Claude `settings.json` | 只改顶层 `model`，保留 permissions、MCP 等 |
 | Codex `config.toml` | 只替换简单顶层单行 model 或在文件开头插入，前后 tomllib 验证其他语义一致 |
@@ -31,6 +32,8 @@ Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停�
 双方案配置无效时，该下拉选项停用并提示对应字段。普通保存保留原配置，恢复按原始字节还原。
 
 选择 AGY 保存 `desktop.primary_host = "agy"`。主模型 ID 由 AGY 设置管理，在应用中只读。AGY 的评审与独立实施固定使用 Codex，模型可从目录选择或输入自定义 ID，思考深度仅供查看。应用按 CLI 同样的规则校验 `agy_relay`。发生错误时，应用显示出错字段并阻止切入 AGY 或写入其接力模型；其他宿主仍可保存与检测，恢复沿用备份原字节。
+
+仅 `agy_relay.dual_plan` 损坏时，应用停用 AGY 双方案下拉并显示出错字段，仍可切入 AGY、保存其他设置或执行 Claude/Codex 宿主的检测。回滚到尚未支持 AGY 双方案的旧版源码前，须从 `~/.config/ai-anti/config.json` 手工删除 `agy_relay.dual_plan` 并保留同级的 `review` 和 `implementation`。切换到 `disable` 后该键仍存在，`last-save.json` 仅保存最近一次修改前的配置。
 
 正常运行遵循 `CODEX_HOME` 与 `CLAUDE_CONFIG_DIR`。`--config-root` 测试根优先覆盖这些路径，
 可解析凭证必须在该根内，不允许父目录跳转或意外 symlink。已有普通项目相对项保留，
@@ -53,7 +56,7 @@ Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停�
 
 本地检查格式、组合、CLI存在/有界version、已安装入口、凭证是否可解析。它不验证登录、额度、
 当前模型可调用或所有CLI版本兼容。真实检测需用户手动确认额度消耗，不读取业务仓库。
-AGY 的「检查配置」校验插件链接与五个必需入口文件。未指定 `--source-root` 时优先使用已安装 AGY 插件对应的源码检出。`agy --version` 与 `compat.json` 的 `tested.agy` 比对，清单外版本仅提示。非 `solo` 还要求配置实施模型，并校验 Codex CLI 符合关联工作树实施入口的版本要求。`solo` 仅检测 AGY CLI 和插件。AGY 下桌面「测试评审模型…」停用，可从 AGY 发起评审。
+AGY 的「检查配置」校验插件链接与六个必需入口文件，双方案子节损坏时在启动 CLI 前报错。未指定 `--source-root` 时优先使用已安装 AGY 插件对应的源码检出。`agy --version` 与 `compat.json` 的 `tested.agy` 比对。非 `solo` 要求配置实施模型，并校验 Codex CLI 符合关联工作树实施入口的版本要求。启用双方案时额外将 `claude --version` 与 `tested.claude` 比对。AGY 和 Claude 的清单外版本只提示。`solo` 仅探测 AGY CLI 并检查插件。AGY 下桌面「测试评审模型…」停用，可从 AGY 发起评审。
 
 Qwen 复用正式 `review.py diff --channel qwen`，临时仓库有 HEAD 和小改动，输出在仓库外，
 检查 completed、通道/执行器/协议/请求模型；Claude 分支精确匹配实际模型，Codex 分支保留 requested_only，并保留原完整读取和权限门禁。耗时可能最多30分钟，无快速探针或自动降级。
