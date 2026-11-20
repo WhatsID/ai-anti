@@ -19,6 +19,7 @@ import Combine
         let snapshot: [String: Any] = ["signature": "a", "fingerprints": ["fixture": "a"], "can_restore": true,
             "values": ["host": "codex", "channel": "qwen", "mode": "rules", "primary_model": "fixture", "qwen_executor": "codex", "claude_qwen_executor": "codex", "credential_present": true, "base_url": "https://fixture.invalid/anthropic", "responses_base_url": "https://fixture.invalid/v1"]]
         checkDualPlanAndReviewAddress(snapshot)
+        checkAgyHost()
         let checked: [String: Any] = ["signature": "a", "message": "本地检查通过", "checked_at": "fixture", "actual_model": "fake"]
         model.refresh(); assert(model.busy)
         front.complete(.success(snapshot)); assert(model.loaded && !model.busy)
@@ -490,6 +491,97 @@ import Combine
         assert(agentSave["claude_implementation_provider"] as? String == "claude-agent")
         claudeFront.complete(.failure(BridgeFailure(message: "fixture end")))
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
+    }
+
+    @MainActor static func checkAgyHost() {
+        let front = FakeClient()
+        let model = AppModel(foreground: front, background: FakeClient(), automatic: false)
+        let claude: [String: Any] = [
+            "host": "claude", "channel": "codex", "mode": "rules", "primary_model": "fixture-claude",
+            "claude_model": "fixture-claude", "codex_model": "fixture-codex",
+            "claude_channel": "codex", "codex_channel": "qoder", "fallback_channels": ["qwen"],
+            "reviewer_model": "claude-review-id", "qwen_executor": "codex", "claude_qwen_executor": "codex",
+        ]
+        func load(_ values: [String: Any]) {
+            model.refresh()
+            front.complete(.success(["values": values, "signature": "fixture"]))
+        }
+        func postedValues() -> [String: Any] {
+            assert(front.requests.last?["action"] as? String == "save")
+            return front.requests.last?["values"] as! [String: Any]
+        }
+
+        load(claude)
+        assert(!model.dirty && model.draft.claudeImplementationProvider == "claude-agent")
+        model.draft.primaryModel = "unsaved-claude"
+        model.switchHost("agy")
+        assert(model.draft.host == "agy" && model.draft.primaryModel.isEmpty && model.reviewFamily == "codex")
+        assert(model.draft.implementationModelEnabled && !model.reviewUsesQwen && !model.showsReviewAddress)
+        assert(model.primaryOptions == [ModelOption(id: "", label: ModelCatalog.agyManaged)])
+        assert(model.reviewerOptions.first == ModelOption(id: "", label: "CLI 默认"))
+        assert(model.secondaryOptions.first == ModelOption(id: "", label: "未配置（实施阶段停止）"))
+        model.switchReviewFamily("token_plan")
+        model.switchReviewFamily("qoder")
+        assert(model.reviewFamily == "codex")
+        model.draft.mode = "solo"
+        assert(!model.draft.implementationModelEnabled)
+        model.draft.mode = "rules"
+        model.switchHost("claude")
+        assert(model.draft.primaryModel == "unsaved-claude" && model.draft.reviewerModel == "claude-review-id")
+        model.discard()
+
+        model.menuHost("agy")
+        let menu = postedValues()
+        assert(menu["host"] as? String == "agy" && menu["channel"] as? String == "codex")
+        assert(menu["agy_review_model"] == nil && menu["agy_implementation_model"] == nil)
+        assert((menu["host_updates"] as? [String: [String: String]])?.isEmpty == true)
+        var agy = claude
+        agy["host"] = "agy"; agy["primary_model"] = ""
+        front.complete(.success(["values": agy]))
+        assert(model.title == "AGY → Codex · CLI 默认" && !model.dirty)
+
+        model.draft.agyReviewModel = "custom/review"
+        model.save()
+        let review = postedValues()
+        assert(review["agy_review_model"] as? String == "custom/review" && review["agy_implementation_model"] == nil)
+        assert(review["agy_relay"] == nil && review["reviewer_model"] as? String == "claude-review-id")
+        agy["agy_review_model"] = "custom/review"
+        agy["agy_relay"] = ["review": ["effort": "high"], "implementation": NSNull()] as [String: Any]
+        front.complete(.success(["values": agy]))
+        assert(model.title == "AGY → Codex · custom/review" && model.draft.agyReviewEffort == "high")
+        assert(model.reviewerOptions.contains { $0.id == "custom/review" })
+
+        model.switchHost("claude")
+        model.draft.primaryModel = "changed-claude"
+        model.switchHost("agy")
+        model.draft.agyImplementationModel = "custom/implementation"
+        model.save()
+        let implementation = postedValues()
+        assert(implementation["agy_implementation_model"] as? String == "custom/implementation" && implementation["agy_review_model"] == nil)
+        assert(implementation["host_updates"] as? [String: [String: String]] == ["claude": ["primary_model": "changed-claude"]])
+        agy["agy_implementation_model"] = "custom/implementation"
+        agy["agy_relay"] = ["review": ["effort": "high"], "implementation": ["effort": "xhigh"]]
+        agy["claude_model"] = "changed-claude"
+        front.complete(.success(["values": agy]))
+        assert(model.draft.agyImplementationEffort == "xhigh" && !model.secondaryOptions.contains { $0.id.isEmpty })
+        let requests = front.requests.count
+        for invalid in ["", "a b"] {
+            model.draft.agyImplementationModel = invalid
+            model.save()
+            assert(front.requests.count == requests && model.message.contains("AGY 的 Codex 实施模型 ID"))
+        }
+        model.discard()
+
+        var invalid = claude
+        invalid["agy_relay_error"] = "agy_relay.implementation 无效"
+        load(invalid)
+        let beforeMenu = front.requests.count
+        model.menuHost("agy")
+        assert(front.requests.count == beforeMenu && model.draft.host == "claude")
+        assert(model.message.contains("AGY 接力配置无效"))
+        model.switchHost("agy")
+        assert(!model.draft.implementationModelEnabled && !model.draft.agyRelayError.isEmpty)
+        print("PASS: AppModel AGY host, draft isolation, incremental saves, and soft errors")
     }
 
     @MainActor static func checkDualPlanAndReviewAddress(_ snapshot: [String: Any]) {

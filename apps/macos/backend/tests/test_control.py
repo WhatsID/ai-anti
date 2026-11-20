@@ -28,6 +28,138 @@ class StoreTests(unittest.TestCase):
         snap = self.snapshot(); v = snap['values']; v.update(changes)
         return self.store.save(v, snap['fingerprints'])
 
+    def test_agy_host_roundtrip_keeps_other_host_files(self):
+        self.write('claude', b'{"model":"fixture-claude","permissions":{}}\n')
+        self.write('codex', b'model = "fixture-codex" # retain\n')
+        initial = self.snapshot()
+        for host, channel, primary in (('agy', 'codex', ''), ('codex', 'claude', 'fixture-codex'),
+                                       ('claude', 'codex', 'fixture-claude')):
+            with self.subTest(host=host):
+                saved = self.save(host=host, channel=channel, primary_model=primary)
+                self.assertEqual((saved['values']['host'], saved['values']['channel'],
+                                  saved['values']['primary_model']), (host, channel, primary))
+                self.assertEqual(json.loads(self.store.raw('ai'))['desktop']['primary_host'], host)
+                self.assertNotIn('agy_relay', json.loads(self.store.raw('ai')))
+                for key in ('claude', 'codex'):
+                    self.assertEqual(saved['fingerprints'][key], initial['fingerprints'][key])
+        for changes, message in (
+            ({'channel': 'qwen'}, 'AGY 主模型仅支持 Codex 评审'),
+            ({'primary_model': 'external-agy-id'}, 'AGY 主模型 ID 由 AGY 设置管理'),
+            ({'host_updates': {'agy': {'channel': 'codex'}}}, 'host_updates 主模型无效'),
+        ):
+            with self.subTest(changes=changes), self.assertRaisesRegex(StoreError, message):
+                self.save(**({'host': 'agy', 'channel': 'codex', 'primary_model': ''} | changes))
+        updated = self.save(host='agy', channel='codex', primary_model='',
+                            host_updates={'codex': {'primary_model': 'edited-codex'}})
+        self.assertEqual(updated['values']['codex_model'], 'edited-codex')
+        self.assertEqual(updated['fingerprints']['claude'], initial['fingerprints']['claude'])
+
+    def test_agy_single_key_edits_preserve_other_route_and_efforts(self):
+        review = {'provider': None, 'model': 'old-review', 'effort': 'ultra'}
+        implementation = {'provider': 'codex', 'model': 'old-impl', 'effort': 'xhigh'}
+        self.write('ai', {'agy_relay': {'review': review, 'implementation': implementation}})
+        for changed_key, model_key, new_model in (
+            ('review', 'agy_review_model', 'new-review'),
+            ('implementation', 'agy_implementation_model', 'new-impl'),
+            ('review', 'agy_review_model', ''),
+        ):
+            with self.subTest(model_key=model_key, new_model=new_model):
+                snap = self.snapshot()
+                values = {key: val for key, val in snap['values'].items()
+                          if key not in ('agy_review_model', 'agy_implementation_model')}
+                saved = self.store.save(dict(values, **{model_key: new_model}), snap['fingerprints'])
+                route = review if changed_key == 'review' else implementation
+                if new_model:
+                    route['model'] = new_model
+                else:
+                    route.pop('model')
+                self.assertEqual(saved['values'][model_key], new_model)
+                self.assertEqual(json.loads(self.store.raw('ai'))['agy_relay'],
+                                 {'review': review, 'implementation': implementation})
+        before = self.snapshot()
+        raw = self.store.raw('ai')
+        with self.assertRaisesRegex(StoreError, r'应用不清空 AGY 实施配置.*agy_relay\.implementation'):
+            self.save(agy_implementation_model='', host_updates={'codex': {'primary_model': 'must-not-write'}})
+        self.assertEqual(self.snapshot()['fingerprints'], before['fingerprints'])
+        self.assertEqual(self.store.raw('ai'), raw)
+
+    def test_agy_new_routes_and_noop_apply(self):
+        import agy_relay
+
+        ai = {'agy_relay': {'review': {'provider': None, 'model': None, 'effort': 'high'},
+                            'implementation': {'provider': 'codex', 'model': 'old', 'effort': None}}}
+        original = encode(ai)
+        self.assertIs(agy_relay.apply(ai, {'agy_review_model': '', 'agy_implementation_model': 'old'}, StoreError), False)
+        self.assertEqual(encode(ai), original)
+        for initial in ({}, {'agy_relay': None}):
+            with self.subTest(initial=initial):
+                data = copy.deepcopy(initial)
+                self.assertIs(agy_relay.apply(data, {'agy_implementation_model': ''}, StoreError), False)
+                self.assertEqual(data, initial)
+                self.write('ai', initial)
+                snap = self.snapshot()
+                for key, route in (('agy_implementation_model', 'implementation'), ('agy_review_model', 'review')):
+                    values = {k: v for k, v in snap['values'].items()
+                              if k not in ('agy_review_model', 'agy_implementation_model')}
+                    snap = self.store.save(dict(values, **{key: route + '-id'}), snap['fingerprints'])
+                self.assertEqual(json.loads(self.store.raw('ai'))['agy_relay'], {
+                    'implementation': {'provider': 'codex', 'model': 'implementation-id'},
+                    'review': {'provider': 'codex', 'model': 'review-id'},
+                })
+        for changes, message in (
+            ({'unknown': 'model'}, '变更字段无效'),
+            ({'agy_review_model': None}, 'agy_review_model'),
+            ({'agy_implementation_model': False}, 'agy_implementation_model'),
+            ({'agy_review_model': 'valid', 'agy_implementation_model': 'two words'}, r'agy_relay\.implementation\.model'),
+            ({'agy_review_model': 'white\u2003space'}, r'agy_relay\.review\.model'),
+        ):
+            with self.subTest(changes=changes), self.assertRaisesRegex(StoreError, message):
+                agy_relay.apply(ai, changes, StoreError)
+            self.assertEqual(encode(ai), original)
+
+    def test_agy_soft_error_allows_unrelated_save_and_byte_exact_restore(self):
+        raw = b'{ "agy_relay" : {"review": {"model": "valid"}, "implementation": {"future": true}} }\n'
+        self.write('ai', raw)
+        snap = self.snapshot()
+        values = dict(snap['values'], mode='auto')
+        self.assertEqual(values.pop('agy_review_model'), '')
+        self.assertEqual(values.pop('agy_implementation_model'), '')
+        self.assertIn('agy_relay.implementation', values['agy_relay_error'])
+        self.assertEqual(values['agy_relay']['review'], {'provider': 'codex', 'model': None, 'effort': None})
+        self.assertIsNone(values['agy_relay']['implementation'])
+        with self.assertRaisesRegex(StoreError, '不能切换为 AGY 主模型'):
+            self.store.save(dict(values, host='agy'), snap['fingerprints'])
+        with self.assertRaisesRegex(StoreError, r'AGY 接力配置无效.*config\.json.*agy_relay'):
+            self.store.save(dict(values, agy_review_model='new'), snap['fingerprints'])
+        self.assertEqual(self.store.raw('ai'), raw)
+        saved = self.store.save(values, snap['fingerprints'])
+        self.assertEqual(saved['values']['mode'], 'auto')
+        self.assertEqual(json.loads(self.store.raw('ai'))['agy_relay'], json.loads(raw)['agy_relay'])
+        restored = self.store.restore(saved['fingerprints'])
+        self.assertEqual(self.store.raw('ai'), raw)
+        self.assertEqual(restored['values']['agy_relay_error'], values['agy_relay_error'])
+
+    def test_restore_agy_host_and_reject_unknown_host(self):
+        raw = b'{ "desktop" : {"primary_host": "agy"}, "agy_relay": [] }\n'
+        self.write('ai', raw)
+        snap = self.snapshot()
+        values = {k: v for k, v in snap['values'].items() if k not in ('agy_review_model', 'agy_implementation_model')}
+        saved = self.store.save(dict(values, host='claude'), snap['fingerprints'])
+        backup = self.store.desktop / 'last-save.json'
+        record = json.loads(backup.read_bytes())
+        invalid = copy.deepcopy(record)
+        invalid['before']['ai'] = raw.replace(b'"agy"', b'"unknown"').hex()
+        atomic(backup, encode(invalid))
+        before = self.store.raw('ai')
+        with self.assertRaisesRegex(StoreError, '恢复记录主模型无效'):
+            self.store.restore(saved['fingerprints'])
+        self.assertEqual(self.store.raw('ai'), before)
+        atomic(backup, encode(record))
+        restored = self.store.restore(saved['fingerprints'])
+        self.assertEqual(restored['values']['host'], 'agy')
+        self.assertTrue(restored['values']['agy_relay_error'])
+        self.assertEqual(self.store.raw('ai'), raw)
+
     def test_dual_plan_absent_or_null_reads_disabled(self):
         for data in ({}, {'claude_relay': None}, {'claude_relay': {}}, {'claude_relay': {'dual_plan': None}}):
             with self.subTest(data=data):

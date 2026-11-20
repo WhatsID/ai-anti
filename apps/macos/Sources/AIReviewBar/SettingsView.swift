@@ -32,6 +32,9 @@ struct CheckStatusText: View {
 // Summaries describe the current draft without exposing addresses or credentials.
 enum SettingsSummary {
     static func review(_ draft: Draft) -> String {
+        if draft.host == "agy" {
+            return "评审服务：Codex / " + (draft.agyReviewModel.isEmpty ? "CLI 默认" : draft.agyReviewModel) + (draft.mode == "solo" ? "（solo 已停用）" : "")
+        }
         let model: String
         switch draft.channel {
         case "qoder": model = "Kimi-K3.1-Pro"
@@ -43,7 +46,9 @@ enum SettingsSummary {
     }
     static func implementation(_ draft: Draft) -> String {
         let detail: String
-        if draft.host == "claude" && draft.claudeImplementationProvider == "codex" {
+        if draft.host == "agy" {
+            detail = "Codex / " + (draft.agyImplementationModel.isEmpty ? "未配置" : draft.agyImplementationModel)
+        } else if draft.host == "claude" && draft.claudeImplementationProvider == "codex" {
             detail = "Codex / " + (draft.claudeImplementationModel.isEmpty ? "未指定" : draft.claudeImplementationModel)
         }
         else if draft.host == "claude" { detail = "Claude Code 实施代理" }
@@ -120,16 +125,22 @@ struct SettingsView: View {
     @State private var customReview = false
     @State private var customClaudeImplementation = false
     @State private var customCodexImplementation = false
+    @State private var customAgyReview = false
+    @State private var customAgyImplementation = false
     private var isSolo: Bool { model.draft.mode == "solo" }
     private var invalidCustomModel: Bool {
         (customReview && !Draft.validModelID(model.draft.reviewerModel)) ||
         (customClaudeImplementation && model.draft.claudeImplementationProvider == "codex" && !Draft.validModelID(model.draft.claudeImplementationModel)) ||
-        (customCodexImplementation && model.draft.implementationProvider == "codex" && !Draft.validModelID(model.draft.secondaryModel))
+        (customCodexImplementation && model.draft.implementationProvider == "codex" && !Draft.validModelID(model.draft.secondaryModel)) ||
+        (customAgyReview && !Draft.validModelID(model.draft.agyReviewModel)) ||
+        (customAgyImplementation && !Draft.validModelID(model.draft.agyImplementationModel))
     }
     private func closeCustomEditors() {
         customReview = false
         customClaudeImplementation = false
         customCodexImplementation = false
+        customAgyReview = false
+        customAgyImplementation = false
     }
     private var versionLabel: String {
         guard let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String,
@@ -137,7 +148,8 @@ struct SettingsView: View {
         return "当前版本：v\(version)"
     }
     private var reviewModelID: String {
-        model.draft.channel == "qoder" ? "kmodel_latest" : model.draft.channel == "codex" ? (model.draft.reviewerModel.isEmpty ? "CLI 默认" : model.draft.reviewerModel) : model.draft.qwenModel
+        if model.draft.host == "agy" { return model.draft.agyReviewModel.isEmpty ? "CLI 默认" : model.draft.agyReviewModel }
+        return model.draft.channel == "qoder" ? "kmodel_latest" : model.draft.channel == "codex" ? (model.draft.reviewerModel.isEmpty ? "CLI 默认" : model.draft.reviewerModel) : model.draft.qwenModel
     }
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: SettingsColumns.spacing) {
@@ -188,9 +200,11 @@ struct SettingsView: View {
                         field("主模型") {
                             Picker("主模型", selection: Binding(get: { model.draft.host }, set: { model.switchHost($0) })) {
                                 Text("Claude Code").tag("claude"); Text("Codex").tag("codex")
+                                Text("AGY").tag("agy")
                             }
                         }
                         modelPicker("主模型 ID", selection: $model.draft.primaryModel, options: model.primaryOptions)
+                            .disabled(model.draft.host == "agy")
                         field("协作模式") {
                             Picker("协作模式", selection: $model.draft.mode) {
                                 ForEach(model.modes, id: \.0) { item in Text(item.0).tag(item.0) }
@@ -213,18 +227,32 @@ struct SettingsView: View {
                                 .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
                         }
                     }
+                    if model.draft.host == "agy" {
+                        note("AGY 主模型由 AGY 设置管理；评审与独立实施使用 Codex。")
+                        if !model.draft.agyRelayError.isEmpty {
+                            Text("AGY 接力配置无效：" + model.draft.agyRelayError).font(.caption).foregroundStyle(.red)
+                                .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
+                        }
+                    }
                     ServiceSettingsGroup("评审服务", summary: SettingsSummary.review(model.draft), isExpanded: $reviewExpanded) {
                         Picker("评审服务", selection: Binding(get: { model.reviewFamily }, set: { model.switchReviewFamily($0) })) {
-                            if model.draft.host == "claude" { Text("Codex").tag("codex") }
-                            Text("千问 Token Plan").tag("token_plan")
+                            if model.draft.host == "claude" || model.draft.host == "agy" { Text("Codex").tag("codex") }
+                            if model.draft.host != "agy" {
+                                Text("千问 Token Plan").tag("token_plan")
+                                Text("自定义 API").tag("custom_api")
+                            }
                             if model.draft.host == "codex" { Text("Qoder").tag("qoder") }
-                            Text("自定义 API").tag("custom_api")
                             if model.draft.channel == "qoder" && model.draft.host == "claude" { Text("已有 Qoder 配置（Claude 主模型暂不支持）").tag("qoder") }
                             if model.draft.channel == "codex" && model.draft.host == "codex" { Text("已有 Codex 配置（此主模型暂不支持）").tag("codex") }
                             if !["codex", "qwen", "qoder"].contains(model.draft.channel) { Text("已有配置：\(model.draft.channel)").tag(model.draft.channel) }
                         }.disabled(isSolo)
                     } content: {
-                        if model.draft.channel == "codex" {
+                        if model.draft.host == "agy" {
+                            codexModelPicker("评审模型", selection: $model.draft.agyReviewModel,
+                                             options: model.reviewerOptions, custom: $customAgyReview)
+                                .disabled(isSolo || !model.draft.agyRelayError.isEmpty)
+                            note("思考深度（只读）：\(model.draft.agyReviewEffort.isEmpty ? "CLI 默认" : model.draft.agyReviewEffort)")
+                        } else if model.draft.channel == "codex" {
                             codexModelPicker("评审模型", selection: $model.draft.reviewerModel,
                                              options: model.reviewerOptions, custom: $customReview).disabled(isSolo)
                         } else if model.draft.channel == "qwen" && model.draft.activeAPI == "custom_api" {
@@ -280,8 +308,10 @@ struct SettingsView: View {
                         }
                     }
                     ServiceSettingsGroup("实施服务", summary: SettingsSummary.implementation(model.draft), isExpanded: $implementationExpanded) {
-                        Picker("实施服务", selection: model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : $model.draft.implementationProvider) {
-                            if model.draft.host == "claude" {
+                        Picker("实施服务", selection: model.draft.host == "agy" ? .constant("codex") : (model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : $model.draft.implementationProvider)) {
+                            if model.draft.host == "agy" {
+                                Text("Codex（指定模型）").tag("codex")
+                            } else if model.draft.host == "claude" {
                                 Text("Claude Code 实施代理").tag("claude-agent")
                                 Text("Codex（指定模型）").tag("codex")
                             } else {
@@ -291,7 +321,13 @@ struct SettingsView: View {
                             }
                         }.disabled(!model.draft.implementationEnabled)
                     } content: {
-                        if model.draft.host == "claude" && model.draft.claudeImplementationProvider == "codex" {
+                        if model.draft.host == "agy" {
+                            codexModelPicker("实施模型 ID", selection: $model.draft.agyImplementationModel,
+                                             options: model.secondaryOptions, custom: $customAgyImplementation)
+                                .disabled(!model.draft.implementationModelEnabled)
+                                .disabled(!model.draft.agyRelayError.isEmpty)
+                            note("思考深度（只读）：\(model.draft.agyImplementationEffort.isEmpty ? "CLI 默认" : model.draft.agyImplementationEffort)")
+                        } else if model.draft.host == "claude" && model.draft.claudeImplementationProvider == "codex" {
                             codexModelPicker("实施模型 ID", selection: $model.draft.claudeImplementationModel,
                                              options: model.secondaryOptions, custom: $customClaudeImplementation)
                                 .disabled(!model.draft.implementationModelEnabled)
@@ -332,7 +368,7 @@ struct SettingsView: View {
             Text(model.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
             HStack(alignment: .center, spacing: 8) {
                 Button("检查配置") { model.check() }.disabled(model.busy || model.dirty || !model.loaded)
-                Button("测试评审模型…") { confirmReal = true }.disabled(isSolo || model.busy || model.dirty || !model.loaded)
+                Button("测试评审模型…") { confirmReal = true }.disabled(isSolo || model.busy || model.dirty || !model.loaded || model.draft.host == "agy")
                 Button("重新读取配置") { if model.dirty { confirmRefresh = true } else { model.refresh() } }.disabled(model.busy)
                     .help("重新从磁盘读取 Claude、Codex 和机制默认配置，不调用模型")
                 Button("恢复上次保存") { confirmRestore = true }.disabled(model.busy || !model.canRestore || model.dirty)

@@ -57,6 +57,11 @@ struct Draft: Equatable {
     var tokenPlanImplementationModel = ModelCatalog.implementationGLM
     var claudeImplementationProvider = "claude-agent"
     var claudeImplementationModel = ""
+    var agyReviewModel = ""
+    var agyImplementationModel = ""
+    var agyReviewEffort = ""
+    var agyImplementationEffort = ""
+    var agyRelayError = ""
     var dualPlanEnabled = false
     var dualPlanPartner = "agy"
     var dualPlanModel = ""
@@ -72,7 +77,7 @@ struct Draft: Equatable {
     var codexModels = ModelCatalog.codex
     var implementationEnabled: Bool { mode != "solo" }
     var implementationModelEnabled: Bool {
-        implementationEnabled && (host == "codex" || claudeImplementationProvider == "codex")
+        implementationEnabled && (host == "codex" || (host == "agy" && agyRelayError.isEmpty) || claudeImplementationProvider == "codex")
     }
     var implementationModel: String {
         get { implementationProvider == "token_plan" ? tokenPlanImplementationModel : implementationProvider == "qoder" ? ModelCatalog.implementationGLM : secondaryModel }
@@ -178,7 +183,8 @@ struct Draft: Equatable {
         ([savedHosts["claude"]?.channel ?? "codex"] + fallbacks).filter { $0 != draft.channel }
     }
     var reviewUsesQwen: Bool {
-        draft.channel == "qwen" || (draft.host == "claude" && claudeFallbacks.contains("qwen"))
+        if draft.host == "agy" { return false }
+        return draft.channel == "qwen" || (draft.host == "claude" && claudeFallbacks.contains("qwen"))
     }
     var showsReviewAddress: Bool {
         reviewUsesQwen && !(draft.host == "claude" && draft.channel == "codex")
@@ -193,6 +199,7 @@ struct Draft: Equatable {
     var reviewFamily: String { draft.service }
     var savedReviewFamily: String { saved.service }
     var title: String {
+        if saved.host == "agy" { return "AGY → Codex · \(saved.agyReviewModel.isEmpty ? "CLI 默认" : saved.agyReviewModel)" }
         let service = ReviewService.title(savedReviewFamily)
         let detail: String
         switch saved.channel {
@@ -204,9 +211,14 @@ struct Draft: Equatable {
         return "\(saved.host == "claude" ? "Claude" : "Codex") → \(service) · \(detail)"
     }
     var primaryOptions: [ModelOption] {
-        ModelCatalog.options(draft.host, preserving: [defaults[draft.host] ?? "", draft.host == saved.host ? saved.primaryModel : "", draft.primaryModel], emptyLabel: "不修改（沿用当前设置）", codexModels: draft.codexModels)
+        if draft.host == "agy" { return [ModelOption(id: "", label: ModelCatalog.agyManaged)] }
+        return ModelCatalog.options(draft.host, preserving: [defaults[draft.host] ?? "", draft.host == saved.host ? saved.primaryModel : "", draft.primaryModel], emptyLabel: "不修改（沿用当前设置）", codexModels: draft.codexModels)
     }
     var secondaryOptions: [ModelOption] {
+        if draft.host == "agy" {
+            return ModelCatalog.options("codex", preserving: [saved.agyImplementationModel, draft.agyImplementationModel],
+                                        emptyLabel: saved.agyImplementationModel.isEmpty ? "未配置（实施阶段停止）" : nil, codexModels: draft.codexModels)
+        }
         if draft.host == "claude" {
             return ModelCatalog.options("codex", preserving: [saved.claudeImplementationModel, draft.claudeImplementationModel],
                                         emptyLabel: "请选择模型", codexModels: draft.codexModels)
@@ -218,6 +230,10 @@ struct Draft: Equatable {
         return ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定", codexModels: draft.codexModels)
     }
     var reviewerOptions: [ModelOption] {
+        if draft.host == "agy" {
+            return ModelCatalog.options("codex", preserving: [saved.agyReviewModel, draft.agyReviewModel],
+                                        emptyLabel: "CLI 默认", codexModels: draft.codexModels)
+        }
         if draft.channel == "qoder" { return [ModelOption(id: "kmodel_latest", label: "Kimi-K3.1-Pro")] }
         if draft.channel == "codex" {
             return ModelCatalog.options("codex", preserving: [saved.reviewerModel, draft.reviewerModel],
@@ -232,7 +248,11 @@ struct Draft: Equatable {
     }
     func switchReviewFamily(_ service: String) {
         guard !busy, loaded, service != reviewFamily else { return }
-        guard ReviewService.api.contains(service) || (service == "qoder" && draft.host == "codex") || (service == "codex" && draft.host == "claude") else { return }
+        if draft.host == "agy" {
+            guard service == "codex" else { return }
+        } else {
+            guard ReviewService.api.contains(service) || (service == "qoder" && draft.host == "codex") || (service == "codex" && draft.host == "claude") else { return }
+        }
         if ReviewService.api.contains(service) { draft.activeAPI = service; draft.channel = "qwen" }
         else { draft.channel = service }
         status = "未检测（服务已变化）"; checkSignature = nil
@@ -340,6 +360,13 @@ struct Draft: Equatable {
         d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.tokenPlanImplementationModel = v["token_plan_implementation_model"] as? String ?? ModelCatalog.implementationGLM; d.implementationProvider = v["implementation_provider"] as? String ?? "codex"; d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url")
         d.claudeImplementationProvider = v["claude_implementation_provider"] as? String ?? "claude-agent"
         d.claudeImplementationModel = text("claude_implementation_model")
+        d.agyReviewModel = text("agy_review_model")
+        d.agyImplementationModel = text("agy_implementation_model")
+        d.agyRelayError = text("agy_relay_error")
+        if let relay = v["agy_relay"] as? [String: Any] {
+            d.agyReviewEffort = (relay["review"] as? [String: Any])?["effort"] as? String ?? ""
+            d.agyImplementationEffort = (relay["implementation"] as? [String: Any])?["effort"] as? String ?? ""
+        }
         d.dualPlanEnabled = v["dual_plan_enabled"] as? Bool ?? false
         d.dualPlanError = text("dual_plan_error")
         if let plan = v["dual_plan"] as? [String: Any] {
@@ -359,10 +386,10 @@ struct Draft: Equatable {
             if token.responsesBaseURL.isEmpty { token.responsesBaseURL = defaults.responsesBaseURL }
             draft.profiles["token_plan"] = token
         }
-        let channels = ["claude": text("claude_channel"), "codex": text("codex_channel")]
-        defaults = ["claude": text("claude_model"), "codex": text("codex_model")]
+        let channels = ["claude": text("claude_channel"), "codex": text("codex_channel"), "agy": "codex"]
+        defaults = ["claude": text("claude_model"), "codex": text("codex_model"), "agy": ""]
         savedHosts = [:]
-        for host in ["claude", "codex"] {
+        for host in ["claude", "codex", "agy"] {
             savedHosts[host] = HostDraft(primaryModel: defaults[host] ?? "", channel: channels[host].flatMap { $0.isEmpty ? nil : $0 } ?? (host == "claude" ? "codex" : "qwen"))
         }
         savedHosts[d.host] = HostDraft(primaryModel: d.primaryModel, channel: d.channel)
@@ -382,15 +409,25 @@ struct Draft: Equatable {
             message = "Claude 的 Codex 实施模型 ID 必须为非空且不含空白的字符串"
             return
         }
+        if draft.agyImplementationModel != saved.agyImplementationModel && !Draft.validModelID(draft.agyImplementationModel) {
+            message = "AGY 的 Codex 实施模型 ID 必须为非空且不含空白的字符串"
+            return
+        }
         var values = draft.dictionary
         if draft.dualPlanEnabled != saved.dualPlanEnabled {
             values["dual_plan_enabled"] = draft.dualPlanEnabled
+        }
+        if draft.agyReviewModel != saved.agyReviewModel {
+            values["agy_review_model"] = draft.agyReviewModel
+        }
+        if draft.agyImplementationModel != saved.agyImplementationModel {
+            values["agy_implementation_model"] = draft.agyImplementationModel
         }
         if saved.claudeImplementationProvider == "claude-agent" && draft.claudeImplementationProvider == "claude-agent" {
             values.removeValue(forKey: "claude_implementation_provider")
         }
         var updates: [String: [String: String]] = [:]
-        for (host, edit) in currentHosts {
+        for (host, edit) in currentHosts where host != "agy" {
             guard let original = savedHosts[host] else { continue }
             var fields: [String: String] = [:]
             if edit.primaryModel != original.primaryModel { fields["primary_model"] = edit.primaryModel }
@@ -415,13 +452,17 @@ struct Draft: Equatable {
     }
     func switchHost(_ host: String) {
         guard !busy, loaded else { message = "配置尚未读取或正在忙碌，暂不能切换主模型"; return }
-        guard ["claude", "codex"].contains(host), host != draft.host else { return }
+        guard ["claude", "codex", "agy"].contains(host), host != draft.host else { return }
         hostDrafts = currentHosts
         guard let target = hostDrafts[host] else { return }
         draft.host = host; draft.primaryModel = target.primaryModel; draft.channel = target.channel
     }
     func menuHost(_ host: String) {
         guard !busy, loaded, !dirty else { message = "设置草稿尚未保存或配置尚未读取、忙碌"; return }
+        if host == "agy" && !saved.agyRelayError.isEmpty {
+            message = "AGY 接力配置无效，请先在设置中查看并修复 config.json"
+            return
+        }
         switchHost(host)
         guard dirty, draft.host == host else { return }
         if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.responsesBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {

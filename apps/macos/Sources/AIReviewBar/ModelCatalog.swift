@@ -6,6 +6,7 @@ struct ModelOption: Identifiable, Equatable {
 }
 
 enum ModelCatalog {
+    static let agyManaged = "由 AGY 设置管理（本应用不修改）"
     static let implementationGLM = "glm-5.3"
     static let claude = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
     private static let claudeAliases = ["Opus", "Sonnet", "Haiku", "Fable"]

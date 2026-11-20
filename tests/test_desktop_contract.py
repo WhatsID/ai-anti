@@ -489,6 +489,70 @@ class DesktopContract(unittest.TestCase):
         self.assertNotIn('Qoder 暂不支持 Claude 主模型。', view)
         self.assertIn('backend/dual_plan.py', (ROOT/'apps/macos/build-app.sh').read_text())
 
+    def test_agy_relay_matches_cli_validation(self):
+        import agy_relay as desktop
+        import ai_anti_config as cli
+        from config_store import StoreError
+
+        samples = [None, [], False, '', 1, {}, {'agy_relay': None}, {'agy_relay': []},
+                   {'agy_relay': False}, {'agy_relay': {}}, {'agy_relay': {'unknown': True}}]
+        routes = [None, [], False, {}, 'codex', {'provider': 'codex'},
+                  {'provider': 'codex', 'model': 'custom/model:tag', 'unknown': 1}]
+        routes.extend({'provider': provider, 'model': 'model'} for provider in (None, 'codex', 'claude', False, []))
+        routes.extend({'provider': 'codex', 'model': model} for model in (
+            None, '', False, [], 3, 'white space', 'a\tb', 'a\u2003b', 'a\u3000b', 'custom/model:tag'))
+        routes.extend({'provider': 'codex', 'model': 'model', 'effort': effort} for effort in (
+            None, *cli.EFFORTS, 'XHIGH', '', [], 2))
+        for route in ('review', 'implementation'):
+            samples.extend({'agy_relay': {route: value}} for value in routes)
+        mixed = (
+            {'agy_relay': {'review': {'model': 'valid'}, 'implementation': {'future': True}}},
+            {'agy_relay': {'review': {'future': True}, 'implementation': {'provider': 'codex', 'model': 'valid'}}},
+        )
+        samples.extend(mixed)
+        for expected_parser, actual_parser in ((cli.agy_review, desktop.parse_review),
+                                               (cli.agy_implementation, desktop.parse_implementation)):
+            for sample in samples:
+                with self.subTest(parser=expected_parser.__name__, sample=sample):
+                    try:
+                        expected = expected_parser(sample)
+                    except cli.ConfigError as expected_error:
+                        with self.assertRaises(StoreError) as actual_error:
+                            actual_parser(sample, StoreError)
+                        self.assertEqual(str(actual_error.exception), str(expected_error))
+                    else:
+                        self.assertEqual(actual_parser(sample, StoreError), expected)
+        self.assertEqual(desktop.parse_review(mixed[0], StoreError)['model'], 'valid')
+        self.assertEqual(desktop.parse_implementation(mixed[1], StoreError)['model'], 'valid')
+        for sample, bad in zip(mixed, ('implementation', 'review')):
+            with self.subTest(bad=bad), self.assertRaisesRegex(StoreError, rf'agy_relay\.{bad} has unknown keys'):
+                desktop.parse(sample, StoreError)
+
+    def test_agy_settings_view_and_package_contract(self):
+        sources = ROOT / 'apps/macos/Sources/AIReviewBar'
+        view = (sources / 'SettingsView.swift').read_text()
+        app = (sources / 'App.swift').read_text()
+        build = (ROOT / 'apps/macos/build-app.sh').read_text()
+        self.assertIn('Text("AGY").tag("agy")', view)
+        self.assertRegex(view, r'modelPicker\("主模型 ID"[^\n]+\n\s*\.disabled\(model\.draft\.host == "agy"\)')
+        self.assertIn('if model.draft.host == "agy" { return model.draft.agyReviewModel.isEmpty ? "CLI 默认" : model.draft.agyReviewModel }', view)
+        review = view.split('ServiceSettingsGroup("评审服务"', 1)[1].split('ServiceSettingsGroup("实施服务"', 1)[0]
+        implementation = view.split('ServiceSettingsGroup("实施服务"', 1)[1]
+        self.assertIn('if model.draft.host == "claude" || model.draft.host == "agy"', review)
+        self.assertIn('if model.draft.host != "agy"', review)
+        self.assertIn('custom: $customAgyReview', review)
+        self.assertIn('.disabled(isSolo || !model.draft.agyRelayError.isEmpty)', review)
+        self.assertIn('model.draft.host == "agy" ? .constant("codex")', implementation)
+        self.assertIn('custom: $customAgyImplementation', implementation)
+        self.assertIn('agyImplementationEffort', implementation)
+        self.assertRegex(view, r'Button\("测试评审模型…".*\.disabled\([^\n]+\|\| model\.draft\.host == "agy"\)')
+        self.assertIn('model.menuHost("agy")', app)
+        self.assertIn('if model.saved.host != "codex" { Button("Codex"', app)
+        self.assertIn('if model.saved.host != "agy" {', app)
+        self.assertIn('"$source_dir/backend/agy_relay.py"', build)
+        self.assertIn('<key>CFBundleVersion</key><string>11</string>', build)
+        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.3</string>', build)
+
     def test_mode_skill_scope_and_incident_notes(self):
         skill=(ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()
         self.assertIn('relay.default_mode',skill); self.assertIn('never a complete relay',skill)

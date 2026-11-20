@@ -9,6 +9,7 @@ import re
 import tempfile
 import tomllib
 from urllib.parse import urlsplit
+import agy_relay
 import model_services as services
 import dual_plan
 import implementation_models
@@ -22,6 +23,7 @@ def token_plan_model(value):
 
 
 MODES = ('solo', 'auto', 'rules', 'force')
+HOSTS = ('claude', 'codex', 'agy')
 CODEX_MODELS = ('gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna')
 class StoreError(Exception):
     pass
@@ -203,12 +205,13 @@ class Store:
         if not isinstance(channels, list) or not all(isinstance(x, str) for x in channels):
             raise StoreError('review.channels 必须为字符串列表')
         host = desktop.get('primary_host', 'claude')
-        if host not in ('claude', 'codex'):
-            raise StoreError('主导工具配置无效')
-        primary = claude.get('model', '') if host == 'claude' else codex.get('model', '')
+        if host not in HOSTS:
+            raise StoreError('主模型配置无效')
+        primary = claude.get('model', '') if host == 'claude' else codex.get('model', '') if host == 'codex' else ''
+        channel = (channels[0] if channels else 'codex') if host == 'claude' else relay.get('review_channel', 'claude') if host == 'codex' else 'codex'
         claude_provider, claude_model = claude_implementation(ai)
         values = dict(host=host, primary_model=primary, claude_model=claude.get('model', ''), codex_model=codex.get('model', ''),
-                      channel=(channels[0] if channels else 'codex') if host == 'claude' else relay.get('review_channel', 'claude'),
+                      channel=channel,
                       reviewer_model=review.get('codex_model', ''), qwen_model=qwen.get('model', ''),
                       token_plan_implementation_model=token_plan_model(relay.get('token_plan_implementation_model')), secondary_model=relay.get('secondary_model') or '', implementation_provider=implementation_provider(relay.get('implementation_provider')), mode=mode_value, base_url=qwen.get('base_url', ''),
                       responses_base_url=qwen.get('responses_base_url', ''), qwen_executor=relay.get('qwen_executor', 'claude'),
@@ -223,6 +226,16 @@ class Store:
         values['dual_plan'] = plan or dict(dual_plan.DEFAULTS)
         values['dual_plan_enabled'] = values['dual_plan']['enabled']
         values['dual_plan_error'] = plan_error
+        agy_error = ''
+        try:
+            agy_cfg = agy_relay.parse(ai, StoreError)
+        except StoreError as exc:
+            agy_error = str(exc)
+            agy_cfg = {'review': dict(agy_relay.REVIEW_DEFAULT), 'implementation': None}
+        values['agy_relay'] = agy_cfg
+        values['agy_review_model'] = agy_cfg['review']['model'] or ''
+        values['agy_implementation_model'] = (agy_cfg['implementation'] or {}).get('model') or ''
+        values['agy_relay_error'] = agy_error
         for key in ('primary_model', 'claude_model', 'codex_model', 'reviewer_model', 'qwen_model', 'secondary_model', 'base_url'):
             if not isinstance(values[key], str):
                 raise StoreError('配置字段类型无效：' + key)
@@ -303,7 +316,7 @@ class Store:
         if secret_actions is not None and not isinstance(secret_actions, dict):
             raise StoreError('凭证动作必须为对象')
         host = values.get('host')
-        if host not in ('claude', 'codex'):
+        if host not in HOSTS:
             raise StoreError('主模型无效')
         updates = values.get('host_updates', {})
         if not isinstance(updates, dict) or any(h not in ('claude', 'codex') for h in updates):
@@ -316,15 +329,29 @@ class Store:
                 model(fields['primary_model'], optional=True)
             if 'channel' in fields and fields['channel'] not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder')):
                 raise StoreError('支持 Claude→Codex、Claude→API、Codex→API/Qoder')
-        current = updates.setdefault(host, {})
-        for key in ('primary_model', 'channel'):
-            if key in current and current[key] != values.get(key):
-                raise StoreError('host_updates 与当前主模型字段冲突')
+        if host == 'agy':
+            if values.get('channel') != 'codex':
+                raise StoreError('AGY 主模型仅支持 Codex 评审')
+            if values.get('primary_model', '') != '':
+                raise StoreError('AGY 主模型 ID 由 AGY 设置管理，本应用不修改')
+        else:
+            current = updates.setdefault(host, {})
+            for key in ('primary_model', 'channel'):
+                if key in current and current[key] != values.get(key):
+                    raise StoreError('host_updates 与当前主模型字段冲突')
+            model(values.get('primary_model'), optional=True)
         if values.get('mode') not in MODES:
             raise StoreError('协作模式无效；合法值：' + '/'.join(MODES))
-        for key in ('primary_model', 'secondary_model', 'reviewer_model', 'qwen_model'):
+        for key in ('secondary_model', 'reviewer_model', 'qwen_model'):
             model(values.get(key), optional=True)
         ai = object_json(self.raw('ai')) if self.paths['ai'].exists() else {}
+        if host == 'agy' and lookup(ai, 'desktop.primary_host') != 'agy':
+            try:
+                agy_relay.parse(ai, StoreError)
+            except StoreError as exc:
+                raise StoreError('AGY 接力配置无效，不能切换为 AGY 主模型') from exc
+        if any(k in values for k in agy_relay.CHANGE_KEYS):
+            agy_relay.apply(ai, {k: values[k] for k in agy_relay.CHANGE_KEYS if k in values}, StoreError)
         account_config = accounts.normalize(values.get('token_plan_accounts', ai.get('token_plan_accounts')), self.credential_path, StoreError)
         accounts.normalize(ai.get('token_plan_accounts'), self.credential_path, StoreError)
         review, relay, qwen = section(ai, 'review'), section(ai, 'codex_relay'), section(section(ai, 'plugins'), 'qwen')
@@ -371,9 +398,10 @@ class Store:
         if not isinstance(channels, list) or not all(isinstance(c,str) for c in channels):
             raise StoreError('评审通道列表无效')
         original_channels = {'claude': channels[0] if channels else 'codex', 'codex': relay.get('review_channel', 'claude')}
-        if values.get('channel') != original_channels[host]:
-            current['channel'] = values.get('channel')
-        current['primary_model'] = values['primary_model']
+        if host != 'agy':
+            if values.get('channel') != original_channels[host]:
+                current['channel'] = values.get('channel')
+            current['primary_model'] = values['primary_model']
         for h, fields in updates.items():
             route = fields.get('channel', original_channels[h])
             if 'channel' in fields and route not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder')):
@@ -564,6 +592,9 @@ class Store:
             raise StoreError('恢复记录损坏') from None
         if outputs.get('ai') is not None:
             restored_ai = object_json(outputs['ai'])
+            restored_host = section(restored_ai, 'desktop').get('primary_host', 'claude')
+            if restored_host not in HOSTS:
+                raise StoreError('恢复记录主模型无效；请先完成一次新保存以刷新恢复点')
             claude_implementation(restored_ai)
             claude_qwen_executor(restored_ai)
             accounts.normalize(restored_ai.get('token_plan_accounts'), self.credential_path, StoreError)

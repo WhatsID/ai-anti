@@ -3,8 +3,10 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
+import stat
 import subprocess
 import sys
 import tempfile
@@ -35,7 +37,7 @@ def stop(signum=None, frame=None):
             pass
 
 def discover(name):
-    local = str(Path.home() / '.local/bin/qodercli') if name == 'qodercli' else None
+    local = str(Path.home() / '.local/bin' / name) if name in ('qodercli', 'agy') else None
     for candidate in ('/opt/homebrew/bin/' + name, '/usr/local/bin/' + name, shutil.which(name), local):
         if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
@@ -89,20 +91,53 @@ def run(argv, cwd, log, timeout=8, limit=2*1024*1024, env=None, idle_timeout=Non
                 pass
             _active = None
 
-def source_root(store, explicit=None):
+def source_root(store, explicit=None, host=None):
     candidates = []
     if explicit:
         candidates.append(Path(explicit).expanduser())
     else:
-        for base in (store.root / '.agents/skills/codex-relay/SKILL.md', store.root / '.claude/commands/codex-review.md'):
+        entries = [(store.root / '.agents/skills/codex-relay/SKILL.md', 4),
+                   (store.root / '.claude/commands/codex-review.md', 3)]
+        agy_plugin = (store.root / '.gemini/config/plugins/ai-anti/plugin.json', 3)
+        entries.insert(0 if host == 'agy' else len(entries), agy_plugin)
+        for base, depth in entries:
             if base.is_file():
                 resolved = base.resolve()
-                candidates.append(resolved.parents[4] if base.name == 'SKILL.md' else resolved.parents[3])
+                if len(resolved.parents) > depth:
+                    candidates.append(resolved.parents[depth])
     for root in candidates:
         if all((root / p).is_file() for p in ('core/REVIEW_PRINCIPLES.md', 'core/CLI_DISCIPLINE.md',
                 'adapters/codex/skills/claude-review/scripts/review.py', 'adapters/claude-code/commands/codex-review.md')):
             return root.resolve()
     raise CheckError('找不到已安装 ai-anti 源码；使用 --source-root 指定经过验证的 checkout')
+
+def agy_entry(store, root):
+    plugin = root / 'adapters/agy/plugin'
+    required = (plugin / 'plugin.json', plugin / 'rules/AGENTS.md',
+                plugin / 'skills/agy-relay/SKILL.md', plugin / 'skills/codex-review/SKILL.md',
+                root / 'adapters/agy/scripts/codex_review.py')
+    link = store.root / '.gemini/config/plugins/ai-anti'
+    try:
+        valid = link.is_symlink() and link.resolve() == plugin.resolve() and all(
+            stat.S_ISREG(path.lstat().st_mode) and os.access(path, os.R_OK) and path.read_text('utf-8').strip()
+            for path in required)
+    except (OSError, UnicodeError, RuntimeError):
+        valid = False
+    if not valid:
+        raise CheckError('AGY 插件未安装、入口不完整或指向其他 ai-anti 源码；请运行 install.sh --with-agy 或指定 --source-root')
+
+def agy_version(root, log):
+    match = re.search(r'\b([0-9]+\.[0-9]+\.[0-9]+)\b', log.read_text('utf-8', errors='replace'))
+    if not match:
+        raise CheckError('AGY CLI 版本输出无效')
+    version = match.group(1)
+    try:
+        tested = json.loads((root / 'compat.json').read_text('utf-8'))['tested']['agy']
+        if not isinstance(tested, list):
+            raise ValueError
+    except (OSError, ValueError, KeyError, TypeError) as exc:
+        raise CheckError('AGY 实测版本清单无效') from exc
+    return version, '在实测清单内' if version in tested else '未在实测清单'
 
 def review_budgets(store, root, timeout=None):
     """Load the validated checkout's parser, using the Store's config path."""
@@ -148,12 +183,46 @@ def result(kind, state, message, snapshot, actual='未知'):
     return dict(kind=kind, state=state, message=message, signature=snapshot['signature'], actual_model=actual,
                 checked_at=time.strftime('%Y-%m-%d %H:%M:%S'), timestamp=time.time())
 
+def local_agy(store, snapshot, source):
+    v = snapshot['values']
+    root = source_root(store, source, host='agy')
+    review_budgets(store, root)
+    agy_entry(store, root)
+    agy_impl = v['mode'] != 'solo'
+    if agy_impl and not v['agy_implementation_model']:
+        raise CheckError('AGY 实施未配置 agy_relay.implementation；实施阶段会停止')
+    names = {'agy'}
+    if agy_impl:
+        names.add('codex')
+    with tempfile.TemporaryDirectory(prefix='ai-anti-local-') as temp:
+        for name in names:
+            cli = discover(name)
+            log = Path(temp) / (name + '.log')
+            if run([cli, '--version'], temp, log) != 0:
+                raise CheckError(name + ' --version 失败；原始输出已隐藏')
+            if name == 'agy':
+                version, compatibility = agy_version(root, log)
+            else:
+                check_claude_codex_version(root, log)
+    if store.read()['signature'] != snapshot['signature']:
+        raise CheckError('检测中配置或凭证发生变化，结果作废')
+    route = ('Codex · ' + v['agy_implementation_model'] + ' · 关联工作树实施（AGY 接力）'
+             if agy_impl else '停用独立实施')
+    reviewer = v['agy_review_model'] or 'CLI 默认'
+    return result('local', 'passed', f'本地检查通过；实施：{route}；评审：Codex · {reviewer}；'
+                  f'AGY {version}（{compatibility}）；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
+
 def local(store, source=None):
     snapshot = store.read()
     v = snapshot['values']
+    if v['host'] == 'agy' and v['agy_relay_error']:
+        raise CheckError(v['agy_relay_error'])
     if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
     # Validation builds bytes but never writes them.
-    store.outputs(v, '')
+    check_values = {k: val for k, val in v.items() if k not in ('dual_plan_enabled', 'agy_review_model', 'agy_implementation_model')}
+    store.outputs(check_values, '')
+    if v['host'] == 'agy':
+        return local_agy(store, snapshot, source)
     claude_codex_implementation = v['host'] == 'claude' and v['mode'] != 'solo' and v['claude_implementation_provider'] == 'codex'
     try:
         root = source_root(store, source)
@@ -267,7 +336,10 @@ def real(store, source=None, timeout=None):
     v = snapshot['values']
     if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
     if v['mode'] == 'solo': raise CheckError('solo 模式停用交叉评审')
-    store.outputs(v, '')
+    if v['host'] == 'agy':
+        raise CheckError('AGY 主模型暂不支持桌面端合成评审检测；请使用「检查配置」或从 AGY 发起评审')
+    check_values = {k: val for k, val in v.items() if k not in ('dual_plan_enabled', 'agy_review_model', 'agy_implementation_model')}
+    store.outputs(check_values, '')
     root = source_root(store, source)
     timeout, idle_timeout = review_budgets(store, root, timeout)
     with tempfile.TemporaryDirectory(prefix='ai-anti-probe-') as temp:

@@ -11,6 +11,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import checks
 from config_store import Store, atomic
 ROOT = Path(__file__).resolve().parents[4]
+AGY_PLUGIN = Path('adapters/agy/plugin')
 
 class CheckTests(unittest.TestCase):
     def setUp(self):
@@ -28,6 +29,160 @@ class CheckTests(unittest.TestCase):
         v.update(host=host, channel='qwen', qwen_model='qwen-fixture', qwen_executor='codex', base_url='https://example.invalid/anthropic', responses_base_url='https://example.invalid/v1')
         store.save(v, snap['fingerprints'], 'fixture-token')
         return store
+
+    def agy_link(self, store, checkout):
+        link = store.root / '.gemini/config/plugins/ai-anti'
+        link.parent.mkdir(parents=True, exist_ok=True)
+        link.symlink_to(checkout / AGY_PLUGIN, target_is_directory=True)
+        return link
+
+    def test_agy_local_bin_discovery(self):
+        local = self.root / '.local/bin/agy'
+        local.parent.mkdir(parents=True)
+        local.write_text('#!/bin/sh\nexit 0\n')
+        local.chmod(0o700)
+        with patch('checks.shutil.which', return_value=None), patch('checks.Path.home', return_value=self.root), patch('checks.os.path.isfile', side_effect=lambda value: value == str(local)):
+            self.assertEqual(checks.discover('agy'), str(local))
+
+    def test_agy_source_discovery_prioritizes_plugin_checkout(self):
+        store = Store(self.root / 'home')
+        codex_checkout = self.root / 'codex-checkout'
+        for path in ('core/REVIEW_PRINCIPLES.md', 'core/CLI_DISCIPLINE.md',
+                     'adapters/codex/skills/claude-review/scripts/review.py',
+                     'adapters/claude-code/commands/codex-review.md',
+                     'adapters/codex/skills/codex-relay/SKILL.md'):
+            target = codex_checkout / path
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text('fixture')
+        codex_link = store.root / '.agents/skills/codex-relay'
+        codex_link.parent.mkdir(parents=True)
+        codex_link.symlink_to(codex_checkout / 'adapters/codex/skills/codex-relay')
+        self.agy_link(store, ROOT)
+        self.assertEqual(checks.source_root(store, host='agy'), ROOT)
+        self.assertEqual(checks.source_root(store, host='claude'), codex_checkout)
+        self.assertEqual(checks.source_root(store, explicit=codex_checkout, host='agy'), codex_checkout)
+        with self.assertRaisesRegex(checks.CheckError, '指向其他 ai-anti 源码'):
+            checks.agy_entry(store, codex_checkout)
+        codex_link.unlink()
+        self.assertEqual(checks.source_root(store, host='codex'), ROOT)
+
+    def test_agy_entry_requires_all_regular_files_and_exact_symlink(self):
+        store = Store(self.root / 'home')
+        checkout = self.root / 'checkout'
+        required = [checkout / AGY_PLUGIN / name for name in (
+            'plugin.json', 'rules/AGENTS.md', 'skills/agy-relay/SKILL.md', 'skills/codex-review/SKILL.md')]
+        required.append(checkout / 'adapters/agy/scripts/codex_review.py')
+        for path in required:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text('fixture')
+        link = self.agy_link(store, checkout)
+        checks.agy_entry(store, checkout)
+        for path in required:
+            with self.subTest(path=path):
+                path.unlink()
+                with self.assertRaisesRegex(checks.CheckError, '入口不完整'):
+                    checks.agy_entry(store, checkout)
+                path.write_text('fixture')
+        script = required[-1]
+        script.write_text(' \n')
+        with self.assertRaisesRegex(checks.CheckError, '入口不完整'):
+            checks.agy_entry(store, checkout)
+        script.unlink()
+        script.symlink_to(ROOT / 'adapters/agy/scripts/codex_review.py')
+        with self.assertRaisesRegex(checks.CheckError, '入口不完整'):
+            checks.agy_entry(store, checkout)
+        script.unlink()
+        script.write_text('fixture')
+        link.unlink()
+        link.symlink_to(self.root / 'missing')
+        with self.assertRaisesRegex(checks.CheckError, '入口不完整'):
+            checks.agy_entry(store, checkout)
+        link.unlink()
+        link.mkdir()
+        with self.assertRaisesRegex(checks.CheckError, '入口不完整'):
+            checks.agy_entry(store, checkout)
+
+    def test_agy_local_versions_and_routes(self):
+        store = Store(self.root / 'home')
+        self.agy_link(store, ROOT)
+        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"},"agy_relay":{"review":{"model":"review-id"},"implementation":{"provider":"codex","model":"impl-id"}}}')
+        version_logs = {'agy': 'Antigravity CLI 1.5.13\n', 'codex': 'codex-cli 0.169.1\n'}
+
+        def fake_run(argv, cwd, log):
+            self.assertEqual(argv[1:], ['--version'])
+            log.write_text(version_logs[argv[0]])
+            return 0
+
+        with patch('checks.discover', side_effect=lambda name: name) as discover, patch('checks.run', side_effect=fake_run):
+            reply = checks.local(store)
+            self.assertCountEqual([call.args[0] for call in discover.call_args_list], ['agy', 'codex'])
+            self.assertEqual(reply['state'], 'passed')
+            self.assertIn('实施：Codex · impl-id · 关联工作树实施（AGY 接力）', reply['message'])
+            self.assertIn('评审：Codex · review-id', reply['message'])
+            self.assertIn('AGY 1.5.13（在实测清单内）', reply['message'])
+            self.assertIn('评审检测不能替代实施证据', reply['message'])
+            version_logs['agy'] = 'Antigravity CLI 8.0.1\n'
+            self.assertIn('AGY 8.0.1（未在实测清单）', checks.local(store)['message'])
+            version_logs['agy'] = 'no version'
+            with self.assertRaisesRegex(checks.CheckError, 'AGY CLI 版本输出无效'):
+                checks.local(store)
+            version_logs['agy'] = '1.5.13'
+            version_logs['codex'] = 'codex-cli 0.163.0'
+            with self.assertRaisesRegex(checks.CheckError, r'Codex 实施要求 codex-cli 0\.169\.1'):
+                checks.local(store)
+
+    def test_agy_local_requires_implementation_only_outside_solo(self):
+        store = Store(self.root / 'home')
+        self.agy_link(store, ROOT)
+        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"}}')
+        with patch('checks.discover') as discover, patch('checks.run') as run:
+            with self.assertRaisesRegex(checks.CheckError, r'未配置 agy_relay\.implementation'):
+                checks.local(store)
+            discover.assert_not_called()
+            run.assert_not_called()
+        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"},"relay":{"default_mode":"solo"}}')
+
+        def version_only(argv, cwd, log):
+            self.assertEqual(argv, ['agy', '--version'])
+            log.write_text('1.5.13')
+            return 0
+
+        with patch('checks.discover', side_effect={'agy': 'agy'}.__getitem__) as discover, patch('checks.run', side_effect=version_only):
+            reply = checks.local(store)
+        discover.assert_called_once_with('agy')
+        self.assertIn('实施：停用独立实施；评审：Codex · CLI 默认', reply['message'])
+
+    def test_local_isolates_soft_errors_across_hosts(self):
+        store = Store(self.root / 'home')
+        self.agy_link(store, ROOT)
+        atomic(store.paths['ai'], b'{"agy_relay":{"review":{"future":true}}}')
+        with patch('checks.discover', return_value='/usr/bin/true'):
+            self.assertEqual(checks.local(store, ROOT)['state'], 'passed')
+        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"},"claude_relay":{"dual_plan":{"enabled":1}},"agy_relay":{"implementation":{"provider":"codex","model":"impl"}}}')
+        self.assertIn('claude_relay.dual_plan.enabled', store.read()['values']['dual_plan_error'])
+
+        def version_only(argv, cwd, log):
+            log.write_text({'agy': '1.5.13', 'codex': 'codex-cli 0.169.1'}[argv[0]])
+            return 0
+
+        with patch('checks.discover', side_effect=lambda name: name), patch('checks.run', side_effect=version_only):
+            self.assertEqual(checks.local(store)['state'], 'passed')
+        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"},"agy_relay":{"review":{"future":true}}}')
+        with patch('checks.discover') as discover, patch('checks.run') as run:
+            with self.assertRaisesRegex(checks.CheckError, r'agy_relay\.review has unknown keys'):
+                checks.local(store)
+            discover.assert_not_called()
+            run.assert_not_called()
+
+    def test_agy_real_rejects_before_source_or_cli(self):
+        store = Store(self.root / 'home')
+        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"}}')
+        with patch('checks.source_root') as source, patch('checks.discover') as discover, patch('checks.run') as run:
+            with self.assertRaisesRegex(checks.CheckError, 'AGY 主模型暂不支持桌面端合成评审检测'):
+                checks.real(store)
+            source.assert_not_called()
+            discover.assert_not_called()
+            run.assert_not_called()
 
     def test_implementation_checks_independent_token_profile(self):
         store = self.api_store()
@@ -201,6 +356,7 @@ class CheckTests(unittest.TestCase):
         snap = store.read(); v = snap['values']; v.update(host='codex', channel='qoder')
         store.save(v, snap['fingerprints'])
         data=json.loads(store.paths['ai'].read_text()); data['review'].update(timeout=321,idle_timeout=45)
+        data['agy_relay'] = {'review': {'future': True}}
         atomic(store.paths['ai'],json.dumps(data).encode())
         with patch('checks.discover', return_value='/usr/bin/true') as discover:
             checks.local(store, str(ROOT))

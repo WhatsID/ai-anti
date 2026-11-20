@@ -1,7 +1,7 @@
 # AIAnti 菜单栏应用
 
-首期为本机菜单栏与小设置窗口，管理配置和检测。业务评审继续从 Claude Code / Codex 发起。
-配置范围为 Claude→Codex、Claude→API、Codex→API/Qoder；既有 Codex→Claude 配置可读取，不加入首期新选列表。
+应用通过本机菜单栏与设置窗口管理配置和检测。业务评审从 Claude Code、Codex 或 AGY 发起。
+可配置 Claude→Codex、Claude→API、Codex→API/Qoder、AGY→Codex；既有 Codex→Claude 配置仍可读取。
 配置范围不等于全链验证：DeepSeek 完整流程和 Claude 普通登录完整链路仍待补验。
 路径级版本与证据见 [兼容性说明](../../docs/COMPATIBILITY.md)，数据外发、证据保留、凭证和恢复备份见
 [安全说明](../../SECURITY.md)。
@@ -18,7 +18,7 @@ bash apps/macos/build-app.sh /private/tmp/ai-anti-app-build
 自己本机使用不需要 iOS 式开发者账号；ad-hoc 签名不等于 Apple 公证，跨机器分发的签名/公证另行处理。
 应用不会登录自启，也不自动更新。Python 不打包在应用中；Finder 启动时按显式 `--python`、Homebrew
 常见绝对路径、PATH 候选顺序寻找并有界验证 Python 3.11+，缺失时设置窗口显示原因。
-Claude/Codex/Qoder（qodercli）CLI 的发现同样覆盖 `/opt/homebrew/bin` 和 `/usr/local/bin`。
+Claude、Codex、AGY（`agy`）和 Qoder（`qodercli`）CLI 的发现同样覆盖 `/opt/homebrew/bin` 和 `/usr/local/bin`；AGY 和 Qoder 还会查找 `~/.local/bin`。
 
 ```bash
 /private/tmp/ai-anti-app-build/AIAnti.app/Contents/MacOS/AIAnti \
@@ -29,8 +29,7 @@ Claude/Codex/Qoder（qodercli）CLI 的发现同样覆盖 `/opt/homebrew/bin` �
 
 `--settings` 直接打开设置；`--config-root` 是临时 HOME 语义根，覆盖 Claude、Codex、ai-anti、
 凭证查找、备份及锁路径。fixture 模式拒绝越界凭证路径，不能拿它指向真实 HOME。
-没有 `--source-root` 时从已安装的 codex-relay skill 或 Claude codex-review 命令解析只读源码 symlink，
-验证 core 和正式入口；不会把当前业务 cwd 当机制源码。移动/删除源码后检测需重新指定有效来源。
+没有 `--source-root` 时，从已安装的 codex-relay skill、Claude codex-review 命令或 AGY 插件链接定位只读源码并验证 core 和正式入口。AGY 主模型优先使用插件所指向的检出。移动或删除源码后，检测需重新指定有效来源。
 
 ## 配置与检测
 
@@ -44,7 +43,7 @@ Qwen 使用现有正式 `review.py diff --channel qwen` 全部门禁；Codex 需
 验证 JSON 最终 turn 与随机合成文件读取得到的值，不能只凭退出码为零。实际模型没有结构化证据则标“未知”。
 检测结果只保存在内存；重启归未检测，配置/端点/凭证文件 stat 改变后失效。
 
-评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen4-Max（qwen4-max）、Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3.1-Pro（kmodel_latest；CLI 明确准入 1.1.74 / 1.1.77，1.1.77 已完成正式 bug-review 实测；桌面路由仅离线验证）；Codex 评审目录含 gpt-6.2-sol、gpt-6.2-astra 等六个模型，支持 CLI 默认及自定义模型 ID；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Codex 服务仅 Claude 主模型可新选；既有其他路由保留显示。
+评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen4-Max（qwen4-max）、Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3.1-Pro（kmodel_latest；CLI 明确准入 1.1.74 / 1.1.77，1.1.77 已完成正式 bug-review 实测；桌面路由仅离线验证）；Codex 评审目录含 gpt-6.2-sol、gpt-6.2-astra 等六个模型，支持 CLI 默认及自定义模型 ID；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Claude 可选择 Codex 评审，AGY 固定使用 Codex 评审；既有其他路由保留显示。
 
 API 服务显示服务地址和“认证 / API 密钥”，CLI 服务使用现有 CLI 登录，仅 Qoder 显示“登录状态未检测”。AIAnti 设置窗口对两种主模型的 Qwen 评审统一使用 Codex CLI · Responses。Qwen 为首选或回退时，窗口显示「评审服务地址（Responses）」，Claude 主模型选 Codex 评审服务时隐藏该字段。任一主模型的通道含 Qwen 时，保存需要填写 Responses 地址，保存保留通道顺序。发现旧执行器配置时，保存后才能检测。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `plugins.qwen.claude_executor=claude`，Codex 主模型手动设置 `codex_relay.qwen_executor=claude`。再次用 AIAnti 保存会将两项都写回 `codex`。Responses 路径不支持评审已提交的 commit。 所有真实合成检测统一读取用户配置 `review.timeout` / `review.idle_timeout`（默认1800/900秒，上限3600/900秒，先到者终止）。Qwen/Qoder正式入口外围为总时间+60秒，界面3700秒覆盖最大3600+60并支持取消；极慢本地准备仍可能触发外围预算。Qoder保留2MiB输出上限，保留正式 runner 全部门禁和实际 Kimi-K3.1-Pro 证据校验。
 
@@ -60,7 +59,7 @@ model_services（version=1、active_api、固定 token_plan/custom_api profiles�
 
 旧配置首次加载只在内存迁移：所有非空端点必须精确等于已知千问默认地址才归千问，否则（包括空端点、混合地址、尾斜杠）归自定义 API 并保留模型/地址/路径顺序。只有迁移到的一个 profile 继承旧凭证键及路径；另一个没有 legacy 凭证。首次保存才持久化。未知版本、字段错误或 profile/投影冲突拒绝写入。冲突错误只列字段名；修复时备份配置，然后按 model_services.active_api 对应 profile 将 model、base_url、responses_base_url、credential_paths、credential_key 同步到 plugins.qwen，保留其他配置和密钥，再重新读取；不要删除配置或密钥来绕过错误。
 
-主模型选项决定编辑哪组默认配置；两组主模型 ID 和评审通道保留独立草稿，一次保存统一写入实际修改。空主模型表示保留已有默认值，空 Codex 评审模型表示 CLI 默认（真实检测需明确 ID）。协作模式仅接受 solo、auto、rules、force，旧 required 无效。用户当次指令 > 项目 .claude/relay-mode.local > 全局默认 > rules；solo 停用交叉评审及独立实施。菜单与检测要求先保存或取消草稿。
+主模型选项决定编辑哪组默认配置。主模型草稿各自保留，一次保存统一写入实际修改。Claude 和 Codex 的空主模型表示保留已有默认值。空 Codex 评审模型表示 CLI 默认（桌面真实 Codex 检测需明确 ID）。协作模式仅接受 solo、auto、rules、force，旧 required 无效。用户当次指令 > 项目 .claude/relay-mode.local > 全局默认 > rules；solo 停用交叉评审及独立实施。菜单与检测要求先保存或取消草稿。
 
 保存前重读指纹，与加载快照不符则要求重新读取配置；进程间锁、同目录原子替换、私有备份、最终回读。
 多文件失败仅回滚仍等于本次输出的文件，遇外部修改报告部分状态；不宣称与外部编辑器构成强事务。
@@ -68,6 +67,12 @@ model_services（version=1、active_api、固定 token_plan/custom_api profiles�
 `~/.config/ai-anti/desktop/`（目录0700、文件0600），备份可能含敏感配置，应按密钥保管。
 备份原字节以可逆 hex 保存，不是加密；后续保存替换上次备份，恢复成功删除，不定时清理。
 卸载脚本或删除应用不自动移除用户配置、密钥或备份，清理须自行明确选择；不要误删原配置或 secrets。
+
+### AGY 主模型
+
+在菜单栏或设置中选择 AGY，保存为 `desktop.primary_host = "agy"`。主模型 ID 由 AGY 设置管理。评审与独立实施固定使用 Codex，分别保存到 `agy_relay.review.model` 和 `agy_relay.implementation.model`。评审可选「CLI 默认」，实施需要指定模型，移除已保存的实施配置须手工编辑 `~/.config/ai-anti/config.json`。思考深度在设置中只读显示，保存模型时保留。配置段损坏时设置显示出错字段，修复并重新读取后可切入 AGY 或编辑接力模型。
+
+「检查配置」验证由 `install.sh --with-agy` 管理的插件链接及必需入口，并将 `agy --version` 与实测版本清单比对。清单外版本只提示。非 `solo` 还要求已配置实施模型，并按关联工作树实施入口的版本要求检查 Codex CLI。`solo` 仅检查 AGY。AGY 的桌面合成评审按钮停用，可从 AGY 发起评审。
 
 ## 离线测试
 
@@ -84,7 +89,7 @@ swiftc -parse-as-library -module-cache-path /private/tmp/ai-anti-app-checks/modu
 /private/tmp/ai-anti-app-checks/AppModelChecks
 ```
 
-覆盖模型目录、已保存未知 ID 保留、API 服务独立草稿切换与保存回读、静默检查不发布 UI、单请求门禁、前台优先、过期成功/失败、草稿保护、保存回读、取消与退出清理。
+覆盖模型目录、已保存未知 ID 保留、API 服务独立草稿切换与保存回读、AGY 首次切换与单字段保存、静默检查不发布 UI、单请求门禁、前台优先、过期成功/失败、草稿保护、保存回读、取消与退出清理。
 
 ```bash
 PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m unittest discover -s apps/macos/backend/tests -v

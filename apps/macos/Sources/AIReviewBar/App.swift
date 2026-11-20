@@ -38,11 +38,14 @@ import AppKit
             Text("当前配置：" + model.title)
             Menu("主模型") {
                 Button("Claude Code" + (model.saved.host == "claude" ? " ✓" : "")) { model.menuHost("claude") }; Button("Codex" + (model.saved.host == "codex" ? " ✓" : "")) { model.menuHost("codex") }
+                Button("AGY" + (model.saved.host == "agy" ? " ✓" : "")) { model.menuHost("agy") }
             }.disabled(model.busy || model.dirty || !model.loaded)
             Menu("评审服务") {
-                if model.saved.host == "claude" { Button("Codex" + (model.savedReviewFamily == "codex" ? " ✓" : "")) { model.menuChannel("codex") } }
-                Button("千问 Token Plan" + (model.savedReviewFamily == "token_plan" ? " ✓" : "")) { model.menuChannel("token_plan") }
-                Button("自定义 API" + (model.savedReviewFamily == "custom_api" ? " ✓" : "")) { model.menuChannel("custom_api") }
+                if model.saved.host != "codex" { Button("Codex" + (model.savedReviewFamily == "codex" ? " ✓" : "")) { model.menuChannel("codex") } }
+                if model.saved.host != "agy" {
+                    Button("千问 Token Plan" + (model.savedReviewFamily == "token_plan" ? " ✓" : "")) { model.menuChannel("token_plan") }
+                    Button("自定义 API" + (model.savedReviewFamily == "custom_api" ? " ✓" : "")) { model.menuChannel("custom_api") }
+                }
                 if model.saved.host == "codex" { Button("Qoder · Kimi-K3.1-Pro" + (model.savedReviewFamily == "qoder" ? " ✓" : "")) { model.menuChannel("qoder") } }
             }.disabled(model.saved.mode == "solo" || model.busy || model.dirty || !model.loaded)
             Menu("协作模式：" + model.saved.mode) {
