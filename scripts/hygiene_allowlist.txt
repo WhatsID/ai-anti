@@ -94,3 +94,6 @@ docs/PLUGINS.md:Token Plan
 
 # 正式产品名提交正文误报：仅放行 pre-push 虚拟文件中的这一完整原文，不通用放行产品名。
 .prepush-commit-messages.txt:新增独立 Token Plan 实施模型配置、模型元数据与界面选项，保持原有默认值。兼容 Claude 内置插件精确名称并保留来源与权限校验。
+# 提交 c7f3de3 正文同类误报：仅放行 pre-push 虚拟文件中的这两行完整原文，不通用放行产品名。
+.prepush-commit-messages.txt:- Token Plan 代理逐字放行 /v1/messages?beta=true 与 count_tokens?beta=true，修复
+.prepush-commit-messages.txt:- Codex 版本钉按路径拆分：只读评审与 Claude 侧实施加入 0.169.1，Token Plan 实施保持
