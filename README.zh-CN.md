@@ -239,7 +239,7 @@ Responses 只读入口的版本钉包含 Codex CLI 0.160.0、0.163.0、0.169.1�
 0.160.0 历史正式 plan 与真实 diff 已通过；0.163.0 于2026-10-20通过合成 plan 两阶段验收，未验证新版业务 diff 或用户级入口全流程；大增量仍可能长时间无输出，900/1800秒仅为本次通过的预算。
 详见[验证记录与边界](docs/COMPATIBILITY.md)。
 
-AIAnti 设置窗口对两种主模型的 Qwen 评审统一使用 Codex CLI · Responses。Qwen 为首选或回退时，窗口只显示「评审服务地址（Responses）」。任一主模型的通道含 Qwen 时，保存需要填写 Responses 地址，保存保留通道顺序。发现旧执行器配置时，保存后才能检测。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `plugins.qwen.claude_executor=claude`，Codex 主模型手动设置 `codex_relay.qwen_executor=claude`。再次用 AIAnti 保存会将两项都写回 `codex`。Responses 路径不支持评审已提交的 commit。
+AIAnti 设置窗口对两种主模型的 Qwen 评审统一使用 Codex CLI · Responses。Qwen 为首选或回退时，窗口显示「评审服务地址（Responses）」，Claude 主模型选 Codex 评审服务时隐藏该字段。任一主模型的通道含 Qwen 时，保存需要填写 Responses 地址，保存保留通道顺序。发现旧执行器配置时，保存后才能检测。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `plugins.qwen.claude_executor=claude`，Codex 主模型手动设置 `codex_relay.qwen_executor=claude`。再次用 AIAnti 保存会将两项都写回 `codex`。Responses 路径不支持评审已提交的 commit。
 
 Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独选择 Claude Code 实施代理或指定 Codex 模型 ID。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。合成检测使用相同可配置预算（默认总时间1800秒、空闲900秒），idle可能先终止。API输出仍限8MiB、Qoder仍限2MiB；正式runner外围为总时间+60秒，界面3700秒覆盖最大3600+60并保留取消。极慢本地准备仍可能触发外围预算。
 

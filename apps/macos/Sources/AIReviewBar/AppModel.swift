@@ -57,6 +57,20 @@ struct Draft: Equatable {
     var tokenPlanImplementationModel = ModelCatalog.implementationGLM
     var claudeImplementationProvider = "claude-agent"
     var claudeImplementationModel = ""
+    var dualPlanEnabled = false
+    var dualPlanPartner = "agy"
+    var dualPlanModel = ""
+    var dualPlanEffort = ""
+    var dualPlanSynthesizer = "claude"
+    var dualPlanOnFailure = "stop"
+    var dualPlanError = ""
+    var dualPlanDetail: String {
+        [dualPlanPartner == "agy" ? "AGY" : dualPlanPartner,
+         dualPlanModel.isEmpty ? "AGY 默认模型" : dualPlanModel,
+         dualPlanEffort.isEmpty ? "默认深度" : dualPlanEffort,
+         dualPlanSynthesizer == "agy" ? "AGY 综合" : "Claude 综合",
+         dualPlanOnFailure == "fallback" ? "允许时回退单方案" : "失败即停止"].joined(separator: " · ")
+    }
     var codexModels = ModelCatalog.codex
     var implementationEnabled: Bool { mode != "solo" }
     var implementationModelEnabled: Bool {
@@ -167,6 +181,9 @@ struct Draft: Equatable {
     }
     var reviewUsesQwen: Bool {
         draft.channel == "qwen" || (draft.host == "claude" && claudeFallbacks.contains("qwen"))
+    }
+    var showsReviewAddress: Bool {
+        reviewUsesQwen && !(draft.host == "claude" && draft.channel == "codex")
     }
     var reviewExecutorLabel: String {
         switch draft.channel {
@@ -325,6 +342,15 @@ struct Draft: Equatable {
         d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.tokenPlanImplementationModel = v["token_plan_implementation_model"] as? String ?? ModelCatalog.implementationGLM; d.implementationProvider = v["implementation_provider"] as? String ?? "codex"; d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url")
         d.claudeImplementationProvider = v["claude_implementation_provider"] as? String ?? "claude-agent"
         d.claudeImplementationModel = text("claude_implementation_model")
+        d.dualPlanEnabled = v["dual_plan_enabled"] as? Bool ?? false
+        d.dualPlanError = text("dual_plan_error")
+        if let plan = v["dual_plan"] as? [String: Any] {
+            d.dualPlanPartner = plan["partner"] as? String ?? "agy"
+            d.dualPlanModel = plan["model"] as? String ?? ""
+            d.dualPlanEffort = plan["effort"] as? String ?? ""
+            d.dualPlanSynthesizer = plan["synthesizer"] as? String ?? "claude"
+            d.dualPlanOnFailure = plan["on_failure"] as? String ?? "stop"
+        }
         d.codexModels = v["codex_models"] as? [String] ?? ModelCatalog.codex
         executorMigrationPending = text("qwen_executor") == "claude" || text("claude_qwen_executor") == "claude"
         saved = d; draft = d; loaded = true
@@ -360,6 +386,9 @@ struct Draft: Equatable {
             return
         }
         var values = draft.dictionary
+        if draft.dualPlanEnabled != saved.dualPlanEnabled {
+            values["dual_plan_enabled"] = draft.dualPlanEnabled
+        }
         if saved.claudeImplementationProvider == "claude-agent" && draft.claudeImplementationProvider == "claude-agent" {
             values.removeValue(forKey: "claude_implementation_provider")
         }

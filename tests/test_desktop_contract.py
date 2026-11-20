@@ -126,7 +126,7 @@ class DesktopContract(unittest.TestCase):
         for item in ('Picker("评审服务"', 'SecureField("API密钥"', 'Picker("评审执行器"', 'Picker("评审模型ID"', 'executorMigrationPending', 'selectedCredentialMessage', 'claudeFallbacks'):
             self.assertIn(item, review_body)
             self.assertNotIn(item, implementation_body)
-        self.assertIn('if model.reviewUsesQwen {', review_body)
+        self.assertRegex(review_body, r'if model\.showsReviewAddress \{\s*field\("评审服务地址（Responses）"\)')
         self.assertIn('TextField("评审服务地址（Responses）", text: $model.draft.responsesBaseURL)', review_body)
         executor_field = review_body.split('field("评审执行器")', 1)[1].split('field("评审模型ID")', 1)[0]
         self.assertIn('selection: .constant(model.draft.channel)', executor_field)
@@ -253,13 +253,17 @@ class DesktopContract(unittest.TestCase):
 
         # Ordinary save preserves claude_relay.dual_plan verbatim
         state = store.read()
-        store.save(dict(state['values'], mode='auto', reviewer_model='gpt-6.2-astra'), state['fingerprints'])
+        values = dict(state['values'], mode='auto', reviewer_model='gpt-6.2-astra')
+        values.pop('dual_plan_enabled')
+        store.save(values, state['fingerprints'])
         config = json.loads(store.raw('ai'))
         self.assertEqual(config['claude_relay']['dual_plan'], dual_plan)
 
         # Switching Claude implementation away from Codex removes implementation but keeps dual_plan
         state = store.read()
-        store.save(dict(state['values'], claude_implementation_provider='claude-agent'), state['fingerprints'])
+        values = dict(state['values'], claude_implementation_provider='claude-agent')
+        values.pop('dual_plan_enabled')
+        store.save(values, state['fingerprints'])
         config = json.loads(store.raw('ai'))
         self.assertNotIn('implementation', config['claude_relay'])
         self.assertEqual(config['claude_relay']['dual_plan'], dual_plan)
@@ -429,6 +433,45 @@ class DesktopContract(unittest.TestCase):
                         desktop.claude_qwen_executor(sample)
                 else:
                     self.assertEqual(desktop.claude_qwen_executor(sample), expected)
+
+    def test_dual_plan_matches_cli_validation(self):
+        import ai_anti_config as cli
+        import config_store as desktop
+        import dual_plan
+
+        samples = [None, [], {}, {'claude_relay': None}, {'claude_relay': []}, {'claude_relay': {}}]
+        samples.extend({'claude_relay': {'dual_plan': plan}} for plan in (
+            None, False, [], {}, {'enabled': True}, {'enabled': 1}, {'enabled': 'true'}, {'enabled': None},
+            {'partner': 'AGY'}, {'partner': None}, {'partner': ''}, {'model': ''}, {'model': 'a b'},
+            {'model': 'a\u2003b'}, {'model': 'a\u3000b'}, {'model': 3}, {'model': 'gemini-4-neon'},
+            {'effort': 'XHIGH'}, {'effort': 'max'}, {'effort': ''}, {'synthesizer': 'codex'},
+            {'synthesizer': 'agy'}, {'on_failure': 'fallback'}, {'on_failure': 'retry'},
+            {'enabled': True, 'future': {'k': 1}},
+        ))
+        for sample in samples:
+            with self.subTest(sample=sample):
+                try:
+                    expected = cli.claude_dual_plan(sample)
+                except cli.ConfigError as error:
+                    with self.assertRaises(desktop.StoreError) as caught:
+                        dual_plan.parse(sample, desktop.StoreError)
+                    for field in ('effort', 'model', 'enabled'):
+                        key = 'claude_relay.dual_plan.' + field
+                        if key in str(error):
+                            self.assertIn(key, str(caught.exception))
+                else:
+                    self.assertEqual(dual_plan.parse(sample, desktop.StoreError), expected)
+
+    def test_dual_plan_settings_view_and_package_contract(self):
+        view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
+        start = view.index('空主模型表示保留已有默认值')
+        end = view.index('ServiceSettingsGroup("评审服务"', start)
+        section = view[start:end]
+        self.assertRegex(section, r'if model\.draft\.host == "claude"\s*\{\s*field\("双方案规划"\)\s*\{')
+        self.assertNotIn('isSolo', section)
+        self.assertNotIn('if model.reviewUsesQwen {', view)
+        self.assertNotIn('Qoder 暂不支持 Claude 主模型。', view)
+        self.assertIn('backend/dual_plan.py', (ROOT/'apps/macos/build-app.sh').read_text())
 
     def test_mode_skill_scope_and_incident_notes(self):
         skill=(ROOT/'adapters/codex/skills/codex-relay/SKILL.md').read_text()

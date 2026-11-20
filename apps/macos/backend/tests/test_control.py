@@ -28,6 +28,79 @@ class StoreTests(unittest.TestCase):
         snap = self.snapshot(); v = snap['values']; v.update(changes)
         return self.store.save(v, snap['fingerprints'])
 
+    def test_dual_plan_absent_or_null_reads_disabled(self):
+        for data in ({}, {'claude_relay': None}, {'claude_relay': {}}, {'claude_relay': {'dual_plan': None}}):
+            with self.subTest(data=data):
+                self.write('ai', data)
+                values = self.values(mode='auto')
+                self.assertIs(values.pop('dual_plan_enabled'), False)
+                self.assertEqual(values['dual_plan_error'], '')
+                self.assertEqual(values['dual_plan'], {
+                    'enabled': False, 'partner': 'agy', 'model': None, 'effort': None,
+                    'synthesizer': 'claude', 'on_failure': 'stop',
+                })
+                self.store.save(values, self.snapshot()['fingerprints'])
+                config = json.loads(self.store.raw('ai'))
+                self.assertEqual('claude_relay' in config, 'claude_relay' in data)
+                self.assertEqual(config.get('claude_relay'), data.get('claude_relay'))
+
+    def test_invalid_dual_plan_allows_unrelated_save_and_byte_exact_restore(self):
+        self.write('claude', {'model': 'old-claude'})
+        self.write('codex', b'model = "old-codex"\n')
+        for key, invalid in (('enabled', 1), ('effort', 'XHIGH'), ('model', 'a b')):
+            with self.subTest(key=key):
+                plan = {'model': 'fixture-model', 'future': {'preserve': True}, key: invalid}
+                self.write('ai', {'claude_relay': {'dual_plan': plan}})
+                original = self.store.raw('ai')
+                state = self.snapshot()
+                values = dict(state['values'], mode='auto')
+                self.assertIs(values.pop('dual_plan_enabled'), False)
+                self.assertIn('claude_relay.dual_plan.' + key, values['dual_plan_error'])
+                saved = self.store.save(values, state['fingerprints'])
+                self.assertEqual(saved['values']['mode'], 'auto')
+                self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay']['dual_plan'], plan)
+                before = {k: self.store.raw(k) for k in ('ai', 'claude', 'codex')}
+                edits = {'claude': {'primary_model': 'new-claude'}, 'codex': {'primary_model': 'new-codex'}}
+                with self.assertRaisesRegex(StoreError, r'双方案配置无效.*claude_relay\.dual_plan'):
+                    self.store.save(dict(values, dual_plan_enabled=True, primary_model='new-claude', host_updates=edits),
+                                    saved['fingerprints'])
+                self.assertEqual({k: self.store.raw(k) for k in before}, before)
+                restored = self.store.restore(saved['fingerprints'])
+                self.assertEqual(self.store.raw('ai'), original)
+                self.assertIn('claude_relay.dual_plan.' + key, restored['values']['dual_plan_error'])
+
+    def test_enable_dual_plan_and_switch_to_claude_agent_in_one_save(self):
+        for relay in (None, {'implementation': {'provider': 'codex', 'model': 'fixture'}}):
+            with self.subTest(relay=relay):
+                self.write('ai', {} if relay is None else {'claude_relay': relay})
+                saved = self.save(claude_implementation_provider='claude-agent', dual_plan_enabled=True)
+                plan = {'enabled': True, 'partner': 'agy', 'model': None, 'effort': None,
+                        'synthesizer': 'claude', 'on_failure': 'stop'}
+                self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay'], {'dual_plan': plan})
+                self.assertEqual(saved['values']['dual_plan'], plan)
+                self.assertIs(saved['values']['dual_plan_enabled'], True)
+
+    def test_disabling_dual_plan_preserves_model_and_unknown_keys(self):
+        plan = {'enabled': True, 'model': 'custom-model', 'future': {'preserve': True}}
+        self.write('ai', {'claude_relay': {'dual_plan': plan}})
+        self.save(dual_plan_enabled=False)
+        self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay']['dual_plan'], dict(plan, enabled=False))
+
+    def test_switch_to_claude_agent_preserves_dual_plan_and_sibling(self):
+        plan = {'enabled': True, 'model': 'custom-model'}
+        kept = {'dual_plan': plan, 'future': {'preserve': True}}
+        self.write('ai', {'claude_relay': dict(kept, implementation={'provider': 'codex', 'model': 'fixture'})})
+        state = self.snapshot()
+        values = dict(state['values'], claude_implementation_provider='claude-agent')
+        values.pop('dual_plan_enabled')
+        self.store.save(values, state['fingerprints'])
+        self.assertEqual(json.loads(self.store.raw('ai')).get('claude_relay'), kept)
+
+    def test_dual_plan_save_rejects_non_boolean(self):
+        for invalid in (1, 'true', None):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(StoreError, 'dual_plan_enabled'):
+                self.save(dual_plan_enabled=invalid)
+
     def test_claude_implementation_and_executor_roundtrip_restore(self):
         route = {'provider': 'codex', 'model': 'gpt-6.2-sol', 'future': {'preserve': True}}
         data = {'claude_relay': {'implementation': route}, 'review': {'codex_model': 'gpt-6.2-astra'},

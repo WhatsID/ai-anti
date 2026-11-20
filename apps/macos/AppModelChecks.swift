@@ -18,6 +18,7 @@ import Combine
         let model = AppModel(foreground: front, background: back, automatic: false)
         let snapshot: [String: Any] = ["signature": "a", "fingerprints": ["fixture": "a"], "can_restore": true,
             "values": ["host": "codex", "channel": "qwen", "mode": "rules", "primary_model": "fixture", "qwen_executor": "codex", "claude_qwen_executor": "codex", "credential_present": true, "base_url": "https://fixture.invalid/anthropic", "responses_base_url": "https://fixture.invalid/v1"]]
+        checkDualPlanAndReviewAddress(snapshot)
         let checked: [String: Any] = ["signature": "a", "message": "本地检查通过", "checked_at": "fixture", "actual_model": "fake"]
         model.refresh(); assert(model.busy)
         front.complete(.success(snapshot)); assert(model.loaded && !model.busy)
@@ -489,5 +490,68 @@ import Combine
         assert(agentSave["claude_implementation_provider"] as? String == "claude-agent")
         claudeFront.complete(.failure(BridgeFailure(message: "fixture end")))
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
+    }
+
+    @MainActor static func checkDualPlanAndReviewAddress(_ snapshot: [String: Any]) {
+        let front = FakeClient()
+        let model = AppModel(foreground: front, background: FakeClient(), automatic: false)
+        model.refresh(); front.complete(.success(snapshot))
+        assert(!model.draft.dualPlanEnabled, "Old snapshots default to dual plan off")
+        assert(model.showsReviewAddress, "Codex→Qwen shows the Responses address")
+
+        var state = snapshot
+        var values = snapshot["values"] as! [String: Any]
+        values["host"] = "claude"; values["channel"] = "same-family"; values["fallback_channels"] = ["qwen"]
+        state["values"] = values
+        model.refresh(); front.complete(.success(state))
+        assert(model.showsReviewAddress, "Claude same-family with Qwen fallback shows the Responses address")
+
+        values["channel"] = "codex"; values["dual_plan_enabled"] = false
+        values["dual_plan"] = ["partner": "agy", "model": "gemini-4-neon", "effort": "xhigh",
+                               "synthesizer": "claude", "on_failure": "stop"]
+        state["values"] = values
+        model.refresh(); front.complete(.success(state))
+        assert(model.reviewUsesQwen && !model.showsReviewAddress, "Claude→Codex hides the address even with Qwen fallback")
+        model.switchReviewFamily("custom_api")
+        assert(model.draft.channel == "qwen" && model.showsReviewAddress, "Claude custom API shows the Responses address")
+        model.discard()
+
+        assert(!model.dirty && !model.draft.dualPlanEnabled && model.draft.dualPlanError.isEmpty)
+        assert(model.draft.dualPlanDetail == "AGY · gemini-4-neon · xhigh · Claude 综合 · 失败即停止")
+        model.draft.dualPlanEnabled = true
+        assert(model.dirty)
+        model.save()
+        let enabledSave = front.requests.last?["values"] as! [String: Any]
+        assert(enabledSave["dual_plan_enabled"] as? Bool == true)
+        assert(enabledSave["dual_plan"] == nil)
+        values["dual_plan_enabled"] = true
+        state["values"] = values
+        front.complete(.success(state))
+        assert(model.saved.dualPlanEnabled && !model.dirty)
+
+        model.draft.reviewerModel = "new-review-model"
+        model.save()
+        let ordinarySave = front.requests.last?["values"] as! [String: Any]
+        assert(ordinarySave["dual_plan_enabled"] == nil, "Saving unrelated changes must omit dual_plan_enabled")
+        front.complete(.success(state))
+        model.menuMode("solo")
+        let menuSave = front.requests.last?["values"] as! [String: Any]
+        assert(menuSave["mode"] as? String == "solo" && menuSave["dual_plan_enabled"] == nil,
+               "Menu mode saves must omit dual_plan_enabled")
+        front.complete(.success(state))
+
+        values["dual_plan"] = ["model": NSNull(), "effort": NSNull(), "synthesizer": "agy", "on_failure": "fallback"]
+        state["values"] = values
+        model.refresh(); front.complete(.success(state))
+        assert(model.draft.dualPlanModel.isEmpty && model.draft.dualPlanEffort.isEmpty)
+        assert(model.draft.dualPlanDetail == "AGY · AGY 默认模型 · 默认深度 · AGY 综合 · 允许时回退单方案")
+
+        let planError = "claude_relay.dual_plan.effort 无效"
+        values["dual_plan_enabled"] = false; values["dual_plan_error"] = planError
+        values.removeValue(forKey: "dual_plan")
+        state["values"] = values
+        model.refresh(); front.complete(.success(state))
+        assert(!model.draft.dualPlanEnabled && model.draft.dualPlanError == planError)
+        print("PASS: AppModel dual-plan load, summaries, save payloads, and review address visibility")
     }
 }

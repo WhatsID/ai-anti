@@ -199,6 +199,21 @@ struct SettingsView: View {
                         note("solo 同时停用交叉评审和独立实施。用户当次明确指令 > 项目 .claude/relay-mode.local > 全局默认 > rules。Codex 模式仅对已加载 codex-relay 的工作流生效。")
                         note("空主模型表示保留已有默认值；一次保存包含 Claude 与 Codex 两组已编辑字段。")
                     }.frame(maxWidth: .infinity, alignment: .leading)
+                    if model.draft.host == "claude" {
+                        field("双方案规划") {
+                            HStack(spacing: 6) {
+                                Toggle("双方案规划", isOn: $model.draft.dualPlanEnabled).toggleStyle(.switch)
+                                    .disabled(!model.draft.dualPlanError.isEmpty)
+                                if !model.draft.dualPlanError.isEmpty {
+                                    Text("：配置无效").foregroundStyle(.red)
+                                } else if model.draft.dualPlanEnabled {
+                                    Text("：" + model.draft.dualPlanDetail).lineLimit(1).truncationMode(.tail)
+                                }
+                            }
+                        }
+                        if !model.draft.dualPlanError.isEmpty { note(model.draft.dualPlanError) }
+                        note("协作方、模型、深度、综合方与失败处置请直接编辑 ~/.config/ai-anti/config.json 的 claude_relay.dual_plan，再重新读取配置。按 solo 运行的任务不做双方案；当次指令与会话内 /disable-dual-plan 优先。")
+                    }
                     ServiceSettingsGroup("评审服务", summary: SettingsSummary.review(model.draft), isExpanded: $reviewExpanded) {
                         Picker("评审服务", selection: Binding(get: { model.reviewFamily }, set: { model.switchReviewFamily($0) })) {
                             if model.draft.host == "claude" { Text("Codex").tag("codex") }
@@ -220,10 +235,13 @@ struct SettingsView: View {
                         } else {
                             modelPicker("评审模型", selection: model.draft.channel == "qoder" ? .constant("kmodel_latest") : $model.draft.qwenModel, options: model.reviewerOptions).disabled(isSolo || model.draft.channel == "qoder")
                         }
-                        if model.reviewUsesQwen {
+                        if model.showsReviewAddress {
                             field("评审服务地址（Responses）") {
                                 TextField("评审服务地址（Responses）", text: $model.draft.responsesBaseURL).disabled(isSolo)
                             }
+                        }
+                        if model.reviewUsesQwen && !model.showsReviewAddress && model.draft.responsesBaseURL.isEmpty {
+                            note("回退列表含 Qwen，保存需要 Responses 地址；请先切换到 API 评审服务填写，再切回 Codex。")
                         }
                         if model.draft.channel == "qwen" {
                             field(model.draft.activeAPI == "token_plan" ? "主账号API密钥" : "评审服务API密钥") {
@@ -238,7 +256,6 @@ struct SettingsView: View {
                         } else {
                             note(model.draft.channel == "qoder" ? "使用现有 Qoder CLI 登录；登录状态未检测。当前固定 Kimi-K3.1-Pro；仅支持 Codex 主模型。" : "使用现有 Codex CLI 登录；登录状态未检测。")
                         }
-                        if model.draft.host == "claude" { note("Qoder 暂不支持 Claude 主模型。") }
                         field("评审执行器") {
                             Picker("评审执行器", selection: .constant(model.draft.channel)) {
                                 Text(model.reviewExecutorLabel).tag(model.draft.channel)

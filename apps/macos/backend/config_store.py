@@ -10,6 +10,7 @@ import tempfile
 import tomllib
 from urllib.parse import urlsplit
 import model_services as services
+import dual_plan
 import implementation_models
 import token_plan_accounts as accounts
 
@@ -214,6 +215,14 @@ class Store:
                       claude_implementation_provider=claude_provider, claude_implementation_model=claude_model,
                       claude_qwen_executor=claude_qwen_executor(ai), codex_models=list(CODEX_MODELS),
                       credential_paths=qwen.get('credential_paths', ['~/.config/ai-anti/secrets.json']), fallback_channels=channels[1:], claude_channel=(channels[0] if channels else 'codex'), codex_channel=relay.get('review_channel', 'claude'))
+        plan, plan_error = None, ''
+        try:
+            plan = dual_plan.parse(ai, StoreError)
+        except StoreError as exc:
+            plan_error = str(exc)
+        values['dual_plan'] = plan or dict(dual_plan.DEFAULTS)
+        values['dual_plan_enabled'] = values['dual_plan']['enabled']
+        values['dual_plan_error'] = plan_error
         for key in ('primary_model', 'claude_model', 'codex_model', 'reviewer_model', 'qwen_model', 'secondary_model', 'base_url'):
             if not isinstance(values[key], str):
                 raise StoreError('配置字段类型无效：' + key)
@@ -355,6 +364,8 @@ class Store:
                 del claude_relay['implementation']
                 if not claude_relay:
                     del ai['claude_relay']
+        if 'dual_plan_enabled' in values:
+            dual_plan.apply_enabled(ai, values['dual_plan_enabled'], StoreError)
         urls = {key: endpoint(values.get(key, qwen.get(key, ''))) for key in ('base_url', 'responses_base_url')}
         channels = review.get('channels', ['codex', 'same-family'])
         if not isinstance(channels, list) or not all(isinstance(c,str) for c in channels):
