@@ -6,6 +6,7 @@ import io
 import json
 import os
 from pathlib import Path
+import shutil
 import signal
 import subprocess
 import sys
@@ -34,7 +35,7 @@ DEFAULTS = {'enabled': False, 'partner': 'claude', 'model': None, 'effort': None
             'synthesizer': 'agy', 'on_failure': 'stop'}
 
 FAKE_CLAUDE = r'''
-import json, os, stat, sys, time
+import json, os, stat, subprocess, sys, time
 from pathlib import Path
 
 assert sys.stdin.read() == ''
@@ -59,6 +60,16 @@ assert not os.path.lexists(cwd / '.git')
 ''' + SNAPSHOT_CAPTURE + r'''
 observed = {path.name: path.read_text() for path in cwd.glob('*.txt') if path.is_file()}
 (base / 'snapshot.json').write_text(json.dumps(observed))
+if fixture.get('rewrite_file'):
+    path, content = fixture['rewrite_file']
+    Path(path).write_text(content)
+if fixture.get('create_untracked_in'):
+    (Path(fixture['create_untracked_in']) / 'concurrent.txt').write_text('source only\n')
+if fixture.get('commit_in'):
+    subprocess.run(
+        ['git', '-C', fixture['commit_in'], '-c', 'user.name=Fixture', '-c', 'user.email=fixture.invalid',
+         'commit', '-qm', 'concurrent change', '--', 'tracked.txt'], check=True,
+    )
 if fixture.get('mutation'):
     target = cwd / 'tracked.txt'
     target.chmod(0o600)
@@ -190,9 +201,15 @@ class ClaudePlanTests(SnapshotOmissionsTests, unittest.TestCase):
         self.out = self.base / 'out'
         self.scenario()
 
-    def git(self, *args):
-        return subprocess.run(['git', '-C', str(self.repo), *args], env=self.env, stdin=subprocess.DEVNULL,
+    def git(self, *args, repo=None):
+        return subprocess.run(['git', '-C', str(repo or self.repo), *args], env=self.env, stdin=subprocess.DEVNULL,
                               capture_output=True, check=True, timeout=8).stdout
+
+    def planning_worktree(self, name='plan-worktree'):
+        head = self.git('rev-parse', '--verify', 'HEAD^{commit}').decode().strip()
+        worktree = self.base / name
+        self.git('worktree', 'add', '--detach', str(worktree), head)
+        return worktree, head
 
     def configure(self, **plan):
         self.config.write_text(json.dumps({'agy_relay': {'dual_plan': dict({'enabled': True}, **plan)}}))
@@ -201,8 +218,8 @@ class ClaudePlanTests(SnapshotOmissionsTests, unittest.TestCase):
         (self.base / 'scenario.json').write_text(json.dumps(
             dict({'events': [init(), terminal()] if events is None else events, 'help': FLAGS}, **fields)))
 
-    def command(self, *, stage='draft', trigger='config', extra=()):
-        return [sys.executable, str(ENTRY), '--repo', str(self.repo), '--out', str(self.out),
+    def command(self, *, stage='draft', trigger='config', extra=(), repo=None):
+        return [sys.executable, str(ENTRY), '--repo', str(repo or self.repo), '--out', str(self.out),
                 '--request', str(self.request), '--config', str(self.config), '--stage', stage,
                 '--trigger', trigger, *extra]
 
@@ -233,11 +250,11 @@ class ClaudePlanTests(SnapshotOmissionsTests, unittest.TestCase):
     def call_args(self):
         return [json.loads(line) for line in self.calls.read_text().splitlines()]
 
-    def run_snapshot(self, code, args=()):
+    def run_snapshot(self, code, args=(), **kwargs):
         capture = self.base / 'snapshot-tree.json'
         capture.unlink(missing_ok=True)
         with patch.dict(self.env, FIXTURE_SNAPSHOT_CAPTURE=str(capture)):
-            evidence = self.invoke(code, extra=args)
+            evidence = self.invoke(code, extra=args, **kwargs)
         if code:
             self.assertFalse(evidence['fallback_allowed'])
             return evidence, None
@@ -294,6 +311,225 @@ class ClaudePlanTests(SnapshotOmissionsTests, unittest.TestCase):
         self.out = self.base / 'synthesis-override'
         self.assertEqual(self.invoke(0, stage='synthesize', trigger='user-message', extra=inputs)['trigger'],
                          'user-message')
+
+    def test_source_repo_redacts_materials_and_omissions_in_both_stages(self):
+        source, _ = self.planning_worktree('source-worktree')
+        alias = self.base / 'source-alias'
+        alias.symlink_to(source, target_is_directory=True)
+        worktree, _ = self.planning_worktree()
+        redact_paths = f'{source}/tracked.txt {alias}/tracked.txt {worktree}/tracked.txt'
+        redacted = ' '.join(['<REPO_ROOT>/tracked.txt'] * 3)
+        claude, agy = self.base / 'claude.md', self.base / 'agy.md'
+        materials = {path: f'{path.stem}: {redact_paths}\n'.encode() for path in (self.request, claude, agy)}
+        for path, data in materials.items():
+            path.write_bytes(data)
+        excluded = f'fixture{source}/skip.txt'
+        (worktree / self.declaration).parent.mkdir()
+        (worktree / self.declaration).write_text(excluded + '\n')
+        (worktree / excluded).parent.mkdir(parents=True)
+        (worktree / excluded).write_text('omitted\n')
+        self.git('add', '--', self.declaration, excluded, repo=worktree)
+        self.configure(synthesizer='claude')
+        source_args = ('--source-repo', str(alias))
+        draft_args = ('--claude-draft', str(claude), '--agy-draft', str(agy))
+        for stage, paths, extra in (('draft', (self.request,), ()), ('synthesize', materials, draft_args)):
+            with self.subTest(stage=stage):
+                self.out = self.base / stage
+                evidence = self.invoke(0, stage=stage, repo=worktree, extra=source_args + extra)
+                self.assertEqual(evidence['repo'], str(worktree))
+                prompt = (self.out / 'prompt.txt').read_text()
+                self.assertEqual(self.call_args()[-1][1], prompt)
+                for path in paths:
+                    self.assertIn(f'{path.stem}: {redacted}\n', prompt)
+                self.assertIn('- Excluded path: "fixture<REPO_ROOT>/skip.txt"', prompt)
+                self.assertEqual(evidence['snapshot_omissions']['omitted_files'], 1)
+                for root in (source, alias, worktree):
+                    self.assertNotIn(str(root), prompt)
+                for path, data in materials.items():
+                    self.assertEqual(path.read_bytes(), data)
+
+    def test_full_options_without_source_repo_match_baseline_bytes(self):
+        self.configure(synthesizer='claude')
+        alias = self.base / 'repo-alias'
+        alias.symlink_to(self.repo, target_is_directory=True)
+        claude, agy = self.base / 'claude.md', self.base / 'agy.md'
+        claude.write_bytes(f'Claude saw {alias}/tracked.txt.\n'.encode())
+        agy.write_bytes(f'AGY saw {self.repo}/tracked.txt.\n'.encode())
+        materials = {path: path.read_bytes() for path in (self.request, claude, agy)}
+        self.write_snapshot_file(self.declaration, b'skip.txt\n')
+        self.write_snapshot_file('skip.txt', b'skip\n')
+        self.commit_snapshot_paths(self.declaration, 'skip.txt')
+        extras = ('--extra-file', 'approved.txt')
+        # Prompt hashes captured by running both stages at 688135a with these inputs.
+        for stage, digest in (
+            ('draft', 'f258075a80dbc85cf32a423bb7ca98d21da2d3b355c80b86a861641b1a1d01d9'),
+            ('synthesize', 'e88fd3366e8269fb86bc55c45c379514b385ecff503e4fab8680a2651a103dea'),
+        ):
+            with self.subTest(stage=stage):
+                self.out = self.base / stage
+                drafts = ('--claude-draft', str(claude), '--agy-draft', str(agy)) if stage == 'synthesize' else ()
+                _, snapshot = self.run_snapshot(0, extras + drafts, stage=stage, repo=alias)
+                self.assertEqual(hashlib.sha256((self.out / 'prompt.txt').read_bytes()).hexdigest(), digest)
+                self.assertEqual(set(snapshot), {'.ai-anti', self.declaration, 'safe-link', 'tracked.txt', 'approved.txt'})
+                self.assertEqual(snapshot['safe-link'], ['symlink', 'tracked.txt'])
+                self.assert_snapshot_bytes(snapshot, self.declaration, b'skip.txt\n')
+                self.assert_snapshot_bytes(snapshot, 'tracked.txt', b'working tree\n')
+                self.assert_snapshot_bytes(snapshot, 'approved.txt', b'approved\n')
+                for path, data in materials.items():
+                    self.assertEqual(path.read_bytes(), data)
+
+    def assert_rejected_before_cli(self, error, **kwargs):
+        summary = self.invoke(2, **kwargs)
+        self.assertIn(error, summary['error'])
+        self.assertFalse(self.out.exists())
+        self.assertFalse(self.calls.exists())
+
+    def test_source_repo_paths_in_instructions_are_rejected_before_cli(self):
+        worktree, _ = self.planning_worktree()
+        alias = self.base / 'source-alias'
+        alias.symlink_to(self.repo, target_is_directory=True)
+        instructions = self.base / 'instructions.md'
+        for root in (self.repo, alias):
+            with self.subTest(root=root):
+                instructions.write_text(f'Read {root}/tracked.txt.\n')
+                self.assert_rejected_before_cli(
+                    '--instructions must not expose real repository absolute path', repo=worktree,
+                    extra=('--source-repo', str(alias), '--instructions', str(instructions)),
+                )
+
+    def test_source_repo_must_be_a_worktree_root_of_the_same_repository(self):
+        worktree, _ = self.planning_worktree()
+        subdir = self.repo / 'nested'
+        subdir.mkdir()
+        foreign = self.base / 'foreign'
+        foreign.mkdir()
+        self.git('init', '-q', repo=foreign)
+        for root, error in (
+            (subdir, f'--source-repo must be the root of a Git working tree: {subdir}'),
+            (foreign, '--source-repo must share a Git common directory with --repo'),
+        ):
+            with self.subTest(root=root):
+                self.assert_rejected_before_cli(error, repo=worktree, extra=('--source-repo', str(root)))
+
+    def test_out_inside_source_repo_is_rejected_before_cli(self):
+        worktree, _ = self.planning_worktree()
+        self.out = self.repo / 'new' / 'out'
+        self.assert_rejected_before_cli('output directory must be outside the repository',
+                                        repo=worktree, extra=('--source-repo', str(self.repo)))
+        self.assertFalse(self.out.parent.exists())
+
+    def test_out_inside_case_variant_of_either_repo_is_rejected_before_cli(self):
+        worktree, _ = self.planning_worktree()
+        for root in (self.repo, worktree):
+            alias = root.with_name(root.name.upper())
+            if not alias.exists() or not os.path.samefile(alias, root):
+                self.skipTest('fixture volume is case-sensitive')
+            with self.subTest(root=root):
+                self.out = alias / 'new' / 'out'
+                self.assert_rejected_before_cli('output directory must be outside the repository',
+                                                repo=worktree, extra=('--source-repo', str(self.repo)))
+                self.assertFalse(self.out.parent.exists())
+
+    def test_git_path_segments_in_extra_files_are_rejected_before_cli(self):
+        worktree, _ = self.planning_worktree()
+        self.assertTrue((worktree / '.git').is_file())
+        nested_git = worktree / 'nested/.git'
+        nested_git.mkdir(parents=True)
+        (nested_git / 'config').write_text('fixture')
+        for path in ('.git', 'nested/.git/config'):
+            with self.subTest(path=path):
+                self.assert_rejected_before_cli('--extra-file must not contain a .git path segment',
+                                                repo=worktree, extra=('--extra-file', path))
+
+    def test_linked_worktree_isolates_same_status_tracked_edit(self):
+        worktree, head = self.planning_worktree()
+        tracked, mirror = self.repo / 'tracked.txt', worktree / 'tracked.txt'
+        dirty_a, dirty_b = b'confirmed A\n', b'concurrent B\n'
+        self.scenario(rewrite_file=(str(tracked), dirty_b.decode()))
+        for repo, extra, code in ((self.repo, (), 3), (worktree, ('--source-repo', str(self.repo)), 0)):
+            with self.subTest(repo=repo):
+                tracked.write_bytes(dirty_a)
+                before = self.git('status', '--porcelain=v1', '-z')
+                self.assertIn(b' M tracked.txt\0', before)
+                self.assertEqual(self.git('rev-parse', 'HEAD').decode().strip(), head)
+                shutil.copy2(tracked, mirror)
+                self.out = self.base / (repo.name + '-out')
+                evidence = self.invoke(code, repo=repo, extra=extra)
+                self.assertEqual(self.git('status', '--porcelain=v1', '-z'), before)
+                self.assertEqual(self.git('rev-parse', 'HEAD').decode().strip(), head)
+                self.assertEqual(tracked.read_bytes(), dirty_b)
+                self.assertEqual(json.loads((self.base / 'snapshot.json').read_text())['tracked.txt'].encode(), dirty_a)
+                if code == 3:
+                    self.assertEqual(evidence['status'], 'integrity_aborted')
+                    self.assertIn('tracked working-tree file contents changed', evidence['error'])
+                else:
+                    self.assertEqual(evidence['head'], head)
+                    self.assertEqual(mirror.read_bytes(), dirty_a)
+
+    def test_linked_worktree_isolates_source_untracked_file_and_commit(self):
+        worktree, head = self.planning_worktree()
+        self.scenario(create_untracked_in=str(self.repo), commit_in=str(self.repo))
+        evidence, snapshot = self.run_snapshot(0, ('--source-repo', str(self.repo)), repo=worktree)
+        self.assertEqual((evidence['status'], evidence['head']), ('completed', head))
+        self.assertNotEqual(self.git('rev-parse', 'HEAD').decode().strip(), head)
+        self.assertEqual(self.git('show', 'HEAD:tracked.txt'), b'working tree\n')
+        self.assertIn(b'?? concurrent.txt\0', self.git('status', '--porcelain=v1', '-z'))
+        self.assertNotIn('concurrent.txt', snapshot)
+        self.assert_snapshot_bytes(snapshot, 'tracked.txt', b'committed\n')
+
+    def test_linked_worktree_still_guards_tracked_file_request_staging_and_reads(self):
+        worktree, _ = self.planning_worktree()
+        tracked = worktree / 'tracked.txt'
+        tracked.write_text('dirty before invocation\n')
+        self.configure(on_failure='fallback')
+        for name, hooks, error in (
+            ('tracked', {'rewrite_file': (str(tracked), 'changed')}, 'tracked working-tree file contents changed'),
+            ('request', {'rewrite_file': (str(self.request), 'changed')}, 'input file contents changed'),
+            ('staging', {'mutation': True}, 'staging snapshot changed'),
+            ('source-read', {'events': [init(), assistant(tool('Read', {'file_path': str(self.repo / tracked.name)})),
+                                        tool_result(), terminal()]}, 'Read.file_path'),
+            ('plan-read', {'events': [init(), assistant(tool('Read', {'file_path': str(tracked)})),
+                                      tool_result(), terminal()]}, 'Read.file_path'),
+        ):
+            with self.subTest(name=name):
+                self.out = self.base / name
+                self.scenario(**hooks)
+                evidence = self.invoke(3, repo=worktree, extra=('--source-repo', str(self.repo)))
+                self.assertEqual((evidence['status'], evidence['on_failure']), ('integrity_aborted', 'fallback'))
+                self.assertIn(error, evidence['error'])
+
+    def test_linked_worktree_reuses_mirrored_inputs_for_both_stages(self):
+        self.configure(synthesizer='claude')
+        self.write_snapshot_file('.gitignore', b'.ai-anti/\n')
+        self.write_snapshot_file('large/corpus.txt', b'x' * 8192)
+        self.write_snapshot_file('deleted.txt', b'remove me\n')
+        self.commit_snapshot_paths('.gitignore', 'large', 'deleted.txt')
+        worktree, head = self.planning_worktree()
+        contents = {'tracked.txt': b'confirmed\n', 'added.txt': b'added\n',
+                    'approved.txt': b'approved\n', self.declaration: b'large/\n'}
+        for rel, data in contents.items():
+            target = worktree / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.write_snapshot_file(rel, data), target)
+        for repo in (self.repo, worktree):
+            self.git('add', '--', 'added.txt', repo=repo)
+            self.git('add', '-f', '--', self.declaration, repo=repo)
+            (repo / 'deleted.txt').unlink()
+        args = ('--source-repo', str(self.repo), '--extra-file', 'approved.txt', '--max-snapshot-bytes', '4096')
+        self.out = self.base / 'draft'
+        draft, snapshot = self.run_snapshot(0, args, repo=worktree)
+        claude = self.out / 'plan.md'
+        agy = self.base / 'agy.md'
+        agy.write_text('AGY draft\n')
+        self.out = self.base / 'synthesize'
+        synthesis, actual = self.run_snapshot(0, args + ('--claude-draft', str(claude), '--agy-draft', str(agy)),
+                                              stage='synthesize', repo=worktree)
+        self.assertEqual(actual, snapshot)
+        self.assertEqual(set(snapshot), {*contents, '.ai-anti', '.gitignore', 'safe-link'})
+        for rel, data in contents.items():
+            self.assert_snapshot_bytes(snapshot, rel, data)
+        for evidence in (draft, synthesis):
+            self.assertEqual((evidence['repo'], evidence['head']), (str(worktree), head))
 
     def test_user_message_override_still_validates_config(self):
         for data in ({}, {'agy_relay': {'dual_plan': {'enabled': False}}}):

@@ -1022,6 +1022,29 @@ class AgyPlanTests(SnapshotOmissionsTests, unittest.TestCase):
                 self.assertFalse(self.out.exists())
                 self.assert_no_cli()
 
+    def test_out_inside_source_repo_is_rejected_before_cli(self):
+        worktree, _ = self.planning_worktree()
+        out = self.repo / 'new' / 'out'
+        result = self.invoke(repo=worktree, out=out, extra_args=['--source-repo', str(self.repo)])
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('output directory must be outside the repository', result.stderr)
+        self.assertFalse(out.parent.exists())
+        self.assert_no_cli()
+
+    def test_out_inside_case_variant_of_either_repo_is_rejected_before_cli(self):
+        worktree, _ = self.planning_worktree()
+        for root in (self.repo, worktree):
+            alias = root.with_name(root.name.upper())
+            if not alias.exists() or not os.path.samefile(alias, root):
+                self.skipTest('fixture volume is case-sensitive')
+            with self.subTest(root=root):
+                out = alias / 'new' / 'out'
+                result = self.invoke(repo=worktree, out=out, extra_args=['--source-repo', str(self.repo)])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('output directory must be outside the repository', result.stderr)
+                self.assertFalse(out.parent.exists())
+                self.assert_no_cli()
+
     def test_git_path_segments_in_extra_files_are_rejected_before_cli(self):
         worktree, _ = self.planning_worktree()
         self.assertTrue((worktree / '.git').is_file())

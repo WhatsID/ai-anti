@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- AGY 主导双方案同步使用冻结提交的隔离规划工作树，Claude 规划封装器支持 `--source-repo` 脱敏，两侧拒绝将 `--out` 写入规划树或发起主树，包括大小写别名。
 - 兼容清单加入 AGY CLI 1.5.14：Claude 主导双方案 `draft`/`synthesize` 经隔离规划工作树真实验证；AGY 主导路径在该版本未验证。
 - Claude 主导双方案改用冻结提交的隔离工作树，隔离主树并发编辑；新增 `--source-repo` 脱敏发起工作树路径，双方案封装器拒绝 `--extra-file` 中的 `.git` 路径段。
 - 双方案规划支持使用受跟踪的 `.ai-anti/plan-snapshot-exclude` 排除路径，并可按项目或通过 `--max-file-bytes` 启用单文件上限。提示词与 manifest 记录快照省略情况。

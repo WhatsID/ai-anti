@@ -75,6 +75,34 @@ def run_git(repo, *args, binary=False):
     return result.stdout
 
 
+def validate_source_repo(supplied_repo, repo):
+    root_error = '--source-repo must be the root of a Git working tree'
+    try:
+        source_repo = supplied_repo.resolve(strict=True)
+        toplevel = run_git(source_repo, 'rev-parse', '--show-toplevel').removesuffix('\n')
+    except (ConfigError, OSError, RuntimeError) as exc:
+        raise ConfigError(f'{root_error}: {supplied_repo}') from exc
+    if source_repo != Path(toplevel).resolve():
+        raise ConfigError(f'{root_error}: {supplied_repo}')
+
+    common_dir_args = ('rev-parse', '--path-format=absolute', '--git-common-dir')
+    source_common = Path(run_git(source_repo, *common_dir_args).removesuffix('\n')).resolve()
+    repo_common = Path(run_git(repo, *common_dir_args).removesuffix('\n')).resolve()
+    if source_common != repo_common:
+        raise ConfigError('--source-repo must share a Git common directory with --repo')
+    return source_repo
+
+
+def ensure_out_outside(out, roots):
+    error = 'output directory must be outside the repository'
+    if any(out == root or root in out.parents for root in roots):
+        raise ConfigError(error)
+    # Existing ancestors can name the same directory with different casing.
+    for ancestor in (out, *out.parents):
+        if ancestor.exists() and any(os.path.samefile(ancestor, root) for root in roots):
+            raise ConfigError(error)
+
+
 def parse_porcelain_z(raw):
     """Parse `git status --porcelain=v1 -z` into [(x, y, path, orig_path), ...]."""
     entries = []
@@ -957,6 +985,7 @@ def omission_notice(omissions, byte_budget, repo_paths, warnings):
 def planning_parser(description):
     parser = argparse.ArgumentParser(description=description)
     parser.add_argument('--repo', required=True, type=Path)
+    parser.add_argument('--source-repo', type=Path, help='originating Git worktree root for path redaction')
     parser.add_argument('--stage', required=True, choices=('draft', 'synthesize'))
     parser.add_argument('--trigger', choices=('config', 'user-message'), default='config')
     parser.add_argument('--request', required=True, type=Path)

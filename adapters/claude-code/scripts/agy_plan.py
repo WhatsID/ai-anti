@@ -24,10 +24,10 @@ from ai_anti_config import ConfigError, claude_dual_plan, claude_dual_plan_defau
 from review_runner import RunError, execute
 from plan_staging import (
     CAP, MAX_PROMPT_BYTES, SEMVER_RE, assemble_prompt, capture_integrity_state, diff_integrity_state,
-    digest_bytes, digest_file, interruption_signal, is_cleanup_failure, make_tree_readonly,
+    digest_bytes, digest_file, ensure_out_outside, interruption_signal, is_cleanup_failure, make_tree_readonly,
     omission_notice, plan_overlay, planning_parser, prepare_materials, prepare_staging,
     remove_tree_readonly_safe, repo_path_variants, rewrite_staging_paths, run_git, validate_prompt,
-    write_json, write_plan_atomic,
+    validate_source_repo, write_json, write_plan_atomic,
 )
 
 
@@ -272,24 +272,6 @@ def check_compat_version(version):
     return []
 
 
-def validate_source_repo(supplied_repo, repo):
-    root_error = '--source-repo must be the root of a Git working tree'
-    try:
-        source_repo = supplied_repo.resolve(strict=True)
-        toplevel = run_git(source_repo, 'rev-parse', '--show-toplevel').removesuffix('\n')
-    except (ConfigError, OSError, RuntimeError) as exc:
-        raise ConfigError(f'{root_error}: {supplied_repo}') from exc
-    if source_repo != Path(toplevel).resolve():
-        raise ConfigError(f'{root_error}: {supplied_repo}')
-
-    common_dir_args = ('rev-parse', '--path-format=absolute', '--git-common-dir')
-    source_common = Path(run_git(source_repo, *common_dir_args).removesuffix('\n')).resolve()
-    repo_common = Path(run_git(repo, *common_dir_args).removesuffix('\n')).resolve()
-    if source_common != repo_common:
-        raise ConfigError('--source-repo must share a Git common directory with --repo')
-    return source_repo
-
-
 def run(args, signal_state=None):
     if signal_state is None:
         signal_state = {}
@@ -308,9 +290,11 @@ def run(args, signal_state=None):
     if repo != toplevel:
         raise ConfigError('repo must be the root of a Git repository')
     head = run_git(repo, 'rev-parse', '--verify', 'HEAD^{commit}').strip()
+    output_roots = [repo]
     source_paths = ()
     if args.source_repo is not None:
         source_repo = validate_source_repo(args.source_repo, repo)
+        output_roots.append(source_repo)
         source_paths = repo_path_variants(source_repo, args.source_repo)
     repo_paths = repo_path_variants(repo, args.repo, extra_paths=source_paths)
 
@@ -318,8 +302,7 @@ def run(args, signal_state=None):
     if args.out.exists() or args.out.is_symlink():
         raise ConfigError(f'output directory already exists: {args.out}')
     out = args.out.resolve()
-    if out == repo or repo in out.parents:
-        raise ConfigError('output directory must be outside the repository')
+    ensure_out_outside(out, output_roots)
 
     # 4. Load and validate config (fail closed)
     config = load(args.config)
@@ -596,9 +579,7 @@ def run(args, signal_state=None):
 
 
 def build_parser():
-    parser = planning_parser(__doc__)
-    parser.add_argument('--source-repo', type=Path, help='originating Git worktree root for path redaction')
-    return parser
+    return planning_parser(__doc__)
 
 
 def main():

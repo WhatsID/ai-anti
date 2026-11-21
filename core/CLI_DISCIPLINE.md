@@ -94,6 +94,7 @@ AGY 实施复用 `adapters/claude-code/scripts/codex_implement.py --relay agy`�
 `adapters/agy/scripts/claude_plan.py` 在独立只读快照中使用 `claude -p --safe-mode --restricted`，
 只开放 Read、Glob、Grep，不传 `--add-dir`。启动前检查所需参数，使用 stdin DEVNULL、
 脱敏后的提示词和完整文件日志，沿用共享总时长、空闲预算与 8 MiB 输出上限。
+双方案调用将 `--repo` 指向隔离规划工作树，`--source-repo` 指向发起主树并将其路径纳入脱敏。
 校验工具集合、读路径、实际模型和快照完整性。退出码 1 且证据同时允许降级、确认完整性时，
 才由调用方按 `on_failure` 决定。调用无自动重试。
 

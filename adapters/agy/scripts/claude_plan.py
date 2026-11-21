@@ -19,10 +19,10 @@ sys.path.insert(0, str(ROOT / 'adapters/codex/skills/claude-review/scripts'))
 from ai_anti_config import ConfigError, agy_dual_plan, agy_dual_plan_defaults, load, model_families, review_limits
 from plan_staging import (
     CAP, MAX_PROMPT_BYTES, SEMVER_RE, assemble_prompt,
-    capture_integrity_state, diff_integrity_state, digest_bytes, digest_file, git_env,
+    capture_integrity_state, diff_integrity_state, digest_bytes, digest_file, ensure_out_outside, git_env,
     interruption_signal, is_cleanup_failure, make_tree_readonly, omission_notice, plan_overlay,
     planning_parser, prepare_materials, prepare_staging, remove_tree_readonly_safe, repo_path_variants,
-    rewrite_staging_paths, run_git, validate_prompt, write_json, write_plan_atomic,
+    rewrite_staging_paths, run_git, validate_prompt, validate_source_repo, write_json, write_plan_atomic,
 )
 from review_runner import ALLOWED, MODEL_FAMILIES, RunError, blocks, builtin_plugins_only, execute
 
@@ -271,12 +271,18 @@ def resolve_run_paths(args):
     top = Path(run_git(repo, 'rev-parse', '--show-toplevel').strip()).resolve()
     if repo != top:
         raise ConfigError('repo must be the root of a Git repository')
+    output_roots = [repo]
+    source_paths = ()
+    if args.source_repo is not None:
+        source_repo = validate_source_repo(args.source_repo, repo)
+        output_roots.append(source_repo)
+        source_paths = repo_path_variants(source_repo, args.source_repo)
+    repo_paths = repo_path_variants(repo, args.repo, extra_paths=source_paths)
     if args.out.exists() or args.out.is_symlink():
         raise ConfigError(f'output directory already exists: {args.out}')
     out = args.out.resolve()
-    if out == repo or repo in out.parents:
-        raise ConfigError('output directory must be outside the repository')
-    return repo, out
+    ensure_out_outside(out, output_roots)
+    return repo, out, repo_paths
 
 
 def run(args, signal_state):
@@ -296,9 +302,11 @@ def run(args, signal_state):
                           + ', '.join(sorted(families)) + '), a full claude-... model ID, '
                           'or an alias registered in claude_review.model_families')
     timeout, idle = review_limits(config, args.timeout, args.idle_timeout)
-    repo, out = resolve_run_paths(args)
+    repo, out, repo_paths = resolve_run_paths(args)
     head = run_git(repo, 'rev-parse', '--verify', 'HEAD^{commit}').strip()
-    prompt, inputs, hashes, extras, warnings = prepare_materials(args, repo, partial(assemble_prompt, claude=True))
+    prompt, inputs, hashes, extras, warnings = prepare_materials(
+        args, repo, partial(assemble_prompt, claude=True), repo_paths=repo_paths,
+    )
     prompt_bytes = validate_prompt(prompt).encode('utf-8')
     if len(prompt_bytes) > MAX_PROMPT_BYTES:
         raise ConfigError(
@@ -309,7 +317,7 @@ def run(args, signal_state):
         repo, extras, args.max_snapshot_bytes, args.max_file_bytes, warnings=warnings,
     )
     prompt += omission_notice(
-        omissions, MAX_PROMPT_BYTES - len(prompt_bytes), repo_path_variants(repo, args.repo), warnings,
+        omissions, MAX_PROMPT_BYTES - len(prompt_bytes), repo_paths, warnings,
     )
     prompt_bytes = prompt.encode('utf-8')
 

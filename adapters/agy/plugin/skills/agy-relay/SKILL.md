@@ -47,15 +47,30 @@ git -C "$repo" status --short
   以重复的 `--extra-file` 参数在 draft 和 synthesize 两次调用复用。
 - **任务目录**：新任务使用 `<scratchpad>/dual-plan/<YYYYMMDD>-<slug>/`，重名追加
   `-2`、`-3` 等。每次调用都选从未存在的 `--out`，保留既有产物和失败证据。
+- **规划工作树**（防 2026-11-21 另一会话修改主树受跟踪文件，双方案 draft 运行约 9 分钟后以 `integrity_aborted` 作废）。
+  - 1a 后、1b 前在主树外建 `$task_dir/plan-worktree`（`$plan_worktree`），与各 `--out` 平级。先核实 `$task_dir` 归当前用户独占（0700），再按项目只读检出配方创建 detached 工作树。
+    无配方时用 `git -C "$repo" worktree add --detach "$plan_worktree" "$frozen_head"`。只用第 1 步冻结的 SHA，不建分支、临时提交，不装依赖或构建。双方案关闭或续接复用既有有效方案时跳过建树。
+  - 1a 确认纳入时，为必要未跟踪 `--extra-file` 和受跟踪的 `.ai-anti/plan-snapshot-exclude` 记录 SHA-256，脏目标文件沿用第 1 步指纹。只镜像这两类材料及已确认纳入任务的脏改动。
+    相对路径不得含 `..`、`.git` 或穿越软链父目录。复制当前字节和权限，软链按目标重建，删除及重命名旧路径同步移除。
+    按已核实的源索引重建成员资格，暂存新增与重命名新路径用 `git add`，忽略规则命中的已索引路径用 `git add -f`。额外文件限常规文件并保持未跟踪。R2 原件留在主树，经 `--request` 传入。
+  - 稀疏检出须让受跟踪的排除声明实际落盘，让本任务的脏受跟踪路径可被 Git 识别（纳入稀疏集合或清除 `skip-worktree` 位）。稀疏检出本身不限制 `git archive` 范围。
+  - 复制后先将规划树实际副本与第 1 步及 1a 确认的指纹逐项比对，防止确认后、复制前主树改写改变已确认输入。核对后在 `$task_dir/mirror.json` 记录各路径的 SHA-256、类型、权限及索引成员资格（软链哈希取链接目标，删除记缺失）。
+    每次调用前按冻结 SHA、`git status` 和镜像逐项核对规划树，任何不一致即停。draft 与 Claude synthesize 共用规划树及同一组 `extra_args`。AGY 起草与综合前先按冻结 SHA 和镜像核对事实。
+    按新基线重跑时新建不重名的规划树。第 4 步实施树独立创建。
+  - 成功或 `fallback` 落盘后，核实本次工作树登记、冻结 SHA 及无意外文件（含未跟踪与忽略文件），先普通 `git worktree remove`。
+    需强制回收时先逐项核对镜像且无额外内容，再用 `git worktree remove --force`。核对或回收失败则保留并报告路径与错误。保留任务证据。
+  - 创建或同步失败即停并报告，禁止在主树自动补跑。准备期部分建成的树同样按上述核对回收，无法证实只有本次内容时保留并报告实际路径与 stderr。
+    停止类失败保留规划树和实际 `--out` 并报告路径，中断先确认进程已停。1c 等待用户裁决期间保留现场，用户取消时按上述核对回收。
 - **1b**：AGY 依 `core/PLANNING.md` 独立起草，完成出稿前初步验证并附自查记录，
   写入任务目录的 `plan-agy.md`。同时后台启动并监控 Claude draft。可选
   `--instructions` 仅传部署规模、规划格式、共享方法要点及脱敏后的客观只读探针事实。
+  `--instructions` 中的主树与规划树路径须脱敏为 `<REPO_ROOT>`。
   AGY 草稿和设计倾向须留到综合阶段。执行器在独立起草时剥离 R2 非需求附录，并在只读快照内运行。
   配置触发时采用默认 `--trigger config`，用户当次消息启用时用 `--trigger user-message`，
   两种触发均须校验原配置。
 
   ```bash
-  python3 "$mechanism/adapters/agy/scripts/claude_plan.py" --repo "$repo" --stage draft \
+  python3 "$mechanism/adapters/agy/scripts/claude_plan.py" --repo "$plan_worktree" --source-repo "$repo" --stage draft \
     --request "$request" --out "$draft_out" "${extra_args[@]}" "${trigger_args[@]}" < /dev/null
   ```
 
@@ -67,7 +82,7 @@ git -C "$repo" status --short
   manifest/status、R1 与仓库事实。遇到实质产品方向或用户可见交互分歧，停下请用户裁决。
 
   ```bash
-  python3 "$mechanism/adapters/agy/scripts/claude_plan.py" --repo "$repo" --stage synthesize \
+  python3 "$mechanism/adapters/agy/scripts/claude_plan.py" --repo "$plan_worktree" --source-repo "$repo" --stage synthesize \
     --request "$request" --agy-draft "$task_dir/plan-agy.md" --claude-draft "$claude_draft" \
     --out "$synthesis_out" "${extra_args[@]}" "${trigger_args[@]}" < /dev/null
   ```
@@ -78,8 +93,10 @@ git -C "$repo" status --short
   退出码 2、3、130、143、其他非零码或无法核验证据时，停止并保留现场。
 - **落盘前复核**：AGY 对拟落盘综合稿或降级稿逐项检查关键设计与代码或探针证据，
   对照需求原文排查遗漏，检查 manifest 的警告，清理失效暂存引用。无法静态成立的主张
-  补最小反例或保留为待验证。在综合记录中保留验证证据和自查记录，再保存到第 1 步确定的
-  方案路径，随后进入第 2 步。
+  补最小反例或保留为待验证。在综合记录中保留验证证据和自查记录。写入前对照冻结 SHA 与镜像
+  核对主树漂移，另记落盘时观察到的主树 HEAD，保留第 1 步冻结记录供第 4 步核对，并按续接规则判定。
+  漂移涉及本任务路径时按最新主树修正行号与代码事实，实质范围变化停下请用户确认。
+  复核后保存到第 1 步确定的方案路径，随后进入第 2 步。
 
 ## 第 2 步：Codex 只读评审
 
@@ -152,7 +169,8 @@ AGY 对照候选基线独立读取全部增量。用 git status --short、git di
 汇报需求及第 3b 步裁决、逐条评审意见与分诊、实际通道和请求模型/深度、修改文件与理由、
 验证命令与结果、版本或工具警告、未覆盖项、产物路径，以及落回和工作树处置状态。
 双方案规划注明协作方 Claude、请求模型和实际模型（`actual_model`）、请求深度、综合方及
-实际调用目录。当次消息触发时注明来源。临时禁用或降级时注明原因，降级另注明失败阶段。
+实际调用目录。执行过双方案调用时同时注明规划工作树的处置状态，保留时附路径。
+当次消息触发时注明来源。临时禁用或降级时注明原因，降级另注明失败阶段。
 对用户跳过项或失败门禁明示证据。不得将安装探针、离线替身或 requested_only 记录当作
 真实新会话遵循、真实模型身份或终审通过的证据。
 

@@ -618,6 +618,15 @@ rmcp::transport::worker: worker quit with fatal: Transport channel closed, when 
   - `draft`：运行期间在发起仓库把已脏的受跟踪文件改成另一版本并提交一次；结果 `completed`、`integrity_ok=true`，约 89 秒，`manifest.head` 为冻结提交，草稿读到镜像版本，发起仓库的并发改动保留；需求原文中的发起仓库绝对路径被脱敏（`repo_path_redacted` 1 次）。随后按文档回收：普通回收因镜像改动被拒，核对镜像指纹后强制回收成功。
   - `synthesize`（`--trigger user-message`，配置综合方为 `claude`）：`completed`、`integrity_ok=true`，约 99 秒，提示词中不含发起仓库与规划工作树路径；综合稿按仓库事实指出草稿与当前文件不符。
   - 该版本的 AGY 主导路径（AGY → Codex 评审／实施、AGY → Claude 规划）未验证。
+- AGY 主导侧同步使用隔离规划工作树。两个封装器的离线测试覆盖 `--source-repo` 校验、
+  `--out` 仓库边界及大小写别名。替身 Claude 覆盖两阶段输入脱敏、隔离主树并发写入和提交、
+  快照复用与完整性检查。
+- 真实 Claude CLI 2.1.326 封装器验收（一次性本地仓库，`claude_plan.py --stage draft --trigger user-message`，
+  `--repo` 为规划工作树、`--source-repo` 为发起仓库，请求 `sonnet`／`low`，`actual_model=claude-sonnet-5-5`）：
+  - 运行期间把发起仓库已脏的受跟踪文件改成另一版本：`completed`、`integrity_ok=true`，约 15 秒，草稿读到镜像版本。
+  - 第二次运行期间同时改写该文件并在发起仓库提交一次：`completed`、`integrity_ok=true`，约 10 秒，`manifest.head` 为冻结提交。
+  - 两次提示词均不含发起仓库与规划工作树路径（`repo_path_redacted` 2 次）；随后普通回收因镜像改动被拒，核对镜像指纹后强制回收成功。
+  - 这只验证了封装器与 Claude CLI，AGY 1.5.14 的 AGY 主导路径（AGY 宿主遵循技能、建树与回收）仍未验证。
 
 ### AGY 暂存引用改写与历史耗时样本
 
