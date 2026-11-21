@@ -13,7 +13,7 @@ description: 在当前会话内临时禁用、恢复或查看 Claude 主导的 A
 - **无参数 / `session` / `off`**：在**当前会话内**临时禁用双方案规划（本会话后续进入接力第 1 步及小改就地升级补写新方案时，均改走 Claude 独立单方案，不调用 AGY）。确认已生效，并提醒该设置仅限本会话、不会改动全局配置。
 - **`once`**：仅对**下一次**接力出方案（含首次第 1 步或小改就地升级补写新方案）临时禁用双方案规划。**消费时点**：该次出方案一旦完成（方案落盘）或中止（错误/用户取消），`once` 状态即刻消费并自动恢复遵循全局配置 `claude_relay.dual_plan.enabled`。
 - **`on` / `reset`**：清除当前会话内的临时禁用状态，恢复遵循全局配置 `~/.config/ai-anti/config.json` 的 `claude_relay.dual_plan.enabled`（不会替全局开启未启用的配置）。
-- **`status`**：用已安装命令链接定位机制根，从 `adapters/codex/skills/claude-review/scripts` 导入 `ai_anti_config.load` 与 `claude_dual_plan` 读取 `~/.config/ai-anti/config.json`（配置 JSON 损坏或字段无效时立即报错停止，不静默回落默认）；汇报全局配置（`enabled`、`partner`、`model`、`effort`、`synthesizer`、`on_failure`）、当前会话覆写状态与实际生效结果。
+- **`status`**：用已安装命令链接定位机制根，从 `adapters/codex/skills/claude-review/scripts` 的 `ai_anti_config.py` 导入 `load` 与 `claude_dual_plan` 两个函数读取 `~/.config/ai-anti/config.json`（配置 JSON 损坏或字段无效时立即报错停止，不静默回落默认）；汇报全局配置（`enabled`、`partner`、`model`、`effort`、`synthesizer`、`on_failure`）、当前会话覆写状态与实际生效结果。
 - **其他任何参数**：**拒绝执行，不改变当前会话状态，不写任何文件**；报错并列出全部合法值：`无参数 / session / off / once / on / reset / status`。
 
 ### 长会话上下文压缩边界
