@@ -17,8 +17,8 @@
 | Qwen Responses 经 Codex | Codex 0.160.0 | 正式 plan 与历史 scoped diff；`actual_model=null`、`model_evidence=requested_only` |
 | Qwen Responses 经 Codex | Codex 0.163.0 | 2026-10-20 合成 plan 两阶段；未验证新版业务 diff 或用户级入口全流程，模型证据仍为 requested_only |
 | Codex → Qoder | Qoder CLI 1.1.74 / 1.1.77，实际 Kimi-K3.1-Pro | 1.1.77 正式 bug-review 双阶段；新版 plan/diff 仅离线覆盖，旧版历史证据归属见下文 |
-| Claude 主导 → AGY 双方案规划 | AGY CLI 1.5.13 | 本机 `--mode plan --sandbox --output-format stream-json` 探针、生产 `agy_plan.py` 的真实 `draft`/`synthesize` 探针均已完成，并有离线全路径单测。`model_evidence=requested_only` |
-| AGY 主导 → Codex → AGY | AGY CLI 1.5.13，Codex CLI 0.169.1 | 插件静态校验、隔离 `HOME` 发现、合成只读 `codex_review.py plan` 与 `codex_implement.py --relay agy` 真实探针均通过；AGY 新交互会话端到端遵循闭环待用户授权安装后验证。`model_evidence=requested_only` |
+| Claude 主导 → AGY 双方案规划 | AGY CLI 1.5.13 / 1.5.14 | 1.5.13：本机 `--mode plan --sandbox --output-format stream-json` 探针、生产 `agy_plan.py` 的真实 `draft`/`synthesize` 探针均已完成，并有离线全路径单测。1.5.14：经隔离规划工作树的真实 `draft`/`synthesize` 各一次（见下文「2026-11-21 隔离工作树规划」）。`model_evidence=requested_only` |
+| AGY 主导 → Codex → AGY | AGY CLI 1.5.13（1.5.14 未验证），Codex CLI 0.169.1 | 插件静态校验、隔离 `HOME` 发现、合成只读 `codex_review.py plan` 与 `codex_implement.py --relay agy` 真实探针均通过；AGY 新交互会话端到端遵循闭环待用户授权安装后验证。`model_evidence=requested_only` |
 | Codex 用户级入口 / 共享方法 | Codex 0.160.0 | 有限跨项目发现、隔离接力与方法样本；不是任意任务遵循保证 |
 | Claude 普通登录主导完整链路 | 待补验 | 历史 Login expired；Qwen bare 鉴权不能代替普通登录验收 |
 | DeepSeek | 历史端点 / 离线能力 | 不代表当前配置、桌面外部调用或完整接力通过 |
@@ -614,6 +614,10 @@ rmcp::transport::worker: worker quit with fatal: Transport channel closed, when 
   `--source-repo` 可选，须为同一 Git 仓库的工作树根。若提供，其物理与逻辑绝对路径也纳入提示词脱敏及 `--instructions` 拒绝检查。
 - 两个规划封装器都拒绝包含 `.git` 路径段的 `--extra-file`。快照和需求原件的完整性检查照常执行。
 - 临时 Git 工作树与替身 AGY 的离线测试覆盖主树并发写入和提交、规划材料篡改及路径脱敏。真实 AGY 端到端验收单独取证。
+- 真实 AGY CLI 1.5.14 端到端（一次性本地仓库，`--repo` 为规划工作树、`--source-repo` 为发起仓库）：
+  - `draft`：运行期间在发起仓库把已脏的受跟踪文件改成另一版本并提交一次；结果 `completed`、`integrity_ok=true`，约 89 秒，`manifest.head` 为冻结提交，草稿读到镜像版本，发起仓库的并发改动保留；需求原文中的发起仓库绝对路径被脱敏（`repo_path_redacted` 1 次）。随后按文档回收：普通回收因镜像改动被拒，核对镜像指纹后强制回收成功。
+  - `synthesize`（`--trigger user-message`，配置综合方为 `claude`）：`completed`、`integrity_ok=true`，约 99 秒，提示词中不含发起仓库与规划工作树路径；综合稿按仓库事实指出草稿与当前文件不符。
+  - 该版本的 AGY 主导路径（AGY → Codex 评审／实施、AGY → Claude 规划）未验证。
 
 ### AGY 暂存引用改写与历史耗时样本
 

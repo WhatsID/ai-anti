@@ -279,7 +279,7 @@ Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独
 |------|------------------|
 | Claude Code | 2.1.258、2.1.280（评审路径） |
 | Codex CLI | 0.156.0、0.160.0、0.163.0（已验路径不同） |
-| AGY CLI | 1.5.13（Claude 主导双方案 `draft`/`synthesize` 合成真实探针，边界见 `docs/COMPATIBILITY.md`） |
+| AGY CLI | 1.5.13、1.5.14（Claude 主导双方案 `draft`/`synthesize` 真实探针；AGY 主导路径仅在 1.5.13 验证，边界见 `docs/COMPATIBILITY.md`） |
 | 基础脚本 | Python 3.9+；macOS 已测，其他系统未验 |
 | 可选 macOS 菜单栏 | macOS 13+、Swift 6.1、Python 3.11+；ad-hoc 构建，非公证分发 |
 

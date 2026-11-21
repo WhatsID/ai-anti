@@ -341,7 +341,7 @@ Versions with path-scoped evidence:
 |-----------|------------------------------------|
 | Claude Code | 2.1.258, 2.1.280 (review paths) |
 | Codex CLI | 0.156.0, 0.160.0, 0.163.0 (different verified paths) |
-| AGY CLI | 1.5.13 (Claude-led dual-plan `draft`/`synthesize` synthetic live probes; see `docs/COMPATIBILITY.md`) |
+| AGY CLI | 1.5.13, 1.5.14 (Claude-led dual-plan `draft`/`synthesize` live probes; AGY-led paths verified on 1.5.13 only; see `docs/COMPATIBILITY.md`) |
 | Base scripts | Python 3.9+; macOS tested, other systems unverified |
 | Optional macOS menu bar app | macOS 13+, Swift 6.1, Python 3.11+; ad-hoc build, not notarized distribution |
 
