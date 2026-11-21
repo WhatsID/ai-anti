@@ -225,8 +225,9 @@ def validate_prompt(payload):
     return payload
 
 
-def repo_path_variants(repo, supplied_repo):
+def repo_path_variants(repo, supplied_repo, *, extra_paths=()):
     paths = {str(repo).rstrip('/'), os.path.abspath(supplied_repo).rstrip('/')}
+    paths.update(extra_paths)
     return sorted(paths - {''}, key=lambda path: (-len(path), path))
 
 
@@ -767,7 +768,7 @@ def assemble_prompt(stage, request_text, instructions_text=None, claude_draft=No
     return validate_prompt(payload)
 
 
-def prepare_materials(args, repo, assemble_prompt):
+def prepare_materials(args, repo, assemble_prompt, *, repo_paths=None):
     input_paths = {'request': args.request}
     req_raw, req_text = read_regular_utf8(args.request, '--request')
     claude_text = None
@@ -810,12 +811,14 @@ def prepare_materials(args, repo, assemble_prompt):
     seen_extra = set()
     for raw_extra in args.extra_file or []:
         rel = normalize_relpath(raw_extra, '--extra-file')
+        if '.git' in rel.split('/'):
+            raise ConfigError(f'--extra-file must not contain a .git path segment: {rel}')
         if rel not in seen_extra:
             seen_extra.add(rel)
             extra_files.append(rel)
 
     # Redact local paths before any material is passed to the provider.
-    paths = repo_path_variants(repo, args.repo)
+    paths = repo_path_variants(repo, args.repo) if repo_paths is None else repo_paths
     if instructions_text and any(path in instructions_text for path in paths):
         raise ConfigError('--instructions must not expose real repository absolute path')
     warnings = []

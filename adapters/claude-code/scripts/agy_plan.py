@@ -272,6 +272,24 @@ def check_compat_version(version):
     return []
 
 
+def validate_source_repo(supplied_repo, repo):
+    root_error = '--source-repo must be the root of a Git working tree'
+    try:
+        source_repo = supplied_repo.resolve(strict=True)
+        toplevel = run_git(source_repo, 'rev-parse', '--show-toplevel').removesuffix('\n')
+    except (ConfigError, OSError, RuntimeError) as exc:
+        raise ConfigError(f'{root_error}: {supplied_repo}') from exc
+    if source_repo != Path(toplevel).resolve():
+        raise ConfigError(f'{root_error}: {supplied_repo}')
+
+    common_dir_args = ('rev-parse', '--path-format=absolute', '--git-common-dir')
+    source_common = Path(run_git(source_repo, *common_dir_args).removesuffix('\n')).resolve()
+    repo_common = Path(run_git(repo, *common_dir_args).removesuffix('\n')).resolve()
+    if source_common != repo_common:
+        raise ConfigError('--source-repo must share a Git common directory with --repo')
+    return source_repo
+
+
 def run(args, signal_state=None):
     if signal_state is None:
         signal_state = {}
@@ -290,6 +308,11 @@ def run(args, signal_state=None):
     if repo != toplevel:
         raise ConfigError('repo must be the root of a Git repository')
     head = run_git(repo, 'rev-parse', '--verify', 'HEAD^{commit}').strip()
+    source_paths = ()
+    if args.source_repo is not None:
+        source_repo = validate_source_repo(args.source_repo, repo)
+        source_paths = repo_path_variants(source_repo, args.source_repo)
+    repo_paths = repo_path_variants(repo, args.repo, extra_paths=source_paths)
 
     # 3. Validate output directory (must not exist, must not be symlink, must be outside repo)
     if args.out.exists() or args.out.is_symlink():
@@ -310,7 +333,9 @@ def run(args, signal_state=None):
         dual = dual or claude_dual_plan_defaults()
     timeout, idle = review_limits(config, args.timeout, args.idle_timeout)
 
-    payload, input_paths, input_sha256, extra_files, warnings = prepare_materials(args, repo, assemble_prompt)
+    payload, input_paths, input_sha256, extra_files, warnings = prepare_materials(
+        args, repo, assemble_prompt, repo_paths=repo_paths,
+    )
     prompt_bytes = validate_prompt(payload).encode('utf-8')
     if len(prompt_bytes) > MAX_PROMPT_BYTES:
         raise ConfigError(
@@ -322,7 +347,7 @@ def run(args, signal_state=None):
         repo, extra_files, args.max_snapshot_bytes, args.max_file_bytes, warnings=warnings,
     )
     payload += omission_notice(
-        omissions, MAX_PROMPT_BYTES - len(prompt_bytes), repo_path_variants(repo, args.repo), warnings,
+        omissions, MAX_PROMPT_BYTES - len(prompt_bytes), repo_paths, warnings,
     )
     prompt_bytes = payload.encode('utf-8')
     print_arg = '--print=' + payload
@@ -571,7 +596,9 @@ def run(args, signal_state=None):
 
 
 def build_parser():
-    return planning_parser(__doc__)
+    parser = planning_parser(__doc__)
+    parser.add_argument('--source-repo', type=Path, help='originating Git worktree root for path redaction')
+    return parser
 
 
 def main():

@@ -608,6 +608,13 @@ rmcp::transport::worker: worker quit with fatal: Transport channel closed, when 
 - 两个规划封装器读取项目根目录受跟踪的 `.ai-anti/plan-snapshot-exclude`。声明为 UTF-8，最多 64 KiB，支持空行、`#` 注释、字面路径及以 `/` 结尾的目录前缀。默认关闭单文件上限，可用 `max-file-bytes <正整数>` 启用，`--max-file-bytes` 可覆盖声明。声明文件与显式 `--extra-file` 材料保留在快照中，仍计入 128 MiB 总预算。提示词空间不足以容纳省略概述时，封装器准备阶段以退出码 2 停止。
 - 两个规划封装器的离线测试使用真实临时 Git 仓库和替身 CLI，覆盖归档目录排除、追踪状态与声明校验、最终版本取舍、复制中的文件增长、120 KiB 提示词预算、`snapshot_omissions` 留证及默认快照回归。此验证覆盖快照准备与封装器的本地行为，真实模型对省略说明的遵循待验证。
 
+### 2026-11-21 隔离工作树规划
+
+- Claude 主导双方案将 `--repo` 指向冻结提交的规划工作树，draft 与 AGY synthesize 共用其镜像输入。
+  `--source-repo` 可选，须为同一 Git 仓库的工作树根。若提供，其物理与逻辑绝对路径也纳入提示词脱敏及 `--instructions` 拒绝检查。
+- 两个规划封装器都拒绝包含 `.git` 路径段的 `--extra-file`。快照和需求原件的完整性检查照常执行。
+- 临时 Git 工作树与替身 AGY 的离线测试覆盖主树并发写入和提交、规划材料篡改及路径脱敏。真实 AGY 端到端验收单独取证。
+
 ### AGY 暂存引用改写与历史耗时样本
 
 - 发布 `plan.md` 前，将已知暂存根内的 Markdown 链接改成仓库相对路径的行内代码，裸路径改成相对路径，裸暂存根改成 `<REPO_ROOT>`。匹配范围为 `out.resolve() / '.staging'`、其 realpath 与两者的 URL 编码形式，调用方的逻辑路径别名不在匹配范围内。manifest 的 `staging_path_rewritten` 告警记录次数，`plan_sha256` 对应发布内容，`plan.jsonl` 保留原始流。

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Claude 主导双方案改用冻结提交的隔离工作树，隔离主树并发编辑；新增 `--source-repo` 脱敏发起工作树路径，双方案封装器拒绝 `--extra-file` 中的 `.git` 路径段。
 - 双方案规划支持使用受跟踪的 `.ai-anti/plan-snapshot-exclude` 排除路径，并可按项目或通过 `--max-file-bytes` 启用单文件上限。提示词与 manifest 记录快照省略情况。
 
 ## 0.3.5 — 2026-11-21

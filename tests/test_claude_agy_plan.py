@@ -109,6 +109,13 @@ if os.environ.get('FIXTURE_CREATE_UNTRACKED_IN'):
     p = pathlib.Path(os.environ['FIXTURE_CREATE_UNTRACKED_IN']) / 'sneaky.txt'
     p.write_text('sneaky\\n', encoding='utf-8')
 
+if os.environ.get('FIXTURE_COMMIT_IN'):
+    subprocess.run(
+        ['git', '-C', os.environ['FIXTURE_COMMIT_IN'], '-c', 'user.email=fixture.invalid',
+         '-c', 'user.name=Fixture', 'commit', '-qm', 'concurrent change', '--', 'app.py'],
+        check=True,
+    )
+
 if os.environ.get('FIXTURE_MUTATE_STAGING'):
     os.chmod(cwd, os.stat(cwd).st_mode | 0o700)
     target = cwd / 'app.py'
@@ -634,6 +641,12 @@ class AgyPlanTests(SnapshotOmissionsTests, unittest.TestCase):
             text=True,
         ).stdout.strip()
 
+    def planning_worktree(self):
+        head = self.git('rev-parse', '--verify', 'HEAD^{commit}')
+        worktree = self.base / 'plan-worktree'
+        self.git('worktree', 'add', '--detach', str(worktree), head)
+        return worktree, head
+
     def write_config(self, **overrides):
         dual = {
             'enabled': True,
@@ -931,6 +944,94 @@ class AgyPlanTests(SnapshotOmissionsTests, unittest.TestCase):
                 self.assertEqual(manifest['limits']['max_prompt_bytes'], 122880)
                 for source, (path, _) in materials.items():
                     self.assertEqual(path.read_bytes(), pristine[source])
+
+    def test_source_repo_redacts_both_worktree_paths_without_changing_materials(self):
+        worktree, _ = self.planning_worktree()
+        self.write_config(synthesizer='agy')
+        source_alias = self.base / 'source-alias'
+        source_alias.symlink_to(self.repo, target_is_directory=True)
+        unrelated = self.base / 'unrelated'
+        materials = [
+            (self.request, f'Request: {self.repo}/app.py and {worktree}/app.py. Keep {unrelated}.\n',
+             f'Request: <REPO_ROOT>/app.py and <REPO_ROOT>/app.py. Keep {unrelated}.\n'),
+            (self.claude_draft, f'Claude: {source_alias}/app.py and {worktree}/app.py.\n',
+             'Claude: <REPO_ROOT>/app.py and <REPO_ROOT>/app.py.\n'),
+            (self.agy_draft, f'AGY: {self.repo}/app.py and {worktree}/app.py.\n',
+             'AGY: <REPO_ROOT>/app.py and <REPO_ROOT>/app.py.\n'),
+        ]
+        for path, body, _ in materials:
+            path.write_bytes(body.encode('utf-8'))
+
+        source_args = ['--source-repo', str(source_alias)]
+        for stage in ('draft', 'synthesize'):
+            with self.subTest(stage=stage):
+                out = self.base / stage
+                draft_args = self.synthesize_args() if stage == 'synthesize' else []
+                result = self.invoke(repo=worktree, stage=stage, out=out, extra_args=source_args + draft_args)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                prompt = (out / 'prompt.txt').read_text(encoding='utf-8')
+                argv = json.loads(self.calls.read_text().splitlines()[-1])['argv']
+                self.assertEqual(argv[-1], '--print=' + prompt)
+                present = materials if stage == 'synthesize' else materials[:1]
+                for _, _, expected in present:
+                    self.assertIn(expected, prompt)
+                for root in (self.repo, source_alias, worktree):
+                    self.assertNotIn(str(root), prompt)
+                for path, body, _ in materials:
+                    self.assertEqual(path.read_bytes(), body.encode('utf-8'))
+
+        result = self.invoke(repo=worktree, stage='synthesize', extra_args=self.synthesize_args())
+        self.assertEqual(result.returncode, 0, result.stderr)
+        prompt = (self.out / 'prompt.txt').read_text(encoding='utf-8')
+        for _, body, _ in materials:
+            self.assertIn(body.replace(str(worktree), '<REPO_ROOT>'), prompt)
+
+        # Either participant can be a linked worktree.
+        out = self.base / 'linked-source'
+        result = self.invoke(out=out, extra_args=['--source-repo', str(worktree)])
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn(materials[0][2], (out / 'prompt.txt').read_text(encoding='utf-8'))
+
+    def test_source_repo_paths_in_instructions_are_rejected_before_cli(self):
+        worktree, _ = self.planning_worktree()
+        source_alias = self.base / 'source-alias'
+        source_alias.symlink_to(self.repo, target_is_directory=True)
+        for root in (self.repo, source_alias):
+            with self.subTest(root=root):
+                self.instructions.write_text(f'Read {root}/app.py.\n', encoding='utf-8')
+                result = self.invoke(repo=worktree, extra_args=[
+                    '--source-repo', str(source_alias), '--instructions', str(self.instructions),
+                ])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('--instructions must not expose real repository absolute path', result.stderr)
+                self.assertFalse(self.out.exists())
+                self.assert_no_cli()
+
+    def test_source_repo_must_be_a_worktree_root_of_the_same_repository(self):
+        worktree, _ = self.planning_worktree()
+        foreign = self.base / 'foreign'
+        subprocess.run(['git', 'init', '-q', str(foreign)], check=True)
+        for root, error in (
+            (self.request.parent, 'must be the root of a Git working tree'),
+            (foreign, 'must share a Git common directory with --repo'),
+        ):
+            with self.subTest(root=root):
+                result = self.invoke(repo=worktree, extra_args=['--source-repo', str(root)])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('--source-repo ' + error, result.stderr)
+                self.assertFalse(self.out.exists())
+                self.assert_no_cli()
+
+    def test_git_path_segments_in_extra_files_are_rejected_before_cli(self):
+        worktree, _ = self.planning_worktree()
+        self.assertTrue((worktree / '.git').is_file())
+        for path in ('.git', 'nested/.git/config'):
+            with self.subTest(path=path):
+                result = self.invoke(repo=worktree, extra_args=['--extra-file', path])
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('--extra-file must not contain a .git path segment', result.stderr)
+                self.assertFalse(self.out.exists())
+                self.assert_no_cli()
 
     def test_instructions_and_residual_repository_path_are_rejected_before_cli(self):
         logical = self.base / 'logical-repo'
@@ -1286,6 +1387,156 @@ class AgyPlanTests(SnapshotOmissionsTests, unittest.TestCase):
         self.assertEqual((self.repo / 'extra.txt').read_bytes(), before_extra)
         self.assertEqual(self.request.read_bytes(), before_req)
         self.assertFalse((self.repo / 'deleted.txt').exists())
+
+    def test_linked_worktree_isolates_same_status_tracked_edit(self):
+        dirty_a = 'VERSION = "A"\n'
+        dirty_b = 'tampered outside staging\n'
+        source_app = self.repo / 'app.py'
+        worktree, head = self.planning_worktree()
+        plan_app = worktree / 'app.py'
+        hooks = {'FIXTURE_MUTATE_REAL_FILE': str(source_app)}
+        for repo, expected_code in ((self.repo, 3), (worktree, 0)):
+            with self.subTest(repo=repo):
+                source_app.write_text(dirty_a, encoding='utf-8')
+                self.assertEqual(
+                    subprocess.check_output(['git', '-C', str(self.repo), 'status', '--porcelain=v1', '-z']),
+                    b' M app.py\0',
+                )
+                out = self.base / ('out-' + repo.name)
+                args = []
+                if repo == worktree:
+                    shutil.copy2(source_app, plan_app)
+                    args = ['--source-repo', str(self.repo)]
+                result = self.invoke(repo=repo, out=out, extra_args=args, extra_env=hooks)
+                self.assertEqual(source_app.read_text(encoding='utf-8'), dirty_b)
+                self.assertEqual(
+                    subprocess.check_output(['git', '-C', str(self.repo), 'status', '--porcelain=v1', '-z']),
+                    b' M app.py\0',
+                )
+                self.assertEqual(self.git('rev-parse', 'HEAD'), head)
+                self.assertEqual(json.loads(self.calls.read_text().splitlines()[-1])['app_py'], dirty_a)
+                if expected_code == 3:
+                    manifest = self.assert_terminal(result, 3, 'integrity_aborted', 'integrity_violation', out)
+                    self.assertIn('tracked working-tree file contents changed', manifest['error'])
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    manifest = self.load_manifest(out)
+                    self.assertTrue(manifest['completed'])
+                    self.assertTrue(manifest['integrity_ok'])
+                    self.assertEqual(manifest['repo'], str(worktree))
+                    self.assertEqual(manifest['head'], head)
+                    self.assertEqual(plan_app.read_text(encoding='utf-8'), dirty_a)
+
+    def test_linked_worktree_isolates_source_untracked_file_and_commit(self):
+        worktree, head = self.planning_worktree()
+        baseline = (worktree / 'app.py').read_text(encoding='utf-8')
+        (self.repo / 'app.py').write_text('VERSION = "source only"\n', encoding='utf-8')
+        result = self.invoke(repo=worktree, extra_args=['--source-repo', str(self.repo)], extra_env={
+            'FIXTURE_CREATE_UNTRACKED_IN': str(self.repo),
+            'FIXTURE_COMMIT_IN': str(self.repo),
+        })
+        self.assertEqual(result.returncode, 0, result.stderr)
+        manifest = self.load_manifest()
+        self.assertTrue(manifest['completed'])
+        self.assertTrue(manifest['integrity_ok'])
+        self.assertEqual(manifest['head'], head)
+        self.assertNotEqual(self.git('rev-parse', 'HEAD'), head)
+        self.assertEqual(self.git('status', '--short'), '?? sneaky.txt')
+        call = json.loads(self.calls.read_text().splitlines()[-1])
+        self.assertEqual(call['app_py'], baseline)
+        self.assertNotIn('sneaky.txt', call['files'])
+
+    def test_linked_worktree_still_guards_tracked_file_request_and_staging(self):
+        self.write_config(on_failure='fallback')
+        worktree, _ = self.planning_worktree()
+        plan_app = worktree / 'app.py'
+        plan_app.write_text('VERSION = "dirty before invocation"\n', encoding='utf-8')
+        for name, hooks, error in (
+            ('tracked', {'FIXTURE_MUTATE_REAL_FILE': str(plan_app)}, 'tracked working-tree file contents changed'),
+            ('request', {'FIXTURE_MUTATE_REAL_FILE': str(self.request)}, 'input file contents changed'),
+            ('staging', {'FIXTURE_MUTATE_STAGING': '1'}, 'staging'),
+        ):
+            with self.subTest(name=name):
+                out = self.base / name
+                result = self.invoke(repo=worktree, out=out, extra_env=hooks,
+                                     extra_args=['--source-repo', str(self.repo)])
+                manifest = self.assert_terminal(result, 3, 'integrity_aborted', 'integrity_violation', out)
+                self.assertIn(error, manifest['error'])
+
+    def test_linked_worktree_reuses_mirrored_inputs_for_both_stages(self):
+        self.write_config(synthesizer='agy')
+        declaration = '.ai-anti/plan-snapshot-exclude'
+        self.write_snapshot_file('.gitignore', (self.repo / '.gitignore').read_bytes() + b'.ai-anti/\n')
+        self.write_snapshot_file('large/corpus.txt', b'x' * 8192)
+        self.commit_snapshot_paths('.gitignore', 'large/corpus.txt')
+        worktree, head = self.planning_worktree()
+        contents = {
+            'app.py': b'VERSION = "confirmed"\n',
+            'added.py': b'ADDED = True\n',
+            'extra.txt': b'untracked extra\n',
+            declaration: b'large/\n',
+        }
+        for rel, data in contents.items():
+            target = worktree / rel
+            target.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(self.write_snapshot_file(rel, data), target)
+        self.git('add', 'added.py')
+        self.git('add', '-f', '--', declaration)
+        (self.repo / 'deleted.txt').unlink()
+        (worktree / 'deleted.txt').unlink()
+        self.assertEqual(self.git('ls-files', '--error-unmatch', '--', 'added.py', declaration),
+                         f'{declaration}\nadded.py')
+        git = ['git', '-C', str(worktree)]
+        subprocess.run([*git, 'add', '--', 'added.py'], check=True)
+        indexed = subprocess.run([*git, 'add', '--', declaration], capture_output=True)
+        self.assertNotEqual(indexed.returncode, 0)
+        subprocess.run([*git, 'add', '-f', '--', declaration], check=True)
+        sha256 = hashlib.sha256(contents[declaration]).hexdigest()
+        for repo in (self.repo, worktree):
+            self.assertEqual(hashlib.sha256((repo / declaration).read_bytes()).hexdigest(), sha256)
+
+        args = ['--source-repo', str(self.repo), '--extra-file', 'extra.txt', '--max-snapshot-bytes', '4096']
+        draft = self.base / 'draft'
+        for stage in ('draft', 'synthesize'):
+            with self.subTest(stage=stage):
+                out = self.base / stage
+                stage_args = ['--claude-draft', str(self.claude_draft), '--agy-draft', str(draft / 'plan.md')]
+                result = self.invoke(repo=worktree, stage=stage, out=out,
+                                     extra_args=args + (stage_args if stage == 'synthesize' else []))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                manifest = self.load_manifest(out)
+                self.assertTrue(manifest['completed'])
+                self.assertTrue(manifest['integrity_ok'])
+                self.assertEqual(manifest['repo'], str(worktree))
+                self.assertEqual(manifest['head'], head)
+                call = json.loads(self.calls.read_text().splitlines()[-1])
+                self.assertEqual(call['app_py'], contents['app.py'].decode())
+                self.assertEqual(call['added_py'], contents['added.py'].decode())
+                self.assertEqual(call['extra_txt'], contents['extra.txt'].decode())
+                self.assertEqual(call['files'], sorted([*contents, '.gitignore']))
+
+    def test_sparse_linked_worktree_requires_exclusion_file_on_disk(self):
+        declaration = '.ai-anti/plan-snapshot-exclude'
+        self.write_snapshot_file(declaration, b'large/\n')
+        self.write_snapshot_file('large/corpus.txt', b'x' * 8192)
+        self.commit_snapshot_paths(declaration, 'large/corpus.txt')
+        worktree, _ = self.planning_worktree()
+        git = ['git', '-C', str(worktree)]
+        subprocess.run([*git, 'sparse-checkout', 'set', '--no-cone', '/*', '!/*/'], check=True)
+        self.assertFalse((worktree / declaration).exists())
+        args = ['--max-snapshot-bytes', '4096']
+        result = self.invoke(repo=worktree, extra_args=args)
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('exceeds --max-snapshot-bytes', result.stderr)
+        self.assertFalse(self.out.exists())
+        self.assert_no_cli()
+        subprocess.run([*git, 'sparse-checkout', 'add', f'/{declaration}'], check=True)
+        self.assertTrue((worktree / declaration).is_file())
+        result = self.invoke(repo=worktree, extra_args=args)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        call = json.loads(self.calls.read_text().splitlines()[-1])
+        self.assertIn(declaration, call['files'])
+        self.assertNotIn('large/corpus.txt', call['files'])
 
     def test_snapshot_size_limit_exceeded_exits_2_without_out_or_cli(self):
         result = self.invoke(stage='draft', extra_args=['--max-snapshot-bytes', '10'])
