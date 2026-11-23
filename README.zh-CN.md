@@ -2,180 +2,197 @@
 
 [English](README.md) | 简体中文
 
-面向 AI 编程开发过程中的跨模型对抗评审及分模型实施验收机制。
+AI 编程中的跨模型接力：一个模型出方案，**另一个**模型对抗性评审，独立的模型实施，主模型终审验收。
 
-## 是什么，为什么
+## 为什么
 
-AI 编程过程中，单个模型独立完成「出方案 → 写代码 → 验收」时，如果有单点盲区会一路带到结果里。ai-anti
-把这条链拆开，交给立场不同的角色接力：
+单个模型独立完成「出方案 → 写代码 → 验收」时，它自己的盲区会一路带进结果里。ai-anti 把这条链拆给
+立场不同的角色：
 
-1. **出方案**——主模型写方案文件，并逐字保留用户的原始需求；
-2. **交叉评审**——**另一个**模型只读仓库，对照原始需求审方案，立场是「这是别人做的方案，
-   挑会导致返工的硬伤」；
-3. **分诊**——主模型逐条裁决评审意见：必修、登记备查、或驳回，避免评审轮次膨胀；
-4. **实施**——由独立的模型按定稿方案实施落地；
-5. **终审**——主模型对照方案审查全部增量，再向用户汇报。
+1. **出方案**：主模型写方案文件，并逐字保留你的原始需求。
+2. **交叉评审**：另一个模型只读仓库，以「这是别人做的方案」的立场，挑会导致返工的硬伤。
+3. **分诊**：主模型逐条裁决评审意见，分为必修、登记或驳回，防止评审轮次膨胀。
+4. **实施**：独立的实施者按定稿方案落地。
+5. **终审**：主模型对照方案审查全部增量，再向你汇报。
 
-这套机制重点不是让更多模型分担更多工作，而是让立场不同的第二个模型去找第一个模型看不见的错，避免单模型盲区导致的隐藏问题或后期返工。
+重点不是让更多模型干更多活，而是让立场不同的第二个模型，找出第一个模型看不见的错。
 
-## 接力路径
+## 工作原理
 
-箭头左边是主导的主模型（出方案、裁决、终审），其余模型按路径承担评审或实施。
+### 安装器做了什么
 
-| 方向 | 入口 | 做什么 |
-|------|------|--------|
-| Claude → Codex | `/codex-review plan <方案.md>`、`/codex-review diff`、`/codex-implement <方案.md>` | Claude Code 主导。Codex 在只读沙箱里评审，可按配置用指定 Codex 模型在隔离工作树实施，也可在实施子代理因 API 故障受阻时接手 |
-| Codex → Claude/Qwen | `$claude-review`、`$codex-relay` | Codex 主导；选定的 Claude/Qwen 模型在 fail-closed 检查下评审方案（两阶段）或指定范围的 diff；`$codex-relay` 跑完整接力 |
-| AGY → Codex → AGY | `agy-relay`、`codex-review` | AGY 起草方案，可选 Claude 双方案规划。Codex 只读评审并在隔离工作树实施，AGY 独立审查增量并运行验收 |
+`install.sh` 不复制任何东西进你的项目，只在用户目录下放**符号链接**和**一小段导入**，全部指回本仓库：
 
-## 四级接力档位
+| 写到哪里 | 指向本仓库的 | 作用 |
+|----------|-------------|------|
+| `~/.claude/CLAUDE.md` 中的 `ai-anti` 标记块 | `@adapters/claude-code/CLAUDE.global.md` | Claude Code 每次开会话都会加载，规则由此进入上下文 |
+| `~/.claude/commands/*.md` | `adapters/claude-code/commands/` | 斜杠命令：`/codex-review`、`/codex-implement`、`/opus-review`、`/relay-mode`、`/bug-review`、`/disable-dual-plan` |
+| `~/.claude/agents/*.md` | `adapters/claude-code/agents/` | 子代理：`implementer`（实施）、`adversarial-reviewer`（同族评审） |
+| `${CODEX_HOME:-~/.codex}/AGENTS.md` 中的标记块（`--with-codex`） | `adapters/codex/AGENTS.global.md` | Codex 的用户级入口 |
+| `~/.agents/skills/*`（`--with-codex`） | `adapters/codex/skills/` | Codex 技能：`$claude-review`、`$codex-relay`、`$bug-review` |
+| `~/.gemini/config/plugins/ai-anti`（`--with-agy`） | `adapters/agy/plugin` | AGY 插件 |
 
-跨模型接力等级分为四级：
+每个安装对象都记在 `~/.claude/ai-anti.manifest.json`，卸载时只删登记过的对象。因为是符号链接，
+`git pull` 更新本仓库后，**新开的会话**就会用上新规则；移动仓库位置后要重跑一次 `./install.sh`。
 
-- solo：禁用接力机制，全部工作都由主模型完成
-- auto：rules 档规则只作参考，由主模型综合判断任务是否值得走流程。例如改动文件多但都是机械替换时可以直接做，只改一个文件但逻辑微妙时也可以主动走流程。更灵活，但结果取决于模型当时的判断
-- rules（默认）：按固定规则判断是否走接力流程——新功能或新模块、预计改动 3 个及以上会影响运行行为的生产文件（测试与纯文档不计）、跨两个及以上顶层子系统、需求含糊需要先定方案，满足任一即走流程，其余任务直接做。同样的改动总是同样处理，结果可预期
-- force：每个任务都强制走接力流程
+### 一次会话里如何生效
 
-无论 rules 还是 auto，命中高风险触发器的任务（接力机制自身的改动，以及项目在自己 `CLAUDE.md` 里列出的数据库结构、部署、认证等）都必须走流程；两者的区别只在一般任务上。
+以 Claude Code 为例：
 
-可信 skill / 项目规则已激活的同任务流程按阶段延续，rules/auto 不因后续一步很小而省略必需门禁，见 [Bug 三句用法](docs/BUG_REVIEW.md)。
+```text
+开新会话
+  └─ Claude Code 自动加载 ~/.claude/CLAUDE.md
+       └─ @import CLAUDE.global.md ── @import core/WORKFLOW_ENTRY.md
+            └─ 模型读到：协作模式、任务规模判定、高风险触发器
+你提需求
+  ├─ 小任务 → 直接做
+  └─ 大任务 / 高风险 → 走接力流程：
+       写方案 + 需求原文（.claude/plans/）
+         （启用双方案时：AGY 同时独立起草，再综合两稿）
+       → /codex-review：命令里的脚本读 ~/.config/ai-anti/config.json，
+         在只读沙箱里调用 codex exec，评审结果落到临时目录
+       → 主模型分诊 → 定稿与需求的差异逐项问你
+       → 实施：implementer 子代理，或 Codex 在隔离 git 工作树里实施
+       → 主模型终审增量 → 汇报（提交需你明确说「提交」）
+```
 
-仅接受 `solo`、`auto`、`rules`、`force`；旧值 `required` 无效，不作兼容。
+Codex 的链路与之对应：`AGENTS.md` 标记块 → `AGENTS.global.md` → 同一份 `core/WORKFLOW_ENTRY.md`。
+需要接力时，再读取 `codex-relay` 或 `claude-review` 技能，由技能里的脚本调用 Claude 或 Qwen 评审。
+AGY 由插件加载同一入口。
 
-可以使用 `/relay-mode` 命令在四种模式之间进行切换。
+### 两层约束
 
-## 接力要点
+- **规则层**（`core/`、`adapters/` 下的 Markdown）：告诉模型什么时候走流程、每一步怎么做。这是模型
+  读了以后遵循的**软约束**，安装成功不等于模型一定照做。
+- **脚本层**（`adapters/**/scripts/*.py`）：真正调用外部 CLI 的封装器。负责只读沙箱、隔离工作树、
+  CLI 版本钉、超时和输出上限、事件流校验，遇到异常一律 fail closed。这一层是**硬约束**，不依赖
+  模型自觉。
 
-- **五步接力**：出方案（用户需求逐字存入同名 `.request.md`）→ 跨模型评审 → 分诊 → 独立实施者
-  实施 → 主模型终审增量并汇报。实施前，定稿方案与原始需求之间凡用户可见的差异，逐项请用户确认。
-- **分诊**：每条意见必须给出具体失败场景（输入或状态 → 错误结果）。只有导致数据丢失或不可逆
-  损坏、让本次需求核心功能不工作、或让未授权的人拿到数据或获得访问，才算**必修**；其余**登记**
-  即算关闭；说不出具体场景的**驳回**并记理由。
-- **两轮上限**：采纳必修项不自动复审；只有架构被推翻或出现 blocker 级新事实才开第二轮。两轮后
-  仍有未解决的必修项，转用户裁决。
-- **降级顺序**：按配置顺序逐档尝试（默认 Codex → 同族）。每档只报告本档结果，由主模型进入
-  下一档；本会话已确认额度耗尽的档不再重试。全部不可用时，普通任务注明「未经交叉评审」继续，
-  高风险任务停下问用户。
-- **同族评审补偿**：同族评审是受限例外，只在全部跨模型通道不可用时启用，且必须同时做到空上下文、
-  固定对抗立场、3–5 个不同视角、自跑只读探针、每条 blocker 独立复核，缺一不算通过。
+项目不需要复制任何文件。项目可以在自己的 `CLAUDE.md` 里覆写参数，例如业务高风险触发器、评审意见
+登记去处、部署规模；可覆写项见 `adapters/claude-code/CLAUDE.global.md` 的覆写表。
 
-## 安装使用
+## 接力流程
 
-第一次使用？先看 [最小上手指南](docs/QUICKSTART.zh-CN.md)：选路径、安装、检查入口、完成小任务及排查。
+| 主导 | 入口 | 评审与实施 |
+|------|------|------------|
+| Claude Code | `/codex-review plan <方案.md>`、`/codex-review diff` | Codex 在只读沙箱评审；实施由 implementer 子代理负责，也可配置 Codex 在隔离工作树实施 |
+| Codex | `$claude-review`、`$codex-relay` | Claude 或 Qwen 评审；`$codex-relay` 跑完整接力 |
+| AGY | `agy-relay`、`codex-review` | Codex 评审并在隔离工作树实施，AGY 独立终审 |
 
-前置条件：基础脚本需要 macOS、Python 3.9+；按所选路径准备相应的
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code) 和/或
-[Codex CLI](https://github.com/openai/codex)，以及所需登录或 API 凭证。
-Qwen Responses 评审需要 Codex 与所配置 API 凭证，不要求 Claude 登录。
-完整接力还需所选路径的独立实施通道与可观察运行证据。按通道要求配置实施模型，
-并选用账号有权访问的模型。
+- **需求原文**：你的原话逐字存进方案旁边的 `.request.md`。实施前，定稿方案与原始需求之间凡是你能
+  感知到的差异，都会逐项请你确认。
+- **分诊**：每条意见都必须给出具体失败场景。只有导致数据丢失或不可逆损坏、让本次需求的核心功能
+  不工作、或让未授权的人拿到数据时，才算**必修**；其余意见**登记**即关闭；说不出场景的**驳回**。
+- **两轮上限**：两轮评审后仍有未解决的必修项，交给你裁决。
+- **评审降级**：按配置的通道顺序逐档尝试（默认 Codex → 同族）。同族评审只在全部跨模型通道都不可用时
+  启用，并且有额外的补偿要求。全部不可用时，普通任务注明「未经交叉评审」后继续，高风险任务停下问你。
+
+规则全文见 `core/REVIEW_PRINCIPLES.md`；每条规则防的是哪次实际失败，见 `core/DESIGN_RATIONALE.md`。
+
+### 双方案规划（可选）
+
+评审是在方案写好之后挑错；双方案则在出方案这一步就引入第二个模型，减少单一视角导致的方案偏差。
+
+1. **各自起草**：主模型写自己的草稿，协作方同时独立起草。Claude 主导时协作方是 AGY，AGY 主导时是
+   Claude。协作方看不到主模型的草稿和设计倾向，只拿到需求原文，并在一份冻结到当前提交的隔离只读
+   工作树里阅读代码，你在主工作树里的并发修改不会干扰它。
+2. **综合定稿**：由综合方（默认主模型，也可配置为协作方）对照仓库事实合并两稿，记录每个设计点采纳了
+   哪一稿、依据是什么。两稿在产品方向或用户可见行为上有实质分歧时，停下来请你裁决。
+3. **照常评审**：综合后的方案继续走交叉评审、分诊和后面的步骤。
+
+启用方式：在配置里设 `claude_relay.dual_plan.enabled`（Claude 主导）或
+`agy_relay.dual_plan.enabled`（AGY 主导），可选协作方模型、思考深度、综合方，以及失败处置
+`on_failure`：`stop` 是停下问你，`fallback` 是退回单方案。Claude Code 里可以用 `/disable-dual-plan`
+在当前会话临时关闭；也可以在当次消息里直接要求开或关。双方案会多花一次协作方调用的额度和时间，
+适合方向性强或容易想偏的任务。
+
+## 协作模式
+
+| 模式 | 行为 |
+|------|------|
+| `solo` | 不走接力，全部由主模型完成 |
+| `auto` | 主模型自行判断是否走流程，下面的规则只作参考 |
+| `rules`（默认） | 满足任一条就走流程：新功能或新模块；预计改动 3 个及以上会影响运行行为的生产文件（测试与纯文档不计）；跨两个及以上顶层子系统；需求含糊、需要先定方案 |
+| `force` | 每个实质任务都走流程 |
+
+无论 `rules` 还是 `auto`，命中**高风险触发器**的任务都必须走流程。高风险触发器包括接力机制自身的
+改动，以及项目在 `CLAUDE.md` 里列出的数据库结构、部署、认证等。
+
+用 `/relay-mode` 查看或切换模式。项目级设置写在仓库根的 `.claude/relay-mode.local`，全局默认在
+`relay.default_mode`。
+
+## 安装
+
+前置条件：macOS、Python 3.9+，以及所选路径需要的
+[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex CLI](https://github.com/openai/codex)
+或 AGY，并完成相应登录或配好 API 凭证。
 
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
 cd ~/ai-anti
-./install.sh                 # Claude Code 侧：命令、子代理、CLAUDE.md 导入
-./install.sh --with-codex    # 可选：Codex 用户级入口及 ~/.agents/skills 技能
-./install.sh --with-agy      # 可选：AGY 原生插件
+./install.sh                 # Claude Code：命令、子代理、CLAUDE.md 导入
+./install.sh --with-codex    # 可选：Codex 入口与技能
+./install.sh --with-agy      # 可选：AGY 插件
+./install.sh --with-hook     # 可选：开会话时播报当前协作模式
 ./install.sh --status        # 只读体检
 ```
 
-需要插件评审通道时再加 `--with-plugin <name>`，并按 [config.example.json](config.example.json) 写好
-`~/.config/ai-anti/config.json`（见下文「模型扩展」「配置」）。
+装完后**新开一个会话**，规则就会生效，在任何仓库里都能用。第一次使用建议按
+[最小上手指南](docs/QUICKSTART.zh-CN.md) 走一遍；安装器的所有权规则、Codex 与 AGY 入口的边界、
+`--status` 的含义、卸载细节，见 [安装细节](docs/INSTALL.zh-CN.md)。
 
-之后在任意仓库打开 Claude Code 或 Codex 即可。项目里不需要复制任何东西，Claude Code 由用户级
-`~/.claude/CLAUDE.md` 加载，Codex 由 `${CODEX_HOME:-~/.codex}/AGENTS.md` 加载。项目可以在自己的 `CLAUDE.md` 里覆写参数（高风险触发器、评审意见
-登记去处、部署规模等），可覆写项见 `adapters/claude-code/CLAUDE.global.md` 的覆写表。
-
-Claude Code 的用户级 `@import` 与 Codex 的用户级指令共同读取
-`core/WORKFLOW_ENTRY.md`；评审细节和接力技能只在需要时加载。
-`./install.sh --with-codex` 同时安装技能及 `${CODEX_HOME:-~/.codex}/AGENTS.md`
-自有标记块，显式读取 `adapters/codex/AGENTS.global.md`，块外用户内容按字节保留。
-普通重装继承组件并升级旧 manifest；源仓库移动后重装刷新路径。
-
-AGY 用户运行 `./install.sh --with-agy` 后启动新 AGY 会话。默认插件路径为
-`~/.gemini/config/plugins/ai-anti`，由插件加载共享工作流入口。用 `agy-relay` 跑完整接力，
-用 `codex-review` 单独审方案。参考配置示例，在 `~/.config/ai-anti/config.json` 中设置
-独立的 `agy_relay.review` 与 `agy_relay.implementation`，超时仍共用 `review.timeout` 和
-`review.idle_timeout`。实施须显式指定 Codex 模型，失败即停并请用户裁决。
-启用 `agy_relay.dual_plan.enabled` 后，可让 Claude 独立起草，由 AGY 或 Claude 综合两稿。
-`./install.sh --without-agy` 收回托管链接与由安装器创建的空目录。
-参见 [AGY 兼容性与验证边界](docs/COMPATIBILITY.md#2026-11-20-agy-led-relay)。
-非空 `AGENTS.override.md` 会遮蔽入口，安装器拒绝安装，不自动改写它。
-`AGENTS.md`、override 或路径祖先中的不安全对象、损坏标记也会在写入前拒绝。
-
-更换 `CODEX_HOME` 前先运行 `./install.sh --without-codex`；移除根据 manifest
-记录的旧路径处理，同时移除原有 Codex 技能。再以新环境执行 `--with-codex`。
-`--uninstall` 仅移除自有块，用户内容保留；仅工具创建且移除后为空的文件才删除。
-用户配置 JSON 和业务仓库均不改写。入口在新会话读取；status 检查安装而非证明模型遵循，
-外部 CLI 的版本命令可能产生该 CLI 自有缓存。多项目完整接力验收不在此次入口改动范围。
-
-调整模块职责、接口、依赖边界或跨调用方重复业务规则时，负责设计或规划的主模型
-按需读取 `core/DESIGN.md`，核对项目目标、调用契约与实质取舍；实施者按定稿契约实现。
-文案、小样式不触发完整设计；无需每仓初始化或新增安装对象，既有源码链接传播共享方法。
-
-用户要求复盘、维护规则，或当前任务出现有证据的重复协作问题时，主模型按需读取
-`core/RETRO.md`：先分类证据，优先修现有确定性检查，项目经验留项目。实际改规则
-遵循现有授权；普通成功任务不自动产出报告。新会话样本仅验证有界行为，不代表
-长期效果或 Claude 普通登录已经验收；不新增安装对象。
-
-负责规划的主模型按需读取 `core/PLANNING.md`，用于有限澄清、方案与可验证行为切片。
-明确小任务不要求完整计划；方法保持模式和权限边界，不自动发工单、派代理或要求
-每仓初始化。独立实施者按定稿方案执行。
-
-共享方法也按需加载：`core/DEBUGGING.md` 指导排障与根因取证，
-`core/TESTING.md` 指导行为验证与验收。直接做、solo 和接力都按适用性读取；
-实施者获得明确的源路径，主模型独立核对证据。不新增命令或技能安装对象，
-不要求每个项目复制文件，也不把所有任务变成 TDD。方法保持授权和评审裁决边界；
-行为验证仅支持记录中的案例，不代表跨项目全场景已经验收。
-
-`./install.sh --status --project DIR` 可选诊断显式给定的项目：Git 根、当前有效 HEAD 提交基线（任意分支或 detached HEAD 均可）、
-项目入口可读性、协作模式及全局部署规模 fallback，不写项目。入口或参数缺失
-是提示，不是安装损坏；项目正文覆写仍需 AI 读取。不加 `--project` 不扫描业务目录。
-普通 `--status` 检查约定共享源与已安装路由，不解析 relay/defaults 或完整用户配置；
-插件仅检查托管链接，不检查 metadata、凭证及通道联网。退出 0 表示报告完成，
-不等于所有检查健康，也不证明模型遵循或完整接力；参数错误仍非零退出。
-
-Codex → Claude/Qwen 用法示例：
+Codex 里的用法示例：
 
 ```text
 使用 $claude-review 评审方案 .claude/plans/20260101-task.md
 使用 $codex-relay 完成下面的任务：……
 ```
 
-`./install.sh --with-hook` 会额外加一个 SessionStart hook，开会话时播报当前协作模式。链接与导入
-都是绝对路径：移动仓库位置后重跑一次 `./install.sh`。
+## 配置
 
-## 模型扩展
+配置文件可选：`~/.config/ai-anti/config.json`，模板见 [config.example.json](config.example.json)。
+安装器不会创建或改写它。文件或键缺失时用内置默认；文件不是合法 JSON 时停下报告，不会静默回落默认。
+凭证放在仓库外，例如 `~/.config/ai-anti/secrets.json`。
 
-评审模型不限于 Codex。以 Claude 作为主模型为例，内置两个评审通道：
+| 键 | 含义 | 默认 |
+|----|------|------|
+| `relay.default_mode` | 全局协作模式 | `rules` |
+| `review.channels` | Claude 主导时的评审通道顺序 | `["codex", "same-family"]` |
+| `review.codex_model` | Claude 主导 `/codex-review` 的评审模型 | Codex CLI 默认 |
+| `review.codex_effort` / `review.codex_high_risk_effort` | 常规任务 / 高风险任务的评审思考深度 | CLI 默认 / 同常规档 |
+| `review.timeout` / `review.idle_timeout` | 外部 CLI 评审的总超时 / 空闲超时（秒） | 1800 / 900 |
+| `defaults.deployment_scale` | 项目未声明时，传给评审方的部署规模 | 未声明 |
+| `claude_relay.implementation` | Claude 主导时改由 Codex 在隔离工作树实施，如 `{"provider":"codex","model":"…","effort":"high"}` | implementer 子代理 |
+| `claude_relay.dual_plan` | Claude 主导时可选 AGY 双方案规划；`/disable-dual-plan` 可在会话内临时关闭 | 关闭 |
+| `agy_relay.review` / `agy_relay.implementation` / `agy_relay.dual_plan` | AGY 主导的评审、实施与双方案规划 | 见模板 |
+| `codex_relay.review_channel` | Codex 主导时的评审通道 | `claude` |
+| `codex_relay.implementation_provider` | Codex 主导时的实施来源 | `codex` |
+| `plugins.<name>` | 插件配置，如 qwen 的 `model`、`base_url`、`credential_paths` | 无 |
+
+思考深度只接受 `low`、`medium`、`high`、`xhigh`、`max`、`ultra`，非法值会在启动 CLI 前报错。
+同一通道两档都显式设置时，高风险档不得低于常规档。评审风险档由送审编排者按 R3 判定，漏传按高风险
+处理。完整字段与取值见模板及 `adapters/codex/skills/claude-review/scripts/ai_anti_config.py`。
+
+## 评审通道与插件
+
+Claude 主导时内置两个评审通道：
 
 | 通道 | 配置名 | 命令 | 说明 |
 |------|--------|------|------|
 | Codex 评审 | `codex` | `/codex-review` | 跨模型评审，默认第一档 |
-| Claude 自评审 | `same-family` | `/opus-review` | 由多个 Claude 子代理做多视角评审；属于同族评审，只在全部跨模型通道都不可用时启用 |
+| Claude 自评审 | `same-family` | `/opus-review` | 多个 Claude 子代理从不同视角评审；同族评审，只在全部跨模型通道都不可用时启用 |
 
-其他模型支持以**插件**形式接入评审：放在 `plugins/<name>/`，用 `./install.sh --with-plugin <name>` 安装，
-再把插件名写进配置的 `review.channels`，排在第几位就是第几档。首个插件 `qwen` 通过 `claude -p`
-驱动任意 anthropic 兼容端点，模型名与端点地址都在配置里填写，换模型只改配置，不改代码。
-编写新插件的契约见 [docs/PLUGINS.md](docs/PLUGINS.md)。
+其他模型以**插件**接入：放在 `plugins/<name>/`，用 `./install.sh --with-plugin <name>` 安装，再把插件名
+写进 `review.channels`，排第几位就是第几档。插件契约见 [docs/PLUGINS.md](docs/PLUGINS.md)。
 
-### 用更经济的模型做评审
-
-评审的价值主要来自**换一个立场、换一套盲区**，而不是用最强的模型。评审方只读仓库、挑方案硬伤，
-不写代码，用价格更低的模型或包月订阅通常就够。常见用法：
-
-- **成本优先**：把插件通道排在最前，例如 `["qwen", "codex", "same-family"]`，日常评审走更便宜的模型，
-  它不可用时再降到 Codex；
-- **质量优先、插件兜底**：保持 `["codex", "qwen", "same-family"]`，Codex 额度用完时自动降到插件通道，
-  而不是直接落到成本最高、且只是同族视角的 Claude 自评审。
-
-无论哪种顺序，同族评审都只在全部跨模型通道不可用时启用。
+评审方只读仓库、挑方案硬伤，价值主要来自**换一个立场、换一套盲区**，用更便宜的模型通常就够。
+例如把 `["qwen", "codex", "same-family"]` 设为成本优先，把 `["codex", "qwen", "same-family"]` 设为质量
+优先、插件兜底。
 
 ### 接入示例：qwen 插件
 
 1. 安装插件：`./install.sh --with-plugin qwen`
-2. 在 `~/.config/ai-anti/config.json` 里填写插件配置，并把 `qwen` 加进通道顺序：
+2. 在 `~/.config/ai-anti/config.json` 里配置插件：
 
    ```json
    {
@@ -190,124 +207,52 @@ Codex → Claude/Qwen 用法示例：
    }
    ```
 
-3. 把 API key 写进凭证文件 `~/.config/ai-anti/secrets.json`，并执行 `chmod 600` 限制权限：
+3. 把 API key 写进 `~/.config/ai-anti/secrets.json`，并执行 `chmod 600`：
 
    ```json
    {"tokenplan": {"value": "<你的 API key>"}}
    ```
 
-   插件按 `credential_paths` 的顺序读取每个文件里的 `tokenplan.value`，取第一个非空值。凭证路径
-   请写绝对路径或 `~` 开头的路径（相对路径按调用时的当前目录解析）。配置或凭证缺失时，这一档
-   判为不可用并降到下一档，不会发起半配置的调用。
+   插件按 `credential_paths` 的顺序取第一个非空的 `tokenplan.value`。路径请写绝对路径或以 `~` 开头。
+   配置或凭证缺失时，这一档判为不可用并降到下一档，不会发起半配置的调用。
 
-### 实测过的评审模型
+实测过的评审模型见 [兼容性说明](docs/COMPATIBILITY.md#实测过的评审模型)。
 
-实测清单和实测程度见 [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#实测过的评审模型)；只验证过端点可调用的模型也在其中单独标注。其他厂商的 anthropic 兼容端点理论上可以同样接入，但尚未实测，接入后建议先做一次最小调用再用于真实评审。
+## 进阶
 
-### Codex 主导的路径
-
-上述 `review.channels` 只路由 Claude 主导路径。Codex 主导路径由 `--channel claude|qwen`
-选择，显式参数优先，其次 `codex_relay.review_channel`，缺省 `claude`；失败不自动降级。
-Claude 默认 Opus，可用 `--model fable` 或配置家族。Qwen 直接复用 `plugins.qwen`，
-无需安装插件；默认保留 Claude CLI，用 sonnet 别名映射配置模型，拒绝显式 `--model`。
-相对凭证路径按 `--repo` 解析，推荐绝对路径或 `~`；Claude 插件按调用 cwd 解析。
-`--prepare-only` 不读凭证、不调用 CLI。所有受管理的 CLI 评审统一读取 `~/.config/ai-anti/config.json` 的
-`review.timeout` / `review.idle_timeout`，默认每阶段1800/900秒。Claude、Qoder默认从600增至1800秒，App Codex检测从1200增至1800秒。
-缺失/null使用默认；坏配置启动前拒绝，不能用单次覆盖掩盖。显式覆盖优先，上限为总时间 3600 秒、idle 900 秒。
-manifest/status 留证通道与模型，init 模型精确校验不证明端点内部路由。
-
-plan 的 inventory/review 每阶段独立计时，最坏运行可达2×timeout；输出上限保留通道差异。未来外部CLI适配须复用共享解析与受限执行入口，任意外部工具、原生Opus子代理不会自动受本配置强制计时。
-
-```bash
-REVIEW_SOURCE=/absolute/path/to/ai-anti/adapters/codex/skills/claude-review/scripts/review.py
-python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
-  --files src/a.py --scale 'single user local tool' --out /private/tmp/qwen-review
-```
-
-Qwen 也可显式选择 Codex CLI 的 Responses 执行器，不依赖 Claude CLI 发起该次评审：
-
-```bash
-python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
-  --responses-base-url https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1 \
-  --idle-timeout 900 --timeout 1800 --repo /path/to/repo --files src/a.py \
-  --scale 'single user local tool' --out /private/tmp/qwen-codex-review
-```
-
-Codex 主导评审用 `codex_relay.qwen_executor=codex` 持久选择执行器，Claude 主导评审用 `plugins.qwen.claude_executor=codex`；另设独立的
-`plugins.qwen.responses_base_url`；不改写原 Anthropic `base_url`，复用模型及凭证路径。
-Responses 只读入口的版本钉包含 Codex CLI 0.160.0、0.163.0、0.169.1，显式使用 medium。其他 CLI 版本预检停止。
-该路径记录 `actual_model=null`、`model_evidence=requested_only`，不证明服务端实际模型身份。
-0.160.0 历史正式 plan 与真实 diff 已通过；0.163.0 于2026-10-20通过合成 plan 两阶段验收，未验证新版业务 diff 或用户级入口全流程；大增量仍可能长时间无输出，900/1800秒仅为本次通过的预算。
-详见[验证记录与边界](docs/COMPATIBILITY.md)。
-
-AIAnti 设置窗口对两种主模型的 Qwen 评审统一使用 Codex CLI · Responses。Qwen 为首选或回退时，窗口显示「评审服务地址（Responses）」，Claude 主模型选 Codex 评审服务时隐藏该字段。任一主模型的通道含 Qwen 时，保存需要填写 Responses 地址，保存保留通道顺序。发现旧执行器配置时，保存后才能检测。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `plugins.qwen.claude_executor=claude`，Codex 主模型手动设置 `codex_relay.qwen_executor=claude`。再次用 AIAnti 保存会将两项都写回 `codex`。Responses 路径不支持评审已提交的 commit。
-
-Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独选择 Claude Code 实施代理或指定 Codex 模型 ID。Anthropic `base_url` 与 Responses `responses_base_url` 独立保存，使用所选模型对应入口与密钥，DeepSeek 完整流程尚未验证。Codex 检测只确认请求模型，服务端实际模型未知。合成检测使用相同可配置预算（默认总时间1800秒、空闲900秒），idle可能先终止。API输出仍限8MiB、Qoder仍限2MiB；正式runner外围为总时间+60秒，界面3700秒覆盖最大3600+60并保留取消。极慢本地准备仍可能触发外围预算。
-
-## 配置
-
-可选的用户配置：`~/.config/ai-anti/config.json`（模板见 [config.example.json](config.example.json)）。
-安装器不创建也不改写它。文件或键缺失即用内置默认；文件不是合法 JSON 时停下报告，不静默回落默认。
-
-| 键 | 含义 | 默认 |
-|----|------|------|
-| `review.channels` | 仅 Claude 主导路径的评审通道顺序 | `["codex", "same-family"]` |
-| `review.codex_effort` | Claude 主导 `/codex-review` 的常规思考深度，可独立于 `review.codex_model` 设置 | 缺失/null → Codex CLI 默认 |
-| `review.codex_high_risk_effort` | Claude 主导 `/codex-review` 的高风险思考深度 | 缺失/null → `review.codex_effort` |
-| `defaults.deployment_scale` | 项目未声明时传给评审方的部署规模 | 未设置 → 评审提示写明「未声明部署规模」 |
-| `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
-| `claude_relay.implementation` | Claude 主导时设为 `{"provider":"codex","model":"gpt-6.2-sol"}`，在隔离工作树固定模型实施（CLI 钉 0.169.1，真实探针待验） | 缺失/null → implementer |
-| `claude_relay.implementation.effort` | Claude 主导时按配置调用 Codex 实施的思考深度 | 缺失/null → Codex CLI 默认 |
-| `claude_relay.dual_plan` | Claude 主导可选 AGY 双方案规划（`enabled`、`partner="agy"`、可选 `model`/`effort` 取 `low\|medium\|high\|xhigh\|max`、`synthesizer="claude"\|"agy"`、`on_failure="stop"\|"fallback"`）；会话级临时禁用命令 `/disable-dual-plan` | 缺失/null/`enabled: false` → Claude 单方案 |
-| `agy_relay.dual_plan` | AGY 主导可选 Claude 双方案规划（`enabled`、`partner="claude"`、可选 `model`、`effort` 取 `low\|medium\|high\|xhigh\|max`、`synthesizer="agy"\|"claude"`、`on_failure="stop"\|"fallback"`） | 缺失/null/`enabled: false` → AGY 单方案 |
-| `agy_relay.review.high_risk_effort` | AGY 主导 Codex 方案评审的高风险思考深度 | 缺失/null → `agy_relay.review.effort` |
-| `plugins.qwen.claude_executor` | Claude 主导的 Qwen 执行器，可显式选 `codex` 走 Responses | `claude` |
-| `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
-| `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅固定逻辑 `glm-5.3` | 缺失/null → `codex` |
-| `codex_relay.secondary_model` | 原生 Codex 实施模型；切换 GLM 时保留 | 未设置 → 每次任务指定 |
-| `codex_relay.qwen_executor` | Qwen 评审的 CLI 执行器 | `claude` |
-| `plugins.qwen.responses_base_url` | Codex 执行器独立的 Responses 地址 | 无 |
-| `plugins.<name>` | 插件配置，如 qwen 的 `model`、`base_url`、`credential_paths` | 无 |
-
-上述 Codex 思考深度键仅接受 `low`、`medium`、`high`、`xhigh`、`max`、`ultra`，非法值会在启动 Codex 前报错。AGY 常规档用 `agy_relay.review.effort`，缺失或为 null 时用 CLI 默认。仅当同一通道的两个深度键都显式设置为非 null 时，高风险档必须达到或超过常规档。
-
-送审编排者按 R3 判档，未传档位按 `high_risk` 处理。评审汇报注明风险档和传入深度，沿用 CLI 默认时也注明。实施 manifest 记录 `requested_effort`（CLI 默认为 `null`）。[共用评审原则](core/REVIEW_PRINCIPLES.md)
-
-示例的常规 high、高风险 xhigh 主要为业务项目的常规评审节省耗时与额度。本仓库的机制文件改动命中高风险触发器。
-
-启用 `agy_relay.review.high_risk_effort` 前先用新源码重建 macOS App，旧 App 后端和旧 CLI 会拒绝该键。回滚前手工删除 AGY 高风险键，并把两个常规档恢复为升级前的值。
-
-凭证放在仓库之外，例如 `~/.config/ai-anti/secrets.json`；插件只读取你配置的路径。
+- **Codex 主导的路径**：评审通道由 `--channel claude|qwen` 选择，其次是 `codex_relay.review_channel`，
+  失败不自动降级。Qwen 可以选 Claude CLI 或 Codex CLI 的 Responses 执行器
+  （`codex_relay.qwen_executor`、`plugins.qwen.claude_executor`、`plugins.qwen.responses_base_url`）。
+  调用方式与版本钉见 [codex-relay 技能](adapters/codex/skills/codex-relay/SKILL.md) 和
+  [兼容性说明](docs/COMPATIBILITY.md)。
+- **Codex 主导的实施来源**：可选原生 Codex、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅，
+  Token Plan 还支持主、备两个账号在额度耗尽时自动切换。契约与验证边界见
+  [codex-relay 技能](adapters/codex/skills/codex-relay/SKILL.md) 和
+  [兼容性说明](docs/COMPATIBILITY.md)。
+- **显式问题复核**：Codex 用 `$bug-review`，Claude Code 用 `/bug-review`，分「独立分析 → 结论复核」
+  两阶段审查已有的问题分析，不要求 Git。见 [docs/BUG_REVIEW.md](docs/BUG_REVIEW.md)。
+- **macOS 菜单栏工具**：可选的 [菜单栏应用](apps/macos/README.md)，用来编辑默认模型、评审通道、
+  协作模式并做本地检测；业务评审仍从 CLI 入口发起。见 [产品说明](docs/MACOS_REVIEW_APP.md)。
 
 ## 兼容性
 
-以下版本有路径限定的证据：
-
-| 组件 | 已登记版本 / 要求 |
-|------|------------------|
-| Claude Code | 2.1.258、2.1.280（评审路径） |
-| Codex CLI | 0.156.0、0.160.0、0.163.0（已验路径不同） |
-| AGY CLI | 1.5.13、1.5.14（Claude 主导双方案 `draft`/`synthesize` 真实探针；AGY 主导路径仅在 1.5.13 验证，边界见 `docs/COMPATIBILITY.md`） |
+| 组件 | 有路径限定证据的版本 |
+|------|---------------------|
+| Claude Code | 2.1.258、2.1.280、2.1.326 |
+| Codex CLI | 0.156.0、0.160.0、0.163.0、0.169.1 |
+| AGY CLI | 1.5.13、1.5.14 |
+| Qoder CLI | 1.1.74、1.1.77 |
 | 基础脚本 | Python 3.9+；macOS 已测，其他系统未验 |
-| 可选 macOS 菜单栏 | macOS 13+、Swift 6.1、Python 3.11+；ad-hoc 构建，非公证分发 |
+| 可选 macOS 菜单栏 | macOS 13+、Swift 6.1、Python 3.11+ |
 
-Claude 2.1.326 与 Codex 0.169.1 的脱敏回放与实际探针进度见 [兼容性明细](docs/COMPATIBILITY.md#2026-11-18-claude-21326--codex-01691)。
-[compat.json](compat.json) 为机器可读版本集合，详细路径与证据边界以
-[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) 为准。安装 status 只报告清单归属，
-不证明全路径兼容或健康；未列版本可能警告，也可能被独立能力/协议门禁拒绝。
-Qwen Responses 的版本钉为 0.160.0、0.163.0、0.169.1，其中 0.169.1 待真实探针。
-安装健康、模型遵循与完整接力分别取证；Claude 普通登录及 DeepSeek 完整流程仍待补验。
+不同版本验证过的路径不同。[compat.json](compat.json) 是机器可读的版本集合，各路径的证据与限制以
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) 为准。未列出的版本可能会警告，也可能被封装器的版本钉拒绝。
 
 ## 成本
 
-采用模型接力机制后，每个走流程的需求都会增加外部模型的评审调用，token 消耗会有所上升：
-
-- **Claude → Codex**：每轮方案评审调用一次 Codex，终审时可再做一次增量评审；降到插件或 Claude
-  自评审时，消耗对应服务的额度（Claude 自评审会并发多个子代理，是最贵的一档）。
-- **Codex → Claude/Qwen**：`$claude-review` 的方案评审每轮调用两次选定的 Claude/Qwen 模型（先独立列清单，再审方案），
-  增量评审每次调用一次。
-
-两条路径的评审都最多两轮。评审模型可以换成更经济的模型，见[用更经济的模型做评审](#用更经济的模型做评审)。
+走流程的任务都会额外调用外部模型。Claude 主导时，每轮方案评审调用一次 Codex，终审可能再加一次增量
+评审；Codex 主导时，每轮方案评审调用两次评审模型（先独立列清单，再审方案）。评审最多两轮。同族评审
+会并发多个 Claude 子代理，是最贵的一档。
 
 ## 卸载
 
@@ -315,64 +260,14 @@ Qwen Responses 的版本钉为 0.160.0、0.163.0、0.169.1，其中 0.169.1 待�
 ./install.sh --uninstall
 ```
 
-只移除 manifest（`~/.claude/ai-anti.manifest.json`）登记且仍指向本仓库的对象，以及
-`~/.claude/CLAUDE.md` 与 Codex `AGENTS.md` 里自己的标记块；你自己的文件与 hook 不受影响。单独移除某部分：
-`--without-hook`、`--without-codex`、`--remove-plugin <name>`。
+只移除 manifest 登记、且仍指向本仓库的对象，以及自己的标记块。单独移除某一部分见
+[安装细节](docs/INSTALL.zh-CN.md#卸载)。
 
 ## 安全
 
-见 [SECURITY.md](SECURITY.md)：分路径控制、模型外发数据、本地证据保留、凭证与桌面恢复备份、安装写入和私密漏洞报告。
+见 [SECURITY.md](SECURITY.md)：分路径控制、发给模型的数据、本地证据保留、凭证、安装写入范围，以及
+私密漏洞报告方式。
 
 ## 许可证
 
 [Apache-2.0](LICENSE)
-
-## macOS 菜单栏配置工具（首期）
-
-[ai-anti 菜单栏应用](apps/macos/README.md) 提供菜单栏＋小设置窗口，管理默认模型、评审通道、协作模式与检测。
-可配置 Claude→Codex、Claude→Qwen/DeepSeek、Codex→Qwen/DeepSeek；配置范围不代表各路径均已验证，业务评审仍从现有入口发起。
-主导工具只是编辑哪组配置，默认值影响后续调用，当前会话不会切换；既有项目模式优先。
-`solo` 同时停用评审和独立实施，Codex 用户级共享入口读取模式并负责分流，接力时再加载 codex-relay。
-
-首次启动只读，不自动调用模型或读密钥正文；免费本地检查不证明登录/额度，手动真实合成检测消耗额度。
-密钥复用已有文件或存入受限明文 secrets.json，不是钥匙串；保存有指纹、备份与冲突检查，支持恢复上次保存。
-构建交付本地签名 `.app`，不自动安装/登录自启；Finder启动不依赖交互shell PATH，需要 Python3.11+ 和 CLI。
-功能边界、配置契约、历史证据与检测限制见 [产品说明](docs/MACOS_REVIEW_APP.md)。
-
-### 显式问题复核
-
-Codex 使用 `bug-review` skill，Claude Code 使用 `/bug-review`，以独立分析→结论复核
-两阶段审查已有问题分析，不要求 Git。两种入口都复用 `codex_relay.review_channel`。
-采集、补证、逐项裁决和人工确认修复由调用方负责。见[材料协议与接入示例](docs/BUG_REVIEW.md)。
-
-Codex 主模型可独立选择实施服务，Claude Code 实施代理保持原状，solo 停用独立实施。
-Token Plan 实施读取共享 `model_services.profiles.token_plan` 的 Responses 地址与凭证，
-与当前评审服务/模型无关，不使用自定义 API 凭证。App 可编辑该共享草稿。配置选择不代表
-业务材料外发授权。Token Plan 引入时仅通过离线 fake 与 App 构建，未新增真实 GLM 运行验证；
-调用 completed 仍需主模型独立验收，实际服务端模型未知。详见 codex-relay skill。
-
-Qoder 实施可设 `codex_relay.implementation_provider=qoder`，逻辑 `glm-5.3` 映射 CLI
-`GLM-5.3`，要求既有订阅登录及 qodercli 1.1.77，不读取 Token Plan 凭证、不改变 Kimi
-评审路由。单次有界写任务不重试；工具限制不是文件/网络硬隔离，CLI 报告身份与未知
-后端路由分开记录。详见 [codex-relay 契约](adapters/codex/skills/codex-relay/SKILL.md#qoder-subscription-implementation)。
-
-Token Plan 独立实施字段为 `codex_relay.token_plan_implementation_model`，仅允许
-`glm-5.3` / `qwen4-max`；缺失或 null 默认 GLM，空串、大小写变体、preview 和未知值拒绝，
-非当前服务也校验。桌面保存/刷新/恢复保留该选择，旧客户端省略字段时保留既有值。
-它不改变评审模型或 native `secondary_model`，仍共享 Token Plan profile 的地址与凭证。
-Qwen4 评审和实施请求 high effort；GLM 与既有模型维持 medium。Responses 只记录请求模型，
-不证明服务端身份；目录选项和评审测试都不证明实施可用。回滚前先选择 GLM；旧版本固定 GLM。
-本次不自动启用新模型，不安装、不改真实用户配置。账号/地域与真实模型工具往返需单独验收。
-
-
-## Token Plan 双订阅槽位
-
-Token Plan 评审和实施共享主账号、备用账号及“主账号额度用尽时自动切换”开关；自定义 API、原生 Codex、Qoder 不参与。主账号仍使用 `model_services.profiles.token_plan` 的凭证接口（旧配置可继续使用 `tokenplan.value`）；备用独立保存到 `secrets.json` 的 `model_services.token_plan_backup.value`，文件权限 0600，不回传密钥到 UI。公开配置为：
-
-```json
-{"token_plan_accounts":{"version":1,"auto_failover":false,"backup":{"credential_paths":[],"credential_key":"model_services.token_plan_backup.value"}}}
-```
-
-启用前两个槽必须配置有效且不同的密钥。每次新任务主账号优先；真实 HTTP429 的明确额度耗尽 JSON 才允许同一模型、同一 URL、同一请求字节换备用认证重发一次，当次任务的后续阶段与有限暂态重试持续使用备用。CLI 会话及已完成工具操作不重启，备用耗尽不循环。普通429限流、401/403、500、超时、断流、已开始的 SSE、账户绑定的 `previous_response_id` / `conversation` 均不跨账号重放。SSE 内错误暂不切换。
-
-启用时只在本次运行内启动有本地认证的 loopback 转发器，真实密钥只保留于父进程内存；上游要求 HTTPS 并验证证书，保留代理及证书环境。CLI 到 localhost 绕过代理。请求及成功响应各上限8MiB，错误 JSON 上限64KiB，最多4个连接；不支持压缩请求与未知传输编码。超限明确失败，不扩大上下文或另起进程。关闭开关保留备用密钥；回滚旧版前先关闭开关，旧版不提供自动切换。manifest/status 的账号槽与切换原因只是此次运行证据，不是实时余额。prepare-only仅验证公开配置，不读取密钥或联网。

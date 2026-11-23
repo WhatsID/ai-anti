@@ -2,228 +2,225 @@
 
 English | [简体中文](README.zh-CN.md)
 
-Cross-model adversarial review, with implementation and acceptance split across models, for
-AI-assisted software development.
+Cross-model relay for AI-assisted coding: one model plans, a **different** model reviews it
+adversarially, a separate implementer writes the code, and the primary model does the final check.
 
-## What it is and why
+## Why
 
-In AI-assisted coding, when a single model does "plan → write code → accept" on its own, any blind
-spot it has travels all the way into the result. ai-anti splits that chain across roles with
-different stances:
+When a single model does "plan → write code → accept" on its own, its blind spots travel all the way
+into the result. ai-anti splits that chain across roles with different stances:
 
-1. **Plan** — the primary model writes a plan file and keeps the user's original request verbatim.
-2. **Cross review** — a *different* model reads the repository (read-only) and reviews the plan
-   against the original request, from the stance "someone else wrote this; find what will cause
-   rework".
-3. **Triage** — the primary model rules on every finding: must-fix, register for later, or reject.
-   This keeps review rounds from exploding.
-4. **Implement** — a separate model carries out the settled plan.
-5. **Final check** — the primary model reviews the whole increment against the plan and reports.
+1. **Plan**: the primary model writes a plan file and keeps your original request verbatim.
+2. **Cross review**: another model reads the repository (read-only) from the stance "someone else
+   wrote this plan" and looks for flaws that would cause rework.
+3. **Triage**: the primary model rules on every finding as must-fix, register for later, or reject,
+   so review rounds do not explode.
+4. **Implement**: a separate implementer carries out the settled plan.
+5. **Final check**: the primary model reviews the whole increment against the plan and reports.
 
-The point is not more models doing more work, but a second model with a different stance finding
-the mistakes the first one cannot see — before they turn into hidden defects or late rework.
+The point is not more models doing more work, but a second model with a different stance finding the
+mistakes the first one cannot see.
 
-## Relay paths
+## How it works
 
-The first model leads the work, adjudicates findings and does the final check. The relay path
-determines which model reviews or implements.
+### What the installer does
 
-| Direction | Entry points | What happens |
-|-----------|--------------|--------------|
-| Claude → Codex | `/codex-review plan <plan.md>`, `/codex-review diff`, `/codex-implement <plan.md>` | Claude Code leads. Codex reviews in a read-only sandbox, implements with a configured model in an isolated worktree, and can take over after an implementer API failure |
-| Codex → Claude/Qwen | `$claude-review`, `$codex-relay` | Codex leads; the selected Claude/Qwen model reviews a plan (two stages) or a scoped diff under fail-closed checks; `$codex-relay` runs the full relay |
-| AGY → Codex → AGY | `agy-relay`, `codex-review` | AGY drafts the plan with optional Claude dual planning. Codex reviews it read-only and implements in an isolated Git worktree. AGY independently reviews the changes and runs acceptance checks. |
+`install.sh` copies nothing into your projects. It only places **symlinks** and **a small import
+block** in your home directory, all pointing back into this checkout:
 
-## Four relay modes
+| Where | Points to | Purpose |
+|-------|-----------|---------|
+| `ai-anti` marker block in `~/.claude/CLAUDE.md` | `@adapters/claude-code/CLAUDE.global.md` | Claude Code loads it in every session, which brings the rules into context |
+| `~/.claude/commands/*.md` | `adapters/claude-code/commands/` | Slash commands: `/codex-review`, `/codex-implement`, `/opus-review`, `/relay-mode`, `/bug-review`, `/disable-dual-plan` |
+| `~/.claude/agents/*.md` | `adapters/claude-code/agents/` | Subagents: `implementer`, `adversarial-reviewer` (same-family review) |
+| Marker block in `${CODEX_HOME:-~/.codex}/AGENTS.md` (`--with-codex`) | `adapters/codex/AGENTS.global.md` | Codex user-level entry |
+| `~/.agents/skills/*` (`--with-codex`) | `adapters/codex/skills/` | Codex skills: `$claude-review`, `$codex-relay`, `$bug-review` |
+| `~/.gemini/config/plugins/ai-anti` (`--with-agy`) | `adapters/agy/plugin` | AGY plugin |
 
-- **solo**: the relay is disabled; the primary model does all the work.
-- **auto**: the rules mode criteria are only guidance; the primary model decides whether a task is worth
-  the relay. For example, many files changed by a mechanical replacement can be done directly,
-  while a single file with subtle logic can still go through the relay. More flexible, but the
-  outcome depends on the model's judgment at the time.
-- **rules** (default): fixed rules decide whether a task goes through the relay — a new feature
-  or module, an expected change to 3 or more production files that affect runtime behavior (tests
-  and pure docs do not count), a change spanning two or more top-level subsystems, or a vague
-  request that needs a plan first. Any one of these triggers the relay; everything else is done
-  directly. The same change is always handled the same way, so the outcome is predictable.
-- **force**: every substantive task goes through the relay.
+Every installed object is recorded in `~/.claude/ai-anti.manifest.json`, and uninstall removes only
+what it recorded. Because these are symlinks, a `git pull` of this checkout takes effect in the **next
+session**. After moving the checkout, run `./install.sh` again.
 
-In both rules and auto, tasks that hit a high-risk trigger (changes to the relay mechanism
-itself, plus whatever a project lists in its own `CLAUDE.md`, such as database schema,
-deployment, or authentication) must go through the relay; the two modes differ only on ordinary
-tasks.
+### How it takes effect in a session
 
-Only `solo`, `auto`, `rules`, `force` are accepted; the former `required` value is invalid.
+Using Claude Code as an example:
 
-Switch modes with the `/relay-mode` command.
+```text
+New session
+  └─ Claude Code loads ~/.claude/CLAUDE.md
+       └─ @import CLAUDE.global.md ── @import core/WORKFLOW_ENTRY.md
+            └─ the model now knows: relay mode, task sizing, high-risk triggers
+You make a request
+  ├─ small task → done directly
+  └─ large or high-risk task → relay:
+       plan + verbatim request (.claude/plans/)
+         (with dual planning: AGY drafts independently, then the drafts are merged)
+       → /codex-review: the command's script reads ~/.config/ai-anti/config.json
+         and runs codex exec in a read-only sandbox; results land in a scratch dir
+       → triage → user-visible differences from your request are confirmed with you
+       → implement: implementer subagent, or Codex in an isolated git worktree
+       → final check of the increment → report (commits only when you say so)
+```
 
-## Relay essentials
+Codex follows the same chain: `AGENTS.md` block → `AGENTS.global.md` → the same
+`core/WORKFLOW_ENTRY.md`. When a relay is needed, it reads the `codex-relay` or `claude-review` skill,
+whose scripts call Claude or Qwen for review. AGY loads the same entry through its plugin.
 
-- **Five-step relay.** Plan (with the user's request kept verbatim in a sibling `.request.md`) →
-  cross-model review → triage → implementation by a separate implementer → final check of the
-  increment by the primary model, then a report. Before implementation, every user-visible
-  difference between the settled plan and the original request is confirmed with the user.
-- **Triage.** Each finding must name a concrete failure scenario (input or state → wrong result).
-  *Must-fix* only if it causes data loss or irreversible damage, breaks the core function of the
-  current request, or lets unauthorized people get data or access. Everything else is
-  *registered* in a ledger and counts as closed. Findings without a concrete scenario are
-  *rejected* with a reason.
-- **Two-round limit.** Adopting must-fix items does not trigger another review. A second round
-  happens only if the architecture is overturned or a blocker-level new fact appears. After two
-  rounds, any unresolved must-fix item goes to the user.
-- **Fallback order.** Channels are tried in the configured order (default Codex → same-family).
-  Each channel reports only its own result; the primary model moves to the next one. A channel
-  whose quota is exhausted is not retried in the same session. If every channel is unavailable,
-  ordinary tasks continue marked "not cross-reviewed", while high-risk tasks stop for the user.
-- **Same-family compensation.** Review by the same model family is a restricted exception, used
-  only when every cross-model channel is unavailable, and only counts if it has all of: empty
-  context, a fixed adversarial stance, 3–5 distinct perspectives, its own read-only probes, and an
-  independent rebuttal of every blocker.
+### Two layers of enforcement
 
-**About language:** the rule texts (`core/`, `adapters/claude-code/CLAUDE.global.md`, command
-templates) and the docs under `docs/` are written in Chinese and are the only authority; they are
-read by the models, which handle Chinese fine. This README is a summary, not a translation.
+- **Rules** (Markdown under `core/` and `adapters/`) tell the model when to run the relay and how
+  each step works. They are **soft**: the model reads and follows them, so a successful install does
+  not guarantee compliance.
+- **Scripts** (`adapters/**/scripts/*.py`) wrap every external CLI call. They enforce read-only
+  sandboxes, isolated worktrees, CLI version pins, timeouts and output caps, and event-stream
+  validation, and fail closed on anything unexpected. This layer is **hard** and does not depend
+  on the model.
+
+Projects need no copied files. A project may override parameters in its own `CLAUDE.md`, such as
+business high-risk triggers, where to register findings, or deployment scale; see the override table in
+`adapters/claude-code/CLAUDE.global.md`.
+
+**About language:** the rule texts (`core/`, `adapters/`) and the docs under `docs/` are written in
+Chinese and are the only authority. The models read them without difficulty. This README is a summary.
 `core/DESIGN_RATIONALE.md` records the real failure behind each rule.
 
-## Install and use
+## The relay
 
-New here? Follow the [minimal quickstart (Chinese)](docs/QUICKSTART.zh-CN.md) for setup, entry checks, a first task and troubleshooting.
+| Lead | Entry points | Review and implementation |
+|------|--------------|---------------------------|
+| Claude Code | `/codex-review plan <plan.md>`, `/codex-review diff` | Codex reviews in a read-only sandbox; the implementer subagent implements, or Codex in an isolated worktree if configured |
+| Codex | `$claude-review`, `$codex-relay` | Claude or Qwen reviews; `$codex-relay` runs the full relay |
+| AGY | `agy-relay`, `codex-review` | Codex reviews and implements in an isolated worktree; AGY does the final check |
 
-Prerequisites: macOS and Python 3.9+ for the base scripts. Install the CLI and login or API
-credentials required by your chosen path: [Claude Code](https://docs.anthropic.com/en/docs/claude-code)
-and/or [Codex CLI](https://github.com/openai/codex). Qwen Responses review uses Codex plus the
-configured API credential; it does not require Claude login.
+- **Verbatim request.** Your words are kept in a sibling `.request.md`. Before implementation, every
+  user-visible difference between the settled plan and your request is confirmed with you.
+- **Triage.** Each finding must name a concrete failure scenario. A finding is *must-fix* only if it
+  causes data loss or irreversible damage, breaks the core function of the request, or exposes data to
+  unauthorized people. Other findings are *registered* and count as closed. Findings without a
+  scenario are *rejected*.
+- **Two-round limit.** Must-fix items still open after two rounds go to you.
+- **Fallback.** Channels are tried in the configured order (default Codex → same-family).
+  Same-family review runs only when every cross-model channel is unavailable, with extra compensating
+  requirements. If none is available, ordinary tasks continue marked "not cross-reviewed", and
+  high-risk tasks stop for you.
 
-A full relay needs the selected path's independent implementation route and observable runtime
-evidence. Set the implementation model as required by that route and use a model your account can access.
+Full rules: `core/REVIEW_PRINCIPLES.md`.
+
+### Dual planning (optional)
+
+Review finds flaws after a plan exists. Dual planning brings in a second model while the plan is being
+written, so the plan does not rest on a single perspective.
+
+1. **Independent drafts.** The primary model writes its own draft while the partner drafts
+   independently: AGY when Claude leads, Claude when AGY leads. The partner sees only your verbatim
+   request, never the primary's draft or design leanings, and reads the code in an isolated read-only
+   worktree frozen at the current commit, so your concurrent edits in the main tree cannot interfere.
+2. **Synthesis.** The synthesizer (the primary by default, or the partner if configured) merges the
+   drafts against repository facts and records which draft each design point came from and why. If the
+   drafts differ substantively on product direction or user-visible behavior, it stops for your
+   decision.
+3. **Review as usual.** The merged plan then goes through cross review, triage and the rest.
+
+Enable it with `claude_relay.dual_plan.enabled` (Claude-led) or `agy_relay.dual_plan.enabled`
+(AGY-led). Optional settings cover the partner model, effort, synthesizer, and `on_failure`, which is
+`stop` (ask you) or `fallback` (continue with a single plan). In Claude Code, `/disable-dual-plan` turns
+it off for the current session, or you can ask for it on or off in your message. Dual planning costs one
+extra partner call in quota and time; it pays off on tasks where direction matters or a plan could
+easily go astray.
+
+## Relay modes
+
+| Mode | Behavior |
+|------|----------|
+| `solo` | No relay; the primary model does everything |
+| `auto` | The primary model decides; the rules below are guidance only |
+| `rules` (default) | Relay when any of the following holds: a new feature or module; an expected change to 3+ production files that affect runtime behavior (tests and pure docs excluded); a change spanning 2+ top-level subsystems; or a vague request that needs a plan first |
+| `force` | Every substantive task uses the relay |
+
+In both `rules` and `auto`, tasks that hit a **high-risk trigger** must use the relay. High-risk
+triggers are changes to the relay mechanism itself, plus whatever a project lists in its `CLAUDE.md`,
+such as database schema, deployment, or authentication.
+
+Use `/relay-mode` to view or switch. The per-project mode lives in `.claude/relay-mode.local` at the
+repository root; the global default is `relay.default_mode`.
+
+## Install
+
+Prerequisites: macOS, Python 3.9+, and the CLIs for your chosen path
+([Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex),
+or AGY), logged in or configured with API credentials.
 
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
 cd ~/ai-anti
-./install.sh                 # Claude Code side: commands, subagents, CLAUDE.md import
-./install.sh --with-codex    # optional: Codex user-level entry and ~/.agents/skills
-./install.sh --with-agy      # optional: AGY native plugin
+./install.sh                 # Claude Code: commands, subagents, CLAUDE.md import
+./install.sh --with-codex    # optional: Codex entry and skills
+./install.sh --with-agy      # optional: AGY plugin
+./install.sh --with-hook     # optional: announce the relay mode at session start
 ./install.sh --status        # read-only health check
 ```
 
-To use a plugin review channel, also pass `--with-plugin <name>` and write
-`~/.config/ai-anti/config.json` following [config.example.json](config.example.json) (see
-"Model extensions" and "Configuration" below).
+Then **open a new session**; the rules apply in any repository. First time? Walk through the
+[minimal quickstart (Chinese)](docs/QUICKSTART.zh-CN.md). The installer's ownership rules, Codex and AGY
+entry edge cases, what `--status` does and does not prove, and uninstall details are in
+[install details (Chinese)](docs/INSTALL.zh-CN.md).
 
-Then open Claude Code or Codex in any repository. Nothing needs to be copied into your projects;
-Claude Code loads `~/.claude/CLAUDE.md`, and Codex loads
-`${CODEX_HOME:-~/.codex}/AGENTS.md`. Projects may override
-parameters (high-risk triggers, where to register findings, deployment scale, ...) in their own
-`CLAUDE.md`; see the override table in `adapters/claude-code/CLAUDE.global.md`.
-
-Both entries read `core/WORKFLOW_ENTRY.md`; review details and relay skills load only
-when needed. `--with-codex` installs the skills and an owned instruction block that
-explicitly reads `adapters/codex/AGENTS.global.md`. User content outside the block is
-preserved byte for byte. Reinstallation inherits optional components and upgrades
-legacy manifests; reinstall after moving the source checkout to refresh its paths.
-
-For AGY, install `--with-agy` and open a new AGY session. The plugin at
-`~/.gemini/config/plugins/ai-anti` loads the shared workflow entry and provides `agy-relay` for
-the full relay and `codex-review` for standalone plan review. Set `agy_relay.review` and
-`agy_relay.implementation` in `~/.config/ai-anti/config.json` as shown in the configuration
-example. AGY uses its own model and effort settings and shares `review.timeout` and
-`review.idle_timeout`. Implementation requires an explicit Codex model and stops on failure for
-the user's decision. `./install.sh --without-agy` removes the owned link and installer-created empty directories.
-Set `agy_relay.dual_plan.enabled` to opt into an independent Claude draft. AGY or Claude can synthesize the two drafts.
-See [AGY compatibility and validation scope](docs/COMPATIBILITY.md#2026-11-20-agy-led-relay).
-
-A nonempty `AGENTS.override.md` shadows the entry, so installation stops and asks you
-to resolve it manually. Unsafe instruction files or path ancestors and damaged markers
-also stop installation before writes. Before changing `CODEX_HOME`, run
-`./install.sh --without-codex`: it removes the owned block at the manifest's recorded
-path and both Codex skills. Then run `--with-codex` with the new environment.
-Uninstall keeps user content, deleting an empty file only when the installer created it.
-It never edits user configuration JSON or business repositories.
-
-The entry loads in a new session. Status checks installation, not model compliance;
-external CLI version commands may create their own caches. Full multi-project relay
-validation is outside this entry change.
-
-For module responsibilities, interfaces, dependency boundaries or repeated business rules
-across callers, the design/planning primary reads `core/DESIGN.md` as needed. It checks
-project goals, caller contracts and meaningful tradeoffs; implementers follow the settled
-contract. Small copy/style edits do not trigger a full design process. No per-project setup
-or new installation object is required; existing source links carry the shared method.
-
-For requested retrospectives, rule maintenance, or evidenced recurring collaboration problems, the primary
-loads `core/RETRO.md`: classify evidence, prefer existing deterministic checks, and keep
-project rules local. Rule changes require existing authorization; successful tasks do not
-automatically trigger reports. New-session samples verify bounded behavior, not long-term
-effectiveness or Claude ordinary-login compliance. No new installation object is added.
-
-The planning primary loads `core/PLANNING.md` for clarification, specifications and
-verifiable behavior slices when needed. Clear small tasks do not require a full plan.
-It preserves mode and permission boundaries and does not create tickets, agents or
-per-project setup. Independent implementers follow the settled plan.
-
-Shared methods also load on demand: `core/DEBUGGING.md` guides diagnosis and
-root-cause evidence; `core/TESTING.md` guides behavioral verification and acceptance.
-This applies to direct work and solo as well as relays. Implementers receive explicit
-source paths, and the primary independently checks their evidence. No new command,
-skill installation or per-project copy is required. The methods preserve authorization
-and review adjudication; they do not make every task a TDD task. Behavioral validation
-is limited to recorded examples, not a claim of full multi-project coverage.
-
-`./install.sh --status --project DIR` optionally diagnoses an explicit project without
-writing it: Git root/current valid HEAD commit (any branch or detached HEAD), readable project entries, effective mode,
-and global deployment-scale fallback. Missing project entries or parameters are hints,
-not damaged installation; project prose overrides still require the AI to read them.
-No project is scanned unless `--project` is supplied. Plain `--status` checks explicit
-shared sources and installed routing, not `relay`/`defaults` or full user configuration.
-It checks plugin links, not plugin metadata, credentials or channel connectivity.
-Status remains a report: exit 0 means reporting finished, not that every check passed.
-It does not prove model compliance or a complete relay. Parameter errors remain nonzero.
-
-Codex → Claude/Qwen examples:
+Codex examples:
 
 ```text
 Use $claude-review to review the plan .claude/plans/20260101-task.md
 Use $codex-relay to complete the following task: ...
 ```
 
-`./install.sh --with-hook` additionally adds a SessionStart hook that announces the current relay
-mode. Links and imports are absolute paths: after moving the checkout, run `./install.sh` again.
+## Configuration
 
-## Model extensions
+The config file is optional: `~/.config/ai-anti/config.json` (template:
+[config.example.json](config.example.json)). The installer never creates or edits it. Missing files or
+keys mean built-in defaults; invalid JSON stops the workflow instead of silently falling back.
+Credentials live outside the repository, e.g. `~/.config/ai-anti/secrets.json`.
 
-The reviewer is not limited to Codex. With Claude as the primary model, two review channels are
-built in:
+| Key | Meaning | Default |
+|-----|---------|---------|
+| `relay.default_mode` | Global relay mode | `rules` |
+| `review.channels` | Review channel order for the Claude-led path | `["codex", "same-family"]` |
+| `review.codex_model` | Reviewer model for Claude-led `/codex-review` | Codex CLI default |
+| `review.codex_effort` / `review.codex_high_risk_effort` | Reasoning effort for standard / high-risk reviews | CLI default / standard effort |
+| `review.timeout` / `review.idle_timeout` | Total / idle timeout for external CLI reviews (seconds) | 1800 / 900 |
+| `defaults.deployment_scale` | Deployment scale passed to reviewers when a project declares none | not declared |
+| `claude_relay.implementation` | Let Codex implement in an isolated worktree on the Claude-led path, e.g. `{"provider":"codex","model":"…","effort":"high"}` | implementer subagent |
+| `claude_relay.dual_plan` | Opt-in AGY dual planning on the Claude-led path; `/disable-dual-plan` turns it off for a session | off |
+| `agy_relay.review` / `agy_relay.implementation` / `agy_relay.dual_plan` | AGY-led review, implementation and dual planning | see template |
+| `codex_relay.review_channel` | Reviewer on the Codex-led path | `claude` |
+| `codex_relay.implementation_provider` | Implementation source on the Codex-led path | `codex` |
+| `plugins.<name>` | Plugin settings, e.g. qwen `model`, `base_url`, `credential_paths` | none |
+
+Effort values are exactly `low`, `medium`, `high`, `xhigh`, `max`, or `ultra`; invalid values stop
+before the CLI starts. When both tiers of a route are explicitly set, the high-risk tier must be at
+least the standard tier. The review orchestrator picks the tier under R3; an omitted tier counts as
+high-risk. All fields and values: the template and
+`adapters/codex/skills/claude-review/scripts/ai_anti_config.py`.
+
+## Review channels and plugins
+
+Two channels are built in on the Claude-led path:
 
 | Channel | Config name | Command | Notes |
 |---------|-------------|---------|-------|
-| Codex review | `codex` | `/codex-review` | Cross-model review; first by default |
-| Claude self-review | `same-family` | `/opus-review` | Several Claude subagents review from different perspectives; same-family, so it runs only when every cross-model channel is unavailable |
+| Codex review | `codex` | `/codex-review` | Cross-model; first by default |
+| Claude self-review | `same-family` | `/opus-review` | Several Claude subagents from different perspectives; same-family, so only when every cross-model channel is unavailable |
 
-Other models join as **plugins** under `plugins/<name>/`: install one with
-`./install.sh --with-plugin <name>`, then add its name to `review.channels` in your config — its
-position there is its place in the fallback order. The first plugin, `qwen`, drives any
-Anthropic-compatible endpoint through `claude -p`; the model name and endpoint are set in config,
-so switching models means editing config, not code. The contract for writing a plugin is in
-[docs/PLUGINS.md](docs/PLUGINS.md).
+Other models join as **plugins** under `plugins/<name>/`: install with
+`./install.sh --with-plugin <name>`, then add the name to `review.channels`; its position is its place
+in the fallback order. Plugin contract: [docs/PLUGINS.md](docs/PLUGINS.md).
 
-### Using cheaper models for review
-
-Review gets its value from **a different stance and a different set of blind spots**, not from the
-strongest model. The reviewer only reads the repository and looks for flaws in the plan; it writes
-no code, so a cheaper model or a flat-rate subscription is usually enough. Common setups:
-
-- **Cost first:** put the plugin first, e.g. `["qwen", "codex", "same-family"]`, so everyday reviews
-  use the cheaper model and fall back to Codex when it is unavailable.
-- **Quality first, plugin as backup:** keep `["codex", "qwen", "same-family"]`, so when Codex runs
-  out of quota the review falls back to the plugin instead of going straight to Claude
-  self-review, which is the most expensive channel and only a same-family perspective.
-
-Whatever the order, same-family review only runs when every cross-model channel is unavailable.
+A reviewer only reads the repository and looks for flaws. Its value comes from **a different stance and
+different blind spots**, so a cheaper model is usually enough: `["qwen", "codex", "same-family"]` puts
+cost first, `["codex", "qwen", "same-family"]` puts quality first with the plugin as backup.
 
 ### Example: the qwen plugin
 
-1. Install the plugin: `./install.sh --with-plugin qwen`
-2. Add the plugin settings to `~/.config/ai-anti/config.json` and put `qwen` into the channel order:
+1. Install: `./install.sh --with-plugin qwen`
+2. Configure `~/.config/ai-anti/config.json`:
 
    ```json
    {
@@ -238,145 +235,57 @@ Whatever the order, same-family review only runs when every cross-model channel 
    }
    ```
 
-3. Put the API key in the credential file `~/.config/ai-anti/secrets.json` and restrict it with
-   `chmod 600`:
+3. Put the API key in `~/.config/ai-anti/secrets.json` and `chmod 600` it:
 
    ```json
    {"tokenplan": {"value": "<your API key>"}}
    ```
 
-   The plugin reads `tokenplan.value` from each file in `credential_paths`, in order, and uses the
-   first non-empty value. Use absolute or `~`-prefixed paths (relative paths resolve against the
-   current directory at call time). If config or credentials are missing, the channel is marked
-   unavailable and the review falls back to the next one; it never makes a half-configured call.
+   The plugin uses the first non-empty `tokenplan.value` from `credential_paths`, in order; use
+   absolute or `~`-prefixed paths. If config or credentials are missing, the channel counts as
+   unavailable and review falls back to the next one, never making a half-configured call.
 
-### Verified reviewer models
+Verified reviewer models: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#实测过的评审模型).
 
-The list of verified reviewer models and how far each was tested is in
-[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#实测过的评审模型); models only checked for endpoint
-reachability are marked separately. Other vendors' Anthropic-compatible endpoints should work the
-same way but have not been tested; do one minimal call before using one for real reviews.
+## Advanced
 
-### The Codex-led path
-
-The `review.channels` order only routes the Claude-led path. Codex selects
-`--channel claude|qwen`, then `codex_relay.review_channel`, defaulting to `claude`.
-Failures never automatically fall back. Claude defaults to Opus; `--model fable` or
-configured families remain supported. Qwen directly reuses `plugins.qwen` without
-plugin installation, defaulting to Claude CLI with a sonnet alias mapped to the configured
-model. Explicit `--model` is rejected for Qwen. Relative credential paths resolve
-against `--repo`; the Claude plugin resolves them against invocation cwd. Prefer
-absolute paths or `~`. `--prepare-only` reads no credentials and calls no CLI.
-All managed CLI reviews read `review.timeout` / `review.idle_timeout` from
-`~/.config/ai-anti/config.json`, defaulting to 1800/900 seconds per stage.
-Claude and Qoder defaults change from 600 to 1800 seconds; App Codex checks from 1200 to 1800.
-Missing/null fields use defaults; invalid values fail before launch, even with explicit overrides.
-Explicit overrides win; caps are 3600 seconds total and 900 idle. Model evidence
-and exact init matching do not prove endpoint-internal routing.
-
-Plan inventory and review each start a fresh budget; worst-case execution is 2×timeout. Output caps remain channel-specific. Future external CLI integrations must reuse the shared parser and bounded execution; arbitrary tools and native Opus subagents are not automatically timed.
-
-```bash
-REVIEW_SOURCE=/absolute/path/to/ai-anti/adapters/codex/skills/claude-review/scripts/review.py
-python3 "$REVIEW_SOURCE" diff --channel qwen --repo /path/to/repo \
-  --files src/a.py --scale 'single user local tool' --out /private/tmp/qwen-review
-```
-
-Qwen can explicitly use Codex CLI's Responses executor without Claude CLI for that review:
-
-```bash
-python3 "$REVIEW_SOURCE" diff --channel qwen --qwen-executor codex \
-  --responses-base-url https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1 \
-  --idle-timeout 900 --timeout 1800 --repo /path/to/repo --files src/a.py \
-  --scale 'single user local tool' --out /private/tmp/qwen-codex-review
-```
-
-Persist the selection with `codex_relay.qwen_executor=codex` for Codex-led review or `plugins.qwen.claude_executor=codex` for Claude-led review, and configure the separate
-`plugins.qwen.responses_base_url`. The Anthropic `base_url` stays separate; model and
-credential paths are reused. The read-only Responses executor pins Codex CLI 0.160.0, 0.163.0, and 0.169.1 and
-explicitly requests medium effort. Other CLI versions stop at preflight. It records
-`actual_model=null` and `model_evidence=requested_only`, not proven serving-model identity.
-Historical 0.160.0 formal plan and actual diff calls passed; 0.163.0 passed a synthetic two-stage plan check on 2026-10-20. The 0.163.0 business diff and full user-entry workflow are unverified. Large diffs can still remain silent for minutes;
-900/1800 seconds is the tested budget, not a latency guarantee. See [verification and limits](docs/COMPATIBILITY.md).
-
-AIAnti uses Codex CLI with Responses for Qwen reviews under either primary host. The settings window shows the Responses address when Qwen is a primary or fallback channel, except when Claude is the primary host and Codex is the selected review service. Saving requires a Responses address if either host uses Qwen and preserves channel order. Legacy executor settings require an explicit save before the app runs checks. To use Anthropic from the CLI, set `plugins.qwen.claude_executor=claude` for Claude-led review or `codex_relay.qwen_executor=claude` for Codex-led review. The next AIAnti save writes both settings back to `codex`. The Responses path cannot review already committed Git commits.
-
-For Claude-to-Codex reviews, select a catalog model or enter a custom review model ID. Claude-led implementation can use the Claude Code agent or Codex with its own model ID. The Anthropic and Responses URLs are stored independently. Codex checks confirm the requested model only; the server's actual model remains unknown. Synthetic checks use the same configurable budgets (default 1800 seconds total, 900 idle); idle can terminate first. API output remains capped at 8 MiB and Qoder at 2 MiB. Formal runners get total+60 seconds for cleanup; the app allows 3700 seconds to cover the maximum 3600+60, with cancellation. Extremely slow local preparation can still exceed the outer budget. DeepSeek's full workflow remains unverified.
-
-## Configuration
-
-Optional user config: `~/.config/ai-anti/config.json` (template:
-[config.example.json](config.example.json)). The installer never creates or edits it. A missing file
-or key means the built-in default; a file that is not valid JSON stops the workflow instead of
-silently falling back.
-
-| Key | Meaning | Default |
-|-----|---------|---------|
-| `review.channels` | Claude-led review channel order only | `["codex", "same-family"]` |
-| `review.codex_effort` | Standard reasoning effort for Claude-led `/codex-review`, independent of `review.codex_model` | missing/null → Codex CLI default |
-| `review.codex_high_risk_effort` | High-risk reasoning effort for Claude-led `/codex-review` | missing/null → `review.codex_effort` |
-| `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
-| `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
-| `claude_relay.implementation` | Set `{"provider":"codex","model":"gpt-6.2-sol"}` to implement in an isolated worktree (CLI pin 0.169.1, live probe pending) | missing/null → implementer |
-| `claude_relay.implementation.effort` | Reasoning effort for configured Claude-led Codex implementation | missing/null → Codex CLI default |
-| `claude_relay.dual_plan` | Opt-in Claude-led dual planning with AGY (`enabled`, `partner="agy"`, optional `model`/`effort` in `low\|medium\|high\|xhigh\|max`, `synthesizer="claude"\|"agy"`, `on_failure="stop"\|"fallback"`); session override via `/disable-dual-plan` | missing/null/`enabled: false` → Claude single plan |
-| `agy_relay.dual_plan` | Opt-in AGY-led dual planning with Claude (`enabled`, `partner="claude"`, optional `model`, `effort` in `low\|medium\|high\|xhigh\|max`, `synthesizer="agy"\|"claude"`, `on_failure="stop"\|"fallback"`) | missing/null/`enabled: false` → AGY single plan |
-| `agy_relay.review.high_risk_effort` | High-risk reasoning effort for AGY-led Codex plan review | missing/null → `agy_relay.review.effort` |
-| `plugins.qwen.claude_executor` | Claude-led Qwen executor. Set `codex` to use Responses | `claude` |
-| `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
-| `codex_relay.implementation_provider` | Codex-led implementation: native `codex`, Token Plan (`glm-5.3` / `qwen4-max`) or Qoder subscription fixed logical `glm-5.3` | missing/null → `codex` |
-| `codex_relay.secondary_model` | Native Codex implementer model; retained when switching to GLM | unset → specify per task |
-| `codex_relay.qwen_executor` | CLI executor for Qwen review | `claude` |
-| `plugins.qwen.responses_base_url` | Separate Responses URL for the Codex executor | none |
-| `plugins.<name>` | Plugin settings, e.g. qwen `model`, `base_url`, `credential_paths` | none |
-
-The Codex effort keys above accept `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` exactly. Invalid values stop the call before Codex starts. AGY's standard effort is `agy_relay.review.effort`, which uses the CLI default when missing or null. When both effort keys for a route are explicitly set to non-null values, the high-risk effort must be at least as high as the standard effort.
-
-The orchestrator selects the review tier under R3. An omitted tier is treated as `high_risk`. Review reports include the tier and the effort passed to Codex, or indicate the CLI default. Implementation records `requested_effort` in the manifest (`null` for the CLI default). [Shared review principles](core/REVIEW_PRINCIPLES.md)
-
-The `high`/`xhigh` example primarily saves review time and quota for routine work in business projects. Changes to this repository's workflow mechanism trigger high-risk review.
-
-Rebuild the macOS App from the updated source before enabling `agy_relay.review.high_risk_effort`. Older App backends and CLI versions reject this key. Before rolling back, remove the AGY high-risk key and restore both standard effort settings to their pre-upgrade values.
-
-Credentials live outside the repository, e.g. `~/.config/ai-anti/secrets.json`; plugins only read
-the paths you configure.
+- **Codex-led path.** The reviewer is chosen by `--channel claude|qwen`, then
+  `codex_relay.review_channel`; failures never fall back automatically. Qwen can run through Claude CLI
+  or Codex CLI's Responses executor (`codex_relay.qwen_executor`, `plugins.qwen.claude_executor`,
+  `plugins.qwen.responses_base_url`). Usage and version pins: the
+  [codex-relay skill](adapters/codex/skills/codex-relay/SKILL.md) and
+  [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+- **Codex-led implementation sources.** Native Codex, Token Plan (`glm-5.3` / `qwen4-max`), or a Qoder
+  subscription. Token Plan supports a primary and a backup account with failover on quota exhaustion.
+  Contracts and verification limits: the [codex-relay skill](adapters/codex/skills/codex-relay/SKILL.md)
+  and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
+- **Problem second opinions.** `$bug-review` (Codex) or `/bug-review` (Claude Code) reviews an
+  existing analysis in two fresh stages, without requiring Git. See [docs/BUG_REVIEW.md](docs/BUG_REVIEW.md).
+- **macOS menu bar app.** The optional [menu bar app](apps/macos/README.md) edits default models,
+  review channels and relay mode, and runs local checks; business reviews still start from the CLI
+  entries. See [the product notes](docs/MACOS_REVIEW_APP.md).
 
 ## Compatibility
 
-Versions with path-scoped evidence:
-
-| Component | Registered versions / requirements |
+| Component | Versions with path-scoped evidence |
 |-----------|------------------------------------|
-| Claude Code | 2.1.258, 2.1.280 (review paths) |
-| Codex CLI | 0.156.0, 0.160.0, 0.163.0 (different verified paths) |
-| AGY CLI | 1.5.13, 1.5.14 (Claude-led dual-plan `draft`/`synthesize` live probes; AGY-led paths verified on 1.5.13 only; see `docs/COMPATIBILITY.md`) |
+| Claude Code | 2.1.258, 2.1.280, 2.1.326 |
+| Codex CLI | 0.156.0, 0.160.0, 0.163.0, 0.169.1 |
+| AGY CLI | 1.5.13, 1.5.14 |
+| Qoder CLI | 1.1.74, 1.1.77 |
 | Base scripts | Python 3.9+; macOS tested, other systems unverified |
-| Optional macOS menu bar app | macOS 13+, Swift 6.1, Python 3.11+; ad-hoc build, not notarized distribution |
+| Optional macOS menu bar app | macOS 13+, Swift 6.1, Python 3.11+ |
 
-See [compatibility details](docs/COMPATIBILITY.md#2026-11-18-claude-21326--codex-01691) for Claude 2.1.326 and Codex 0.169.1 replay evidence and live probe status.
-[compat.json](compat.json) is the machine-readable version set; the path matrix and evidence
-limits in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) are authoritative for detailed support.
-Installer status reports membership, not all-path compatibility or health. Unlisted versions
-may warn and still fail independent capability/protocol gates. Qwen Responses pins 0.160.0,
-0.163.0, and 0.169.1. The 0.169.1 live probe is pending. Installation health, model adherence and
-full relay verification are separate; ordinary Claude login and DeepSeek full flows remain pending.
-
-The optional [macOS app](apps/macos/README.md) edits defaults and runs checks; business reviews
-still start from the CLI entries. Its configured model catalog is not service verification.
+Different versions cover different paths. [compat.json](compat.json) is the machine-readable set; the
+per-path evidence and limits in [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md) are authoritative.
+Unlisted versions may warn or be rejected by the wrappers' version pins.
 
 ## Cost
 
-With the relay, every task that goes through it adds calls to external review models, so token
-usage goes up:
-
-- **Claude → Codex:** each plan-review round calls Codex once, and the final check may add one diff
-  review. Falling back to a plugin or to Claude self-review uses that service's quota instead
-  (Claude self-review runs several subagents in parallel and is the most expensive channel).
-- **Codex → Claude/Qwen:** each `$claude-review` plan-review round calls the selected Claude/Qwen model twice (an independent
-  inventory first, then the plan review); a diff review calls it once.
-
-Both paths cap review at two rounds. You can switch the reviewer to a cheaper model; see
-[Using cheaper models for review](#using-cheaper-models-for-review).
+Every relayed task adds external model calls. On the Claude-led path each plan-review round calls Codex
+once, and the final check may add a diff review. On the Codex-led path each plan-review round calls
+the reviewer twice (an independent inventory, then the review). Review is capped at two rounds.
+Same-family review runs several Claude subagents in parallel and is the most expensive channel.
 
 ## Uninstall
 
@@ -384,54 +293,14 @@ Both paths cap review at two rounds. You can switch the reviewer to a cheaper mo
 ./install.sh --uninstall
 ```
 
-Removes only what the manifest (`~/.claude/ai-anti.manifest.json`) records and still points into
-this checkout, plus its own marker blocks in `~/.claude/CLAUDE.md` and Codex `AGENTS.md`. Your own files and hooks are left
-untouched. Individual parts: `--without-hook`, `--without-codex`, `--remove-plugin <name>`.
+Removes only objects recorded in the manifest that still point into this checkout, plus its own marker
+blocks. To remove individual parts, see [install details (Chinese)](docs/INSTALL.zh-CN.md#卸载).
 
 ## Security
 
 See [SECURITY.md](SECURITY.md) for per-path controls, data sent to model services, retained local
-evidence, credentials and desktop recovery backups, installer writes and private vulnerability reporting.
+evidence, credentials, installer writes, and private vulnerability reporting.
 
 ## License
 
 [Apache-2.0](LICENSE)
-
-### Explicit problem second opinions
-
-Use the `bug-review` Codex skill or Claude Code `/bug-review` command to
-review an existing analysis through two fresh stages, without requiring Git.
-Both use the existing `codex_relay.review_channel` configuration. Evidence collection
-and repair authorization stay with the caller. See [the bundle contract and examples](docs/BUG_REVIEW.md).
-
-Codex-led relays can choose implementation separately from review. Claude Code's
-implementer stays unchanged; solo disables independent implementation. Token Plan uses
-the shared `model_services.profiles.token_plan` Responses URL and credentials, independently
-of active review, and never borrows custom API credentials. The App edits that shared draft.
-Choosing a provider does not authorize business-material transmission. The
-Token Plan introduction used offline fake checks and App builds without an additional live GLM run.
-Invocation completion still requires independent primary acceptance; server model identity
-remains unknown. See the codex-relay skill for bounded execution and evidence.
-
-Qoder implementation: set `codex_relay.implementation_provider` to `qoder`; logical
-`glm-5.3` maps to CLI `GLM-5.3`. Requires existing subscription login and qodercli
-1.1.77. It does not use Token Plan credentials or change Kimi review routing. The
-bounded implementation entry has no write retries or filesystem/network hard sandbox;
-CLI model identity is reported, provider backend identity unknown. See the
-[codex-relay contract](adapters/codex/skills/codex-relay/SKILL.md#qoder-subscription-implementation).
-
-Token Plan implementation uses `codex_relay.token_plan_implementation_model`: only
-`glm-5.3` (missing/null default) or formal `qwen4-max`. Empty/unknown IDs fail even
-when inactive. Review and native models remain independent. Qwen4 requests high effort
-with a local text-only catalog; GLM retains medium. Account availability and real tool
-round trips require separate validation; Responses proves requested model only. Older
-versions use GLM: select GLM before rollback. This change does not activate or install it.
-
-
-## Token Plan primary and backup accounts
-
-Token Plan review and implementation share two credential slots and an opt-in quota failover switch. The primary retains its existing profile credential source; the backup uses `model_services.token_plan_backup.value` in the local 0600 secrets file. Set `token_plan_accounts` as in `config.example.json`; both credentials must exist and differ before enabling. Disabling preserves the backup.
-
-Each logical run starts on primary. Only a real HTTP 429 quota JSON rejection before downstream output permits one identical-request replay with backup authentication. The run stays on backup across stages and bounded transient attempts, without restarting the CLI or completed tools. Generic rate limits, authentication errors, server errors, timeouts, partial streams, SSE errors and account-bound response references never trigger replay. Custom API, native Codex and Qoder keep their routes.
-
-Enabled runs use a temporary authenticated loopback transport, HTTPS upstream certificate validation and inherited upstream proxy settings. Requests and successful responses are limited to 8 MiB; error JSON to 64 KiB; concurrent connections to four. Compressed requests are unsupported. Manifests report the used slot and normalized switch reason, never keys or balances. Prepare-only validates public configuration without credential reads or network. Turn failover off before rolling back to an older release.
