@@ -86,7 +86,14 @@ class DesktopContract(unittest.TestCase):
         self.assertNotIn('.disabled(model.dirty)', view)
         self.assertIn('Codex 评审失败即停止', view)
         app = (ROOT/'apps/macos/Sources/AIReviewBar/App.swift').read_text()
-        self.assertIn('Menu("协作模式："', app)
+        # 0.3.8 起菜单栏下拉只保留当前配置、设置与退出；具体设置项只在设置窗口中修改。
+        menu = app.split('MenuBarExtra {', 1)[1].split('} label:', 1)[0]
+        for item in ('Menu("主模型")', 'Menu("评审服务")', 'Menu("协作模式：', 'Text(model.message)'):
+            self.assertNotIn(item, menu)
+        self.assertIn('Text("当前配置：" + model.title)', menu)
+        self.assertIn('if model.messageIsError { Text("⚠︎ " + model.message) }', menu)
+        self.assertEqual(menu.count('Button('), 2)
+        self.assertLess(menu.index('Button("设置")'), menu.index('Button("退出"'))
         self.assertNotIn('评审模式', app)
     def test_ui_independent_service_groups(self):
         view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
@@ -659,12 +666,10 @@ for event in [
         self.assertIn('custom: $customAgyImplementation', implementation)
         self.assertIn('agyImplementationEffort', implementation)
         self.assertRegex(view, r'Button\("测试评审模型".*\.disabled\([^\n]+\|\| model\.draft\.host == "agy"\)')
-        self.assertIn('model.menuHost("agy")', app)
-        self.assertIn('if model.saved.host != "codex" { Button("Codex"', app)
-        self.assertIn('if model.saved.host != "agy" {', app)
+        self.assertNotIn('model.menuHost(', app)
         self.assertIn('"$source_dir/backend/agy_relay.py"', build)
-        self.assertIn('<key>CFBundleVersion</key><string>14</string>', build)
-        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.7</string>', build)
+        self.assertIn('<key>CFBundleVersion</key><string>15</string>', build)
+        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.8</string>', build)
 
     def test_agy_dual_plan_matches_cli_validation(self):
         import ai_anti_config as cli

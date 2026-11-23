@@ -37,22 +37,8 @@ import AppKit
     var body: some Scene {
         MenuBarExtra {
             Text("当前配置：" + model.title)
-            Menu("主模型") {
-                Button("Claude Code" + (model.saved.host == "claude" ? " ✓" : "")) { model.menuHost("claude") }; Button("Codex" + (model.saved.host == "codex" ? " ✓" : "")) { model.menuHost("codex") }
-                Button("AGY" + (model.saved.host == "agy" ? " ✓" : "")) { model.menuHost("agy") }
-            }.disabled(model.busy || model.dirty || !model.loaded)
-            Menu("评审服务") {
-                if model.saved.host != "codex" { Button("Codex" + (model.savedReviewFamily == "codex" ? " ✓" : "")) { model.menuChannel("codex") } }
-                if model.saved.host != "agy" {
-                    Button("千问 Token Plan" + (model.savedReviewFamily == "token_plan" ? " ✓" : "")) { model.menuChannel("token_plan") }
-                    Button("自定义 API" + (model.savedReviewFamily == "custom_api" ? " ✓" : "")) { model.menuChannel("custom_api") }
-                }
-                if model.saved.host == "codex" { Button("Qoder · Kimi-K3.1-Pro" + (model.savedReviewFamily == "qoder" ? " ✓" : "")) { model.menuChannel("qoder") } }
-            }.disabled(model.saved.mode == "solo" || model.busy || model.dirty || !model.loaded)
-            Menu("协作模式：" + model.saved.mode) {
-                ForEach(model.modes, id: \.0) { item in Button(item.0 + (model.saved.mode == item.0 ? " ✓" : "")) { model.menuMode(item.0) } }
-            }.disabled(model.busy || model.dirty || !model.loaded)
-            Text(model.message)
+            // 具体设置项只在设置窗口调整；菜单仅在读取或保存出错时提示一行错误，正常状态说明不再显示。
+            if model.messageIsError { Text("⚠︎ " + model.message) }
             Divider()
             Button("设置") { delegate.model = model; delegate.showSettings() }.keyboardShortcut(",")
             Button("退出", action: model.quit).keyboardShortcut("q")
