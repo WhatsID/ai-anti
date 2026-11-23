@@ -189,6 +189,12 @@ struct SettingsView: View {
             }
         }
     }
+    private func errorNotice(_ message: String, icon: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: icon).accessibilityHidden(true)
+            Text(message).textSelection(.enabled).fixedSize(horizontal: false, vertical: true)
+        }.font(.caption).foregroundStyle(.red)
+    }
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("配置与检测").font(.title2.bold())
@@ -377,7 +383,18 @@ struct SettingsView: View {
             Divider()
             CheckStatusText(status: model.dirty ? "未检测（设置草稿尚未保存）" : model.status).font(.callout).textSelection(.enabled)
             if model.checking { HStack { ProgressView().controlSize(.small); Text("已用时 \(model.elapsed) 秒"); Button("取消检测", action: model.cancel) } }
-            Text(model.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            if model.dirty && !model.externalChanges.isEmpty {
+                errorNotice("外部程序已修改：\(model.externalChanges.joined(separator: "、"))。当前草稿保存会被拒绝，请先记下改动后点击「重新读取配置」。",
+                            icon: "exclamationmark.triangle.fill")
+            } else if model.dirty && model.externalReadUnreadable {
+                errorNotice("无法读取当前磁盘配置，草稿已保留；请检查配置文件后点击「重新读取配置」。",
+                            icon: "exclamationmark.triangle.fill")
+            }
+            if model.messageIsError {
+                errorNotice(model.message, icon: "xmark.octagon.fill")
+            } else {
+                Text(model.message).font(.caption).foregroundStyle(.secondary).textSelection(.enabled)
+            }
             HStack(alignment: .center, spacing: 8) {
                 Button("检查配置") { model.check() }.disabled(model.busy || model.dirty || !model.loaded)
                 Button("重新读取配置") { if model.dirty { confirmRefresh = true } else { model.refresh() } }.disabled(model.busy)

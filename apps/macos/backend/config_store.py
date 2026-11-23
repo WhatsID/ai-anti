@@ -25,6 +25,13 @@ def token_plan_model(value):
 MODES = ('solo', 'auto', 'rules', 'force')
 HOSTS = ('claude', 'codex', 'agy')
 CODEX_MODELS = ('gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna')
+FINGERPRINT_LABELS = {
+    'ai': 'ai-anti 配置',
+    'claude': 'Claude 设置',
+    'codex': 'Codex 配置',
+    'secrets': '凭证文件',
+}
+
 class StoreError(Exception):
     pass
 
@@ -184,14 +191,19 @@ class Store:
             'codex': (self.root / '.codex' if root else Path(os.environ.get('CODEX_HOME') or str(self.root / '.codex')).expanduser()) / 'config.toml',
             'secrets': self.ai / 'secrets.json',
         }
-    def raw(self, key):
+    def _read_optional(self, key):
         path = self.paths[key]
         safe_path(path)
-        return path.read_bytes() if path.exists() else b''
+        return path.read_bytes() if path.exists() else None
+    def raw(self, key):
+        return self._read_optional(key) or b''
     def read(self):
-        ai_raw, claude_raw, codex_raw = (self.raw(k) for k in ('ai', 'claude', 'codex'))
-        ai = object_json(ai_raw) if self.paths['ai'].exists() else {}
-        claude = object_json(claude_raw) if self.paths['claude'].exists() else {}
+        raw = {k: self._read_optional(k) for k in ('ai', 'claude', 'codex')}
+        config_hashes = {k: hashlib.sha256(data).hexdigest() if data is not None else None
+                         for k, data in raw.items()}
+        ai = object_json(raw['ai']) if raw['ai'] is not None else {}
+        claude = object_json(raw['claude']) if raw['claude'] is not None else {}
+        codex_raw = raw['codex']
         try:
             codex = tomllib.loads(codex_raw.decode()) if codex_raw else {}
         except (ValueError, UnicodeError):
@@ -267,8 +279,12 @@ class Store:
         resolved = [self.credential_path(p) for p in paths]
         values['relative_credentials'] = any(p is None for p in resolved)
         values['credential_present'] = any(p.is_file() for p in resolved if p is not None)
-        return {'values': values, 'fingerprints': {k: fingerprint(p) for k,p in self.paths.items()},
-                'signature': self.signature([p for profile in profiles['profiles'].values() for p in profile['credential_paths']] + values['token_plan_accounts']['backup']['credential_paths']), 'sources': {k: str(p) for k,p in self.paths.items() if k != 'secrets'},
+        credential_paths = [p for profile in profiles['profiles'].values() for p in profile['credential_paths']]
+        credential_paths += values['token_plan_accounts']['backup']['credential_paths']
+        fingerprints = dict(config_hashes, secrets=fingerprint(self.paths['secrets']))
+        return {'values': values, 'fingerprints': fingerprints,
+                'signature': self.signature(credential_paths, config_hashes=config_hashes),
+                'sources': {k: str(p) for k, p in self.paths.items() if k != 'secrets'},
                 'can_restore': (self.desktop / 'last-save.json').is_file()}
     def credential_path(self, raw):
         if not isinstance(raw, str) or not raw or any(c in raw for c in '\r\n\x00'):
@@ -304,7 +320,7 @@ class Store:
             except (StoreError, AttributeError):
                 continue
         return False, None
-    def signature(self, paths):
+    def signature(self, paths, config_hashes=None):
         # Configuration hashes + credential stat only. No secret content goes to UI.
         stamps = {}
         for raw in paths:
@@ -318,7 +334,8 @@ class Store:
                 stamps[str(path)] = [s.st_dev, s.st_ino, s.st_size, s.st_mtime_ns, s.st_ctime_ns]
             except FileNotFoundError:
                 stamps[str(path)] = None
-        config_hashes = {k: fingerprint(p) for k,p in self.paths.items() if k != 'secrets'}
+        if config_hashes is None:
+            config_hashes = {k: fingerprint(p) for k, p in self.paths.items() if k != 'secrets'}
         return hashlib.sha256(encode([config_hashes, stamps])).hexdigest()
     def outputs(self, values, secret, secret_actions=None):
         if secret_actions is not None and not isinstance(secret_actions, dict):
@@ -528,9 +545,11 @@ class Store:
         with open(self.desktop / 'lock', 'a+b') as lock:
             os.chmod(self.desktop / 'lock', 0o600)
             fcntl.flock(lock, fcntl.LOCK_EX)
-            for key, path in self.paths.items():
-                if key not in expected or fingerprint(path) != expected[key]:
-                    raise StoreError('配置已被其他程序修改，请刷新后重试')
+            changed = [key for key, path in self.paths.items()
+                       if key not in expected or fingerprint(path) != expected[key]]
+            if changed:
+                labels = '、'.join(FINGERPRINT_LABELS[key] for key in changed)
+                raise StoreError(f'配置已被其他程序修改（{labels}），请刷新后重试')
             old = {k: self.raw(k) if self.paths[k].exists() else None for k in outputs}
             old_permissions = {k: self.paths[k].stat().st_mode & 0o777 if self.paths[k].exists() else 0o600 for k in outputs}
             backup = self.desktop / 'last-save.json'

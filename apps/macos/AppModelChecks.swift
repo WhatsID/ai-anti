@@ -21,6 +21,7 @@ import Combine
         checkDualPlanAndReviewAddress(snapshot)
         checkAgyDualPlan(snapshot)
         checkAgyHost()
+        checkExternalChanges()
         let checked: [String: Any] = ["signature": "a", "message": "本地检查通过", "checked_at": "fixture", "actual_model": "fake"]
         model.refresh(); assert(model.busy)
         front.complete(.success(snapshot)); assert(model.loaded && !model.busy)
@@ -492,6 +493,258 @@ import Combine
         assert(agentSave["claude_implementation_provider"] as? String == "claude-agent")
         claudeFront.complete(.failure(BridgeFailure(message: "fixture end")))
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
+    }
+
+    @MainActor static func checkExternalChanges() {
+        let values: [String: Any] = [
+            "host": "claude", "channel": "codex", "mode": "rules", "primary_model": "fixture",
+            "claude_channel": "codex", "codex_channel": "qoder",
+            "qwen_executor": "codex", "claude_qwen_executor": "codex",
+        ]
+        let fingerprints: [String: Any] = ["ai": "ai-a", "claude": "claude-a", "codex": NSNull(), "secrets": NSNull()]
+        let before: [String: Any] = ["values": values, "signature": "a", "fingerprints": fingerprints]
+        let secretsChanged = fingerprints.merging(["secrets": "stat:b"]) { _, new in new }
+        let withSecrets: [String: Any] = [
+            "values": values.merging(["credential_present": true]) { _, new in new },
+            "signature": "a", "fingerprints": secretsChanged,
+        ]
+        let claudeChanged = fingerprints.merging(["claude": "claude-b"]) { _, new in new }
+        let after: [String: Any] = [
+            "values": values.merging(["primary_model": "external"]) { _, new in new },
+            "signature": "b", "fingerprints": claudeChanged,
+        ]
+        let checked: [String: Any] = ["signature": "a", "message": "本地检查通过", "checked_at": "fixture"]
+        let failure = BridgeFailure(message: "fixture conflict")
+
+        func makeModel(_ snapshot: [String: Any]? = nil) -> (AppModel, FakeClient, FakeClient) {
+            let front = FakeClient(), back = FakeClient()
+            let model = AppModel(foreground: front, background: back, automatic: false)
+            if let snapshot {
+                model.refresh()
+                front.complete(.success(snapshot))
+            }
+            return (model, front, back)
+        }
+        func inspect(_ model: AppModel, using back: FakeClient, snapshot: [String: Any]) {
+            model.inspect()
+            assert(back.completions.count == 1 && back.requests.last?["action"] as? String == "inspect")
+            back.complete(.success(snapshot.filter { $0.key == "signature" || $0.key == "fingerprints" }))
+        }
+        func assertLoad(_ back: FakeClient) {
+            assert(back.completions.count == 1 && back.requests.last?["action"] as? String == "load")
+        }
+        func sentFingerprints(_ front: FakeClient) -> [String: Any] {
+            assert(front.requests.last?["action"] as? String == "save")
+            return front.requests.last?["fingerprints"] as! [String: Any]
+        }
+
+        // The full inspect response also keeps unchanged polls quiet.
+        do {
+            let (model, front, back) = makeModel(before)
+            model.check(); front.complete(.success(checked))
+            var publications = 0
+            let observer = model.objectWillChange.sink { publications += 1 }
+            for _ in 0..<3 { inspect(model, using: back, snapshot: before) }
+            assert(publications == 0 && back.requests.count == 3)
+            withExtendedLifetime(observer) {}
+        }
+
+        // The managed credential fingerprint and the signature can change independently.
+        do {
+            let (model, front, back) = makeModel(before)
+            inspect(model, using: back, snapshot: withSecrets)
+            assertLoad(back)
+            assert(!model.busy && front.requests.count == 1)
+            model.inspect(); assert(back.requests.count == 2, "Reload must retain the inspection flight")
+            back.complete(.success(withSecrets))
+            assert(model.credentialPresent && model.externalChanges.isEmpty && model.message.contains("已自动重新读取"))
+            model.draft.mode = "force"; model.save()
+            let posted = sentFingerprints(front)
+            assert(posted["secrets"] as? String == "stat:b" && posted["codex"] is NSNull)
+            front.complete(.success(withSecrets))
+            var signatureOnly = withSecrets
+            signatureOnly["signature"] = "credential-path-changed"
+            inspect(model, using: back, snapshot: signatureOnly)
+            assertLoad(back)
+            back.complete(.success(signatureOnly))
+            let count = back.requests.count
+            inspect(model, using: back, snapshot: signatureOnly)
+            assert(back.requests.count == count + 1 && back.completions.isEmpty)
+        }
+
+        // Keep changes to an inactive host, show ordered conflict labels, and recover warnings.
+        do {
+            let (model, _, back) = makeModel(before)
+            model.switchHost("codex")
+            model.draft.primaryModel = "unsaved-codex"
+            model.switchHost("claude")
+            assert(model.draft == model.saved && model.dirty)
+            inspect(model, using: back, snapshot: after)
+            assert(model.externalChanges == ["Claude 设置"] && back.completions.isEmpty)
+            var multiple = after
+            multiple["fingerprints"] = ["secrets": "stat:b", "codex": "codex-b", "claude": "claude-b", "ai": "ai-b"]
+            inspect(model, using: back, snapshot: multiple)
+            assert(model.externalChanges == ["ai-anti 配置", "Claude 设置", "Codex 配置", "凭证文件"])
+            model.inspect(); back.complete(.failure(failure))
+            assert(model.externalReadUnreadable && model.status.contains("不可验证"))
+            inspect(model, using: back, snapshot: before)
+            assert(model.externalChanges.isEmpty && !model.externalReadUnreadable && back.completions.isEmpty)
+            model.switchHost("codex")
+            assert(model.draft.primaryModel == "unsaved-codex")
+        }
+
+        // A successful check must preserve existing warnings and the load baseline.
+        for real in [false, true] {
+            let (model, front, back) = makeModel(before)
+            model.draft.primaryModel = "earlier-edit"
+            inspect(model, using: back, snapshot: after)
+            model.discard()
+            model.check(real: real); assert(model.checking)
+            model.draft.primaryModel = "edited-during-check"
+            var checkResponse = checked
+            checkResponse["fingerprints"] = claudeChanged
+            front.complete(.success(checkResponse))
+            assert(model.externalChanges == ["Claude 设置"] && model.draft.primaryModel == "edited-during-check")
+            inspect(model, using: back, snapshot: after)
+            assert(back.completions.isEmpty && model.externalChanges == ["Claude 设置"],
+                   "A check must not adopt edits made while it was in flight")
+            assert(model.dirty && model.saved.primaryModel == "fixture" && model.draft.primaryModel == "edited-during-check")
+            model.save()
+            assert(sentFingerprints(front)["claude"] as? String == "claude-a")
+            front.complete(.failure(failure))
+        }
+
+        // Discarding an edit made during a reload makes the same disk snapshot eligible again.
+        do {
+            let (model, front, back) = makeModel(before)
+            inspect(model, using: back, snapshot: after)
+            assertLoad(back)
+            model.draft.primaryModel = "typed-during-reload"
+            back.complete(.success(after))
+            assert(model.draft.primaryModel == "typed-during-reload" && model.saved.primaryModel == "fixture")
+            model.discard()
+            assert(!model.dirty && front.requests.count == 1)
+            inspect(model, using: back, snapshot: after)
+            assert(!back.completions.isEmpty, "Discard must allow retrying a reload that was interrupted by an edit")
+            assertLoad(back)
+            back.complete(.success(after))
+            assert(model.saved.primaryModel == "external" && !model.dirty)
+            model.draft.mode = "force"; model.save()
+            assert(sentFingerprints(front)["claude"] as? String == "claude-b")
+            front.complete(.success(after))
+        }
+
+        // Foreground cancellation does not count as a reload failure. Reopening clears a real failure.
+        do {
+            let (model, front, back) = makeModel(before)
+            inspect(model, using: back, snapshot: after)
+            assertLoad(back)
+            let cancellations = back.cancellations
+            model.draft.mode = "force"; model.save()
+            assert(model.busy && back.cancellations == cancellations + 1)
+            front.complete(.failure(failure))
+            model.discard()
+            model.inspect(); assert(back.requests.count == 2)
+            back.complete(.failure(BridgeFailure(message: "cancelled")))
+            assert(!model.externalReadUnreadable && model.saved.primaryModel == "fixture")
+            inspect(model, using: back, snapshot: after)
+            assertLoad(back)
+            back.complete(.failure(failure))
+            assert(model.externalReadUnreadable && model.externalChanges == ["Claude 设置"])
+            inspect(model, using: back, snapshot: after)
+            assert(back.completions.isEmpty && !model.externalReadUnreadable, "The same snapshot must not restart a failed load")
+            model.refreshOnOpen()
+            assert(model.busy && front.requests.last?["action"] as? String == "load")
+            front.complete(.failure(failure))
+            inspect(model, using: back, snapshot: after)
+            assertLoad(back)
+            back.complete(.success(after))
+            assert(model.saved.primaryModel == "external" && !model.messageIsError && model.externalChanges.isEmpty)
+        }
+
+        // A slow window-open load gates editing. Opening with a draft only inspects.
+        do {
+            let (model, front, back) = makeModel()
+            model.refreshOnOpen()
+            assert(model.busy && !model.loaded && front.requests.last?["action"] as? String == "load")
+            model.refreshOnOpen()
+            assert(front.requests.count == 1 && back.requests.isEmpty)
+            front.complete(.success(before))
+            model.check(); front.complete(.success(checked))
+            let checkStatus = model.status
+            model.refreshOnOpen()
+            assert(model.busy && front.requests.last?["action"] as? String == "load", "Opening an already loaded clean form must use foreground load")
+            front.complete(.success(before))
+            assert(model.status == checkStatus, "An unchanged reload preserves the check result")
+            model.refreshOnOpen()
+            assert(model.loaded && model.busy && !model.checking && front.requests.last?["action"] as? String == "load")
+            model.switchHost("codex")
+            assert(model.draft.host == "claude" && model.saved.primaryModel == "fixture")
+            front.complete(.success(after))
+            model.draft.mode = "force"; model.save()
+            assert(sentFingerprints(front)["claude"] as? String == "claude-b")
+            var savedOnOpen = after
+            savedOnOpen["values"] = (after["values"] as! [String: Any]).merging(["mode": "force"]) { _, new in new }
+            front.complete(.success(savedOnOpen))
+            model.draft.mode = "auto"
+            let draft = model.draft
+            let count = front.requests.count
+            model.refreshOnOpen()
+            assert(!model.busy && front.requests.count == count && back.requests.last?["action"] as? String == "inspect")
+            back.complete(.success(["signature": "a", "fingerprints": fingerprints]))
+            assert(model.draft == draft && model.externalChanges == ["Claude 设置"] && back.completions.isEmpty)
+        }
+
+        // Both local validation and backend conflicts are errors while retaining the draft.
+        do {
+            let (model, front, back) = makeModel(before)
+            model.draft.claudeImplementationProvider = "codex"
+            model.draft.claudeImplementationModel = "invalid id"
+            let invalid = model.draft
+            model.save()
+            assert(model.messageIsError && model.message.contains("Claude") && model.dirty && model.draft == invalid)
+            assert(front.requests.count == 1)
+            model.draft.claudeImplementationModel = "valid-id"
+            let valid = model.draft
+            model.save(); front.complete(.failure(failure))
+            assert(model.messageIsError && model.message == "fixture conflict" && model.dirty && model.draft == valid)
+            model.save(); front.complete(.success(before))
+            assert(!model.messageIsError && !model.dirty)
+            model.draft.mode = "force"
+            model.inspect(); back.complete(.failure(failure))
+            assert(model.externalReadUnreadable && model.externalChanges.isEmpty)
+            model.save(); front.complete(.failure(failure))
+            let count = front.requests.count
+            model.discard()
+            assert(!model.messageIsError && model.message.contains("已放弃草稿") && !model.dirty && front.requests.count == count)
+        }
+
+        // Token Plan recommendations can differ from the disk draft without user input.
+        do {
+            var prefilled = before
+            var prefilledValues = values
+            prefilledValues["model_services"] = [
+                "active_api": "custom_api", "profiles": ["token_plan": ["base_url": "", "responses_base_url": ""]],
+            ] as [String: Any]
+            prefilled["values"] = prefilledValues
+            let (model, front, back) = makeModel(prefilled)
+            assert(model.dirty && model.saved.profiles["token_plan"]?.responsesBaseURL == "")
+            assert(model.draft.profiles["token_plan"]?.responsesBaseURL == ServiceProfile.initial("token_plan").responsesBaseURL)
+            var updated = after
+            prefilledValues["primary_model"] = "external"
+            updated["values"] = prefilledValues
+            inspect(model, using: back, snapshot: updated)
+            assertLoad(back)
+            back.complete(.success(updated))
+            assert(model.dirty && model.saved.primaryModel == "external")
+            model.discard()
+            assert(!model.dirty && model.draft == model.saved && front.requests.count == 1)
+            inspect(model, using: back, snapshot: prefilled)
+            assertLoad(back)
+            back.complete(.success(prefilled))
+            assert(model.dirty && model.saved.primaryModel == "fixture")
+        }
+        print("PASS: AppModel external changes, interrupted reloads, window-open refresh, and save errors")
     }
 
     @MainActor static func checkAgyHost() {

@@ -12,7 +12,8 @@ def dispatch(store, request, source=None):
         raise StoreError('请求必须为对象')
     action = request.get('action')
     if action == 'inspect':
-        return {'signature': store.read()['signature']}
+        snap = store.read()
+        return {'signature': snap['signature'], 'fingerprints': snap['fingerprints']}
     if action == 'load':
         return store.read()
     if action == 'save':

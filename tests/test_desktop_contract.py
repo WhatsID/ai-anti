@@ -631,8 +631,8 @@ for event in [
         self.assertIn('if model.saved.host != "codex" { Button("Codex"', app)
         self.assertIn('if model.saved.host != "agy" {', app)
         self.assertIn('"$source_dir/backend/agy_relay.py"', build)
-        self.assertIn('<key>CFBundleVersion</key><string>13</string>', build)
-        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.5</string>', build)
+        self.assertIn('<key>CFBundleVersion</key><string>14</string>', build)
+        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.7</string>', build)
 
     def test_agy_dual_plan_matches_cli_validation(self):
         import ai_anti_config as cli

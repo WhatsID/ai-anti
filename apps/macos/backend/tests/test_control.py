@@ -1,4 +1,5 @@
 import copy
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -27,6 +28,59 @@ class StoreTests(unittest.TestCase):
     def save(self, **changes):
         snap = self.snapshot(); v = snap['values']; v.update(changes)
         return self.store.save(v, snap['fingerprints'])
+
+    def test_inspect_returns_signature_and_fingerprints(self):
+        self.write('ai', {})
+        self.write('secrets', {'tokenplan': {'value': 'fixture-secret'}})
+        snap = self.snapshot()
+        with patch.object(Path, 'read_bytes', autospec=True, side_effect=Path.read_bytes) as read:
+            inspected = dispatch(self.store, {'action': 'inspect'})
+        self.assertEqual(inspected, {k: snap[k] for k in ('signature', 'fingerprints')})
+        self.assertTrue(inspected['fingerprints']['secrets'].startswith('stat:'))
+        self.assertNotIn(self.store.paths['secrets'], [call.args[0] for call in read.call_args_list])
+
+    def test_read_reuses_bytes_for_values_fingerprints_and_signature_during_external_edit(self):
+        original = b'{"relay":{"default_mode":"rules"}}'
+        external = b'{"relay":{"default_mode":"solo"}}'
+        self.write('ai', original)
+        self.write('claude', {'model': 'fixture-claude'})
+        self.write('codex', b'model = "fixture-codex"\n')
+        before = self.snapshot()
+        read_bytes = Path.read_bytes
+        reads = []
+
+        def read_then_change(path):
+            raw = read_bytes(path)
+            if path == self.store.paths['ai'] and path not in reads:
+                self.write('ai', external)
+            reads.append(path)
+            return raw
+
+        with patch.object(Path, 'read_bytes', read_then_change):
+            snap = self.snapshot()
+        with self.assertRaisesRegex(StoreError, '配置已被其他程序修改.*ai-anti 配置.*请刷新后重试'):
+            self.store.save(dict(snap['values'], mode='force'), snap['fingerprints'])
+        self.assertEqual(self.store.raw('ai'), external)
+        self.assertCountEqual(reads, [self.store.paths[k] for k in ('ai', 'claude', 'codex')])
+        self.assertEqual(snap['values']['mode'], 'rules')
+        self.assertEqual(snap['fingerprints']['ai'], hashlib.sha256(original).hexdigest())
+        self.assertEqual(snap['fingerprints'], before['fingerprints'])
+        self.assertEqual(snap['signature'], before['signature'])
+
+    def test_missing_and_empty_config_have_different_fingerprints(self):
+        missing = self.snapshot()
+        self.assertTrue(all(value is None for value in missing['fingerprints'].values()))
+        self.write('codex', b'')
+        empty = self.snapshot()
+        self.assertEqual(empty['values']['codex_model'], missing['values']['codex_model'])
+        self.assertEqual(empty['fingerprints']['codex'], hashlib.sha256(b'').hexdigest())
+        self.assertNotEqual(empty['signature'], missing['signature'])
+        for key in ('ai', 'claude'):
+            with self.subTest(key=key):
+                self.write(key, b'')
+                with self.assertRaisesRegex(StoreError, 'JSON 配置损坏'):
+                    self.snapshot()
+                self.store.paths[key].unlink()
 
     def test_agy_host_roundtrip_keeps_other_host_files(self):
         self.write('claude', b'{"model":"fixture-claude","permissions":{}}\n')
@@ -632,9 +686,22 @@ class StoreTests(unittest.TestCase):
                 self.assertEqual({k: p.read_bytes() if p.exists() else None for k,p in self.store.paths.items()}, before)
                 self.assertEqual(backup.read_bytes(), backup_bytes)
     def test_conflict_no_overwrite(self):
-        snap = self.snapshot(); self.write('claude', {'external':1})
-        with self.assertRaisesRegex(StoreError, '刷新'): self.store.save(snap['values'], snap['fingerprints'])
-        self.assertEqual(json.loads(self.store.raw('claude')), {'external':1})
+        snap = self.snapshot()
+        self.write('claude', {'external': 1})
+        self.write('secrets', {'tokenplan': {'value': 'fixture-secret'}})
+        with self.assertRaises(StoreError) as ctx:
+            self.store.save(snap['values'], snap['fingerprints'])
+        message = str(ctx.exception)
+        self.assertIn('配置已被其他程序修改', message)
+        self.assertIn('Claude 设置、凭证文件', message)
+        self.assertIn('请刷新后重试', message)
+        for path in self.store.paths.values():
+            self.assertNotIn(str(path), message)
+            self.assertNotIn(path.name, message)
+        self.assertNotIn('fixture-secret', message)
+        self.assertEqual(json.loads(self.store.raw('claude')), {'external': 1})
+        self.assertEqual(json.loads(self.store.raw('secrets')), {'tokenplan': {'value': 'fixture-secret'}})
+        self.assertFalse(self.store.paths['ai'].exists())
     def test_new_key_first_private_and_unknown_preserved(self):
         self.write('ai', {'plugins':{'qwen': {'credential_paths':['~/first.json', '~/.config/ai-anti/secrets.json', '~/other.json']}}})
         self.write('secrets', {'unrelated':123, 'tokenplan':{'extra':True, 'value':'old'}})

@@ -152,6 +152,9 @@ struct Draft: Equatable {
     @Published var busy = false
     @Published var loaded = false
     @Published var message = "正在读取配置…"
+    @Published private(set) var messageIsError = false
+    @Published private(set) var externalChanges: [String] = []
+    @Published private(set) var externalReadUnreadable = false
     @Published var status = "未检测"
     @Published var credentialPresent = false
     @Published var relativeCredentials = false
@@ -168,6 +171,7 @@ struct Draft: Equatable {
     @Published var elapsed = 0
     @Published var checking = false
     private var fingerprints: [String: Any] = [:]
+    private var fingerprintValues: [String: String?] = [:]
     private var signature = ""
     private var checkSignature: String?
     private var watching: Timer?
@@ -177,6 +181,7 @@ struct Draft: Equatable {
     private let background: AppRequesting
     private var inspectInFlight = false
     private var inspectGeneration = 0
+    private var failedAutoRefreshSnapshot: (signature: String?, fingerprints: [String: String?]?)?
     private var timer: Timer?
     private struct HostDraft: Equatable {
         var primaryModel: String
@@ -184,12 +189,18 @@ struct Draft: Equatable {
     }
     private var hostDrafts: [String: HostDraft] = [:]
     private var savedHosts: [String: HostDraft] = [:]
+    private var baselineDraft = Draft()
+    private var baselineHosts: [String: HostDraft] = [:]
     private var currentHosts: [String: HostDraft] {
         var hosts = hostDrafts
         hosts[draft.host] = HostDraft(primaryModel: draft.primaryModel, channel: draft.channel)
         return hosts
     }
     var dirty: Bool { executorMigrationPending || draft != saved || (loaded && currentHosts != savedHosts) }
+    private var isUntouched: Bool {
+        ((draft == baselineDraft && currentHosts == baselineHosts) ||
+         (draft == saved && currentHosts == savedHosts)) && !menuSaving
+    }
     private func resetDrafts() { draft = saved; hostDrafts = savedHosts }
     var claudeFallbacks: [String] {
         ([savedHosts["claude"]?.channel ?? "codex"] + fallbacks).filter { $0 != draft.channel }
@@ -277,23 +288,78 @@ struct Draft: Equatable {
             watching = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in Task { @MainActor in self?.inspect() } }
         }
     }
+    private static func normalizeFingerprints(_ data: [String: Any]?) -> [String: String?]? {
+        data?.mapValues { $0 as? String }
+    }
+    private static func changedLabels(from prior: [String: String?], to current: [String: String?]) -> [String] {
+        let labels = [("ai", "ai-anti 配置"), ("claude", "Claude 设置"), ("codex", "Codex 配置"), ("secrets", "凭证文件")]
+        return labels.compactMap { key, label in prior[key] != current[key] ? label : nil }
+    }
+    private func setMessage(_ text: String, isError: Bool = false) {
+        if message != text { message = text }
+        if messageIsError != isError { messageIsError = isError }
+    }
+    private func setExternalReadState(changes: [String], unreadable: Bool) {
+        if externalChanges != changes { externalChanges = changes }
+        if externalReadUnreadable != unreadable { externalReadUnreadable = unreadable }
+    }
+    private func markConfigurationUnverifiable() {
+        checkSignature = nil
+        let unverifiable = "未检测（当前配置不可验证）"
+        if status != unverifiable { status = unverifiable }
+    }
     func inspect() {
         guard loaded && !busy && !inspectInFlight else { return }
         inspectInFlight = true
         let generation = inspectGeneration
         background.start(["action": "inspect"]) { [weak self] result in
             guard let self else { return }
-            self.inspectInFlight = false
-            guard generation == self.inspectGeneration else { return }
+            guard generation == self.inspectGeneration else {
+                self.inspectInFlight = false
+                return
+            }
             switch result {
             case .success(let data):
-                if let prior = self.checkSignature, prior != data["signature"] as? String {
+                let observedSignature = data["signature"] as? String
+                let observedFingerprints = Self.normalizeFingerprints(data["fingerprints"] as? [String: Any])
+                if let prior = self.checkSignature, prior != observedSignature {
                     self.checkSignature = nil; self.status = "未检测（配置或凭证已变化）"
                 }
-            case .failure:
-                if self.status != "未检测（当前配置不可验证）" {
-                    self.checkSignature = nil; self.status = "未检测（当前配置不可验证）"
+                let signatureChanged = observedSignature.map { $0 != self.signature } ?? false
+                let fingerprintsChanged = observedFingerprints.map { $0 != self.fingerprintValues } ?? false
+                guard signatureChanged || fingerprintsChanged else {
+                    self.inspectInFlight = false
+                    self.setExternalReadState(changes: [], unreadable: false)
+                    return
                 }
+                let labels = observedFingerprints.map { Self.changedLabels(from: self.fingerprintValues, to: $0) }
+                    ?? (signatureChanged ? ["配置文件或凭证"] : [])
+                let alreadyFailed = self.failedAutoRefreshSnapshot.map {
+                    $0.signature == observedSignature && $0.fingerprints == observedFingerprints
+                } ?? false
+                guard self.isUntouched && !alreadyFailed else {
+                    self.inspectInFlight = false
+                    self.setExternalReadState(changes: labels, unreadable: false)
+                    return
+                }
+                // Keep the background flight occupied for both requests.
+                self.background.start(["action": "load"]) { [weak self] result in
+                    guard let self else { return }
+                    self.inspectInFlight = false
+                    guard generation == self.inspectGeneration, !self.busy, self.isUntouched else { return }
+                    switch result {
+                    case .success(let data):
+                        if self.apply(data) { self.setMessage("检测到外部配置变化，已自动重新读取") }
+                    case .failure:
+                        self.failedAutoRefreshSnapshot = (observedSignature, observedFingerprints)
+                        self.markConfigurationUnverifiable()
+                        self.setExternalReadState(changes: labels, unreadable: true)
+                    }
+                }
+            case .failure:
+                self.inspectInFlight = false
+                self.markConfigurationUnverifiable()
+                if !self.isUntouched && !self.externalReadUnreadable { self.externalReadUnreadable = true }
             }
         }
     }
@@ -310,7 +376,7 @@ struct Draft: Equatable {
         if checked {
             elapsed = 0
             timer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in Task { @MainActor in self?.elapsed += 1 } }
-            message = payload["action"] as? String == "real" ? "合成检测进行中；API 最多 30 分钟，Qoder 最多 10 分钟，可取消。" : "正在进行本地检查…"
+            setMessage(payload["action"] as? String == "real" ? "合成检测进行中；API 最多 30 分钟，Qoder 最多 10 分钟，可取消。" : "正在进行本地检查…")
         }
         foreground.start(payload) { [weak self] result in
                 guard let self else { return }
@@ -318,7 +384,7 @@ struct Draft: Equatable {
                 switch result {
                 case .failure(let error):
                     if self.menuSaving { self.resetDrafts() }; self.menuSaving = false
-                    self.message = error.localizedDescription
+                    self.setMessage(error.localizedDescription, isError: true)
                     if checked {
                         let formatter = DateFormatter(); formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
                         let kind = payload["action"] as? String == "real" ? "真实合成检测" : "本地检查"
@@ -336,19 +402,22 @@ struct Draft: Equatable {
                                 self.status += " · 实际模型：" + (data["actual_model"] as? String ?? "未知")
                             }
                         }
-                        self.message = "检测完成，用时 \(self.elapsed) 秒"
+                        self.setMessage("检测完成，用时 \(self.elapsed) 秒")
                     } else {
                         let menuAPI = self.menuSaving && self.draft.channel == "qwen"
                         self.menuSaving = false
-                        self.apply(data)
-                        self.message = payload["action"] as? String == "load" ? "已读取默认配置" : "配置已回读确认；用于后续启动或调用"
-                        if menuAPI { self.message += "；请确认服务地址和密钥支持所选模型" }
+                        guard self.apply(data) else { return }
+                        let message = payload["action"] as? String == "load" ? "已读取默认配置" : "配置已回读确认；用于后续启动或调用"
+                        self.setMessage(message + (menuAPI ? "；请确认服务地址和密钥支持所选模型" : ""))
                     }
                 }
         }
     }
-    private func apply(_ data: [String: Any]) {
-        guard let v = data["values"] as? [String: Any] else { message = "配置响应无效"; return }
+    private func apply(_ data: [String: Any]) -> Bool {
+        guard let v = data["values"] as? [String: Any] else {
+            setMessage("配置响应无效", isError: true)
+            return false
+        }
         func text(_ key: String) -> String { v[key] as? String ?? "" }
         var d = Draft(); d.host = text("host"); d.primaryModel = text("primary_model"); d.channel = text("channel")
         if let accounts = v["token_plan_accounts"] as? [String: Any] {
@@ -397,15 +466,16 @@ struct Draft: Equatable {
         }
         d.codexModels = v["codex_models"] as? [String] ?? ModelCatalog.codex
         executorMigrationPending = text("qwen_executor") == "claude" || text("claude_qwen_executor") == "claude"
-        saved = d; draft = d; loaded = true
+        saved = d
         // Legacy configurations may only contain the endpoint for one host.
         // Suggest missing Token Plan defaults in the draft; keep the disk snapshot intact.
-        if var token = draft.profiles["token_plan"] {
+        if var token = d.profiles["token_plan"] {
             let defaults = ServiceProfile.initial("token_plan")
             if token.baseURL.isEmpty { token.baseURL = defaults.baseURL }
             if token.responsesBaseURL.isEmpty { token.responsesBaseURL = defaults.responsesBaseURL }
-            draft.profiles["token_plan"] = token
+            d.profiles["token_plan"] = token
         }
+        draft = d; loaded = true
         let channels = ["claude": text("claude_channel"), "codex": text("codex_channel"), "agy": "codex"]
         defaults = ["claude": text("claude_model"), "codex": text("codex_model"), "agy": ""]
         savedHosts = [:]
@@ -415,6 +485,7 @@ struct Draft: Equatable {
         savedHosts[d.host] = HostDraft(primaryModel: d.primaryModel, channel: d.channel)
         hostDrafts = savedHosts
         fingerprints = data["fingerprints"] as? [String: Any] ?? [:]
+        fingerprintValues = Self.normalizeFingerprints(fingerprints) ?? [:]
         signature = data["signature"] as? String ?? ""
         if let checkSignature, checkSignature != signature { status = "未检测（配置或凭证已变化）"; self.checkSignature = nil }
         credentialPresent = v["credential_present"] as? Bool ?? false
@@ -422,15 +493,26 @@ struct Draft: Equatable {
         fallbacks = v["fallback_channels"] as? [String] ?? []
         canRestore = data["can_restore"] as? Bool ?? false
         sources = data["sources"] as? [String: String] ?? [:]
+        setExternalReadState(changes: [], unreadable: false)
+        failedAutoRefreshSnapshot = nil
+        baselineDraft = draft
+        baselineHosts = currentHosts
+        return true
     }
     func refresh() { operation(["action": "load"]) }
+    func refreshOnOpen() {
+        guard !busy else { return }
+        failedAutoRefreshSnapshot = nil
+        if !loaded || isUntouched { refresh() }
+        else { inspect() }
+    }
     func save() {
         if draft.claudeImplementationProvider == "codex" && !Draft.validModelID(draft.claudeImplementationModel) {
-            message = "Claude 的 Codex 实施模型 ID 必须为非空且不含空白的字符串"
+            setMessage("Claude 的 Codex 实施模型 ID 必须为非空且不含空白的字符串", isError: true)
             return
         }
         if draft.agyImplementationModel != saved.agyImplementationModel && !Draft.validModelID(draft.agyImplementationModel) {
-            message = "AGY 的 Codex 实施模型 ID 必须为非空且不含空白的字符串"
+            setMessage("AGY 的 Codex 实施模型 ID 必须为非空且不含空白的字符串", isError: true)
             return
         }
         var values = draft.dictionary
@@ -462,46 +544,55 @@ struct Draft: Equatable {
     }
     func restore() { operation(["action": "restore", "fingerprints": fingerprints]) }
     func check(real: Bool = false) {
-        guard !dirty else { message = "请先保存或放弃草稿，再检测已保存配置"; return }
+        guard !dirty else { setMessage("请先保存或放弃草稿，再检测已保存配置", isError: true); return }
         operation(["action": real ? "real" : "local"], checked: true)
     }
-    func cancel() { foreground.cancel(); message = "正在取消并清理检测进程…" }
+    func cancel() { foreground.cancel(); setMessage("正在取消并清理检测进程…") }
     func quit() {
         stopBackground(); foreground.cancel()
         if busy {
-            message = "退出前正在清理检测进程…"
+            setMessage("退出前正在清理检测进程…")
             DispatchQueue.main.asyncAfter(deadline: .now() + 6) { NSApplication.shared.terminate(nil) }
         } else { NSApplication.shared.terminate(nil) }
     }
     func switchHost(_ host: String) {
-        guard !busy, loaded else { message = "配置尚未读取或正在忙碌，暂不能切换主模型"; return }
+        guard !busy, loaded else { setMessage("配置尚未读取或正在忙碌，暂不能切换主模型", isError: true); return }
         guard ["claude", "codex", "agy"].contains(host), host != draft.host else { return }
         hostDrafts = currentHosts
         guard let target = hostDrafts[host] else { return }
         draft.host = host; draft.primaryModel = target.primaryModel; draft.channel = target.channel
     }
     func menuHost(_ host: String) {
-        guard !busy, loaded, !dirty else { message = "设置草稿尚未保存或配置尚未读取、忙碌"; return }
+        guard !busy, loaded, !dirty else { setMessage("设置草稿尚未保存或配置尚未读取、忙碌", isError: true); return }
         if host == "agy" && !saved.agyRelayError.isEmpty {
-            message = "AGY 接力配置无效，请先在设置中查看并修复 config.json"
+            setMessage("AGY 接力配置无效，请先在设置中查看并修复 config.json", isError: true)
             return
         }
         switchHost(host)
         guard dirty, draft.host == host else { return }
         if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.responsesBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
-            message = "请在设置中完成所选服务的地址、模型与认证后保存"; return
+            setMessage("请在设置中完成所选服务的地址、模型与认证后保存", isError: true); return
         }
         menuSaving = true; save()
     }
     func menuChannel(_ family: String) {
-        guard !busy, loaded, !dirty else { message = "设置草稿尚未保存或配置忙碌"; return }
+        guard !busy, loaded, !dirty else { setMessage("设置草稿尚未保存或配置忙碌", isError: true); return }
         switchReviewFamily(family)
         guard dirty else { return }
         if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.responsesBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
-            message = "请在设置中完成所选服务的地址、模型与认证后保存"; return
+            setMessage("请在设置中完成所选服务的地址、模型与认证后保存", isError: true); return
         }
         menuSaving = true; save()
     }
-    func menuMode(_ mode: String) { guard !busy, loaded, !dirty else { message = "设置草稿尚未保存"; return }; draft.mode = mode; menuSaving = true; save() }
-    func discard() { resetDrafts() }
+    func menuMode(_ mode: String) {
+        guard !busy, loaded, !dirty else { setMessage("设置草稿尚未保存", isError: true); return }
+        draft.mode = mode; menuSaving = true; save()
+    }
+    func discard() {
+        resetDrafts()
+        if messageIsError {
+            setMessage(externalChanges.isEmpty && !externalReadUnreadable
+                ? "已放弃草稿" : "已放弃草稿，检测到外部修改，将自动重新读取")
+        }
+    }
 }

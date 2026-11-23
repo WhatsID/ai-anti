@@ -18,6 +18,7 @@ import AppKit
             created.center(); window = created
         }
         window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
+        model.refreshOnOpen()
     }
     func applicationWillTerminate(_ notification: Notification) { model?.stopBackground(); model?.cancel() }
 }
@@ -62,7 +63,12 @@ import AppKit
                 .onAppear { delegate.model = model; if CommandLine.arguments.contains("--settings") { delegate.showSettings() } }
         }
         .commands { CommandGroup(replacing: .appSettings) { Button("设置") { delegate.model = model; delegate.showSettings() } } }
-        Settings { SettingsView(model: model).onAppear { delegate.model = model } }
+        Settings {
+            SettingsView(model: model).onAppear {
+                delegate.model = model
+                model.refreshOnOpen()
+            }
+        }
     }
     init() { }
 }
