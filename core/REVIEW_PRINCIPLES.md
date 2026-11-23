@@ -65,6 +65,12 @@ core_text = core.read_text(encoding="utf-8")
 `Path(global_source).resolve().parents[2]` 才是 ai-anti 根。路径可含空格；解析出的 `core` 必须是
 可读常规文件（`core.is_file()` 且 `os.access(core, os.R_OK)`）后才可继续。实际命令仍遵守 `CLI_DISCIPLINE.md`。
 
+支持风险分档的评审入口由送审编排者在**启动评审前**给出本次风险档：本任务命中 `WORKFLOW_ENTRY.md`
+高风险触发器或项目业务高风险触发器清单，或拿不准时为 `high_risk`，否则为 `standard`。plan 评审按
+方案改动清单判定；diff 评审先用 `git status --short` 核对本任务实际改动（含已暂存、未暂存与未跟踪路径）
+再判定，任一命中即升档，不沿用方案轮结论。未给出风险档的入口按 `high_risk` 处理。风险档只选思考深度，
+不改变是否评审、通道顺序、分诊与轮次。
+
 ## R4｜方案评审方式与输出
 
 reviewer 收到仓库根、request、方案和项目部署规模口径。必须依序：

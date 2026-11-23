@@ -17,7 +17,7 @@ import time
 ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'adapters/codex/skills/claude-review/scripts'))
 
-from ai_anti_config import agy_review, load, review_limits
+from ai_anti_config import RISK_TIERS, agy_review, agy_review_effort, load, review_limits
 from review_codex import parse_version_output
 from review_retry import readonly
 from review_runner import RunError, execute
@@ -109,6 +109,7 @@ def preflight(args, env):
     rules = review_rules()
     config = load(args.config)
     review = agy_review(config)
+    review = dict(review, effort=agy_review_effort(review, args.risk_tier))
     timeout, idle = review_limits(config, args.timeout, args.idle_timeout)
     limits = dict(timeout=timeout, idle_timeout=idle, max_output_bytes=OUTPUT_CAP,
                   max_material_bytes=MATERIAL_CAP)
@@ -262,6 +263,7 @@ def run(args, interrupted):
     report = out / 'review_out.txt'
     warnings_file = out / 'warnings.json'
     evidence = dict(relay='agy', mode='plan', provider='codex', requested_model=review['model'],
+                    risk_tier=args.risk_tier or 'unspecified', effective_risk_tier=args.risk_tier or 'high_risk',
                     requested_effort=review['effort'], model_evidence='requested_only',
                     cli_version=None, head=head, repo=str(repo), input_sha256=hashes, limits=limits,
                     attempts_log=None, report=None, warnings_file=None, failed_command_count=0,
@@ -323,6 +325,7 @@ def main():
     for name in ('repo', 'plan', 'out', 'config'):
         plan.add_argument('--' + name, type=Path, required=name != 'config')
     plan.add_argument('--scale', required=True)
+    plan.add_argument('--risk-tier', choices=RISK_TIERS)
     plan.add_argument('--files', nargs='*', default=[])
     plan.add_argument('--timeout', type=int)
     plan.add_argument('--idle-timeout', type=int)

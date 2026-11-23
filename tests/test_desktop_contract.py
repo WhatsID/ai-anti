@@ -170,21 +170,43 @@ class DesktopContract(unittest.TestCase):
         outer=int(re.search(r'action == "real" \? (\d+)',bridge).group(1))
         self.assertEqual(outer,3700); self.assertGreaterEqual(outer,maximum+60)
 
-    def test_codex_review_executable_model_and_effort_snippet(self):
+    def _codex_review_snippet(self):
         command=(ROOT/'adapters/claude-code/commands/codex-review.md').read_text()
         code=next(x for x in re.findall(r'```python\n(.*?)```',command,re.S) if 'model_args' in x)
         store=Store(self.root)
-        fake=self.root/'codex'; fake.write_text('#!'+sys.executable+'\nimport sys,json\nfor e in [{"type":"thread.started","thread_id":"fixture"},{"type":"turn.started"},{"type":"item.completed","item":{"id":"final","type":"agent_message","text":json.dumps(sys.argv[1:])}},{"type":"turn.completed"}]:print(json.dumps(e))\n'); fake.chmod(0o700)
+        fake = self.root/'codex'
+        fake.write_text(f'#!{sys.executable}\n' + '''import json, os, sys
+from pathlib import Path
+Path(os.environ['FIXTURE_CODEX_CALLED']).touch()
+for event in [
+    {'type': 'thread.started', 'thread_id': 'fixture'},
+    {'type': 'turn.started'},
+    {'type': 'item.completed', 'item': {'id': 'final', 'type': 'agent_message', 'text': json.dumps(sys.argv[1:])}},
+    {'type': 'turn.completed'},
+]:
+    print(json.dumps(event))
+''')
+        fake.chmod(0o700)
         env=dict(self.env,PATH=str(self.root)+':/usr/bin:/bin')
+        env.pop('risk_tier', None)
 
-        def invoke(config):
+        def invoke(config, tier=None, env_tier=None):
             case = Path(tempfile.mkdtemp(dir=self.root))
             (case/'review_prompt.txt').write_text('synthetic prompt')
             atomic(store.paths['ai'], json.dumps(config).encode())
-            harness = f'from pathlib import Path\nreview_inputs=[]\nai_anti_root=Path({str(ROOT)!r})\nscratchpad=Path({str(case)!r})\n' + code
-            result = subprocess.run([sys.executable, '-c', harness], env=env, capture_output=True, text=True)
+            harness = f'from pathlib import Path\nreview_inputs=[]\nai_anti_root=Path({str(ROOT)!r})\nscratchpad=Path({str(case)!r})\n'
+            if tier is not None:
+                harness += f'risk_tier = {tier!r}\n'
+            case_env = dict(env, FIXTURE_CODEX_CALLED=str(case/'cli-called'))
+            if env_tier is not None:
+                case_env['risk_tier'] = env_tier
+            result = subprocess.run([sys.executable, '-c', harness + code], env=case_env,
+                                    capture_output=True, text=True)
             return result, case
+        return invoke
 
+    def test_codex_review_executable_model_and_effort_snippet(self):
+        invoke = self._codex_review_snippet()
         model_args = ['--model', 'gpt-6-astra']
         effort_args = ['-c', 'model_reasoning_effort="xhigh"']
         for config, expected in (
@@ -208,10 +230,51 @@ class DesktopContract(unittest.TestCase):
                     self.assertNotEqual(process.returncode, 0)
                     self.assertFalse((case/'review_raw.jsonl').exists())
 
+    def test_codex_review_snippet_uses_python_risk_tier(self):
+        invoke = self._codex_review_snippet()
+        config = {'review': {'codex_effort': 'high', 'codex_high_risk_effort': 'xhigh'}}
+        for tier, env_tier, expected in (
+            ('standard', None, 'high'), ('high_risk', None, 'xhigh'),
+            (None, None, 'xhigh'), (None, 'standard', 'xhigh'),
+        ):
+            with self.subTest(tier=tier, env_tier=env_tier):
+                process, case = invoke(config, tier=tier, env_tier=env_tier)
+                self.assertEqual(process.returncode, 0, process.stderr)
+                self.assertTrue((case/'cli-called').exists())
+                self.assertEqual(json.loads((case/'review_out.txt').read_text()), [
+                    'exec', '--json', '--sandbox', 'read-only', '-c',
+                    'model_reasoning_effort=' + json.dumps(expected), 'synthetic prompt',
+                ])
+        process, case = invoke(config, tier='bogus')
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn('review risk tier must be one of standard, high_risk', process.stderr)
+        self.assertFalse((case/'cli-called').exists())
+
+    def test_codex_review_snippet_preserves_argv_without_high_risk_effort(self):
+        invoke = self._codex_review_snippet()
+        for tier in ('standard', 'high_risk', None):
+            with self.subTest(tier=tier):
+                process, case = invoke({'review': {'codex_effort': 'xhigh'}}, tier=tier)
+                self.assertEqual(process.returncode, 0, process.stderr)
+                self.assertEqual(json.loads((case/'review_out.txt').read_text()), [
+                    'exec', '--json', '--sandbox', 'read-only', '-c',
+                    'model_reasoning_effort="xhigh"', 'synthetic prompt',
+                ])
+
+    def test_codex_review_snippet_rejects_inverted_effort_before_cli(self):
+        invoke = self._codex_review_snippet()
+        config = {'review': {'codex_effort': 'xhigh', 'codex_high_risk_effort': 'high'}}
+        for tier in ('standard', 'high_risk', None):
+            with self.subTest(tier=tier):
+                process, case = invoke(config, tier=tier)
+                self.assertNotEqual(process.returncode, 0)
+                self.assertIn('review.codex_high_risk_effort must not be lower than review.codex_effort', process.stderr)
+                self.assertFalse((case/'cli-called').exists())
+
     def test_app_save_preserves_claude_codex_efforts(self):
         store = Store(self.root)
         atomic(store.paths['ai'], json.dumps({
-            'review': {'codex_model': 'gpt-6-astra', 'codex_effort': 'xhigh'},
+            'review': {'codex_model': 'gpt-6-astra', 'codex_effort': 'high', 'codex_high_risk_effort': 'xhigh'},
             'claude_relay': {'implementation': {'provider': 'codex', 'model': 'gpt-6.2-sol', 'effort': 'high'}},
         }).encode())
         for updates in ({'primary_model': 'claude-test-primary'},
@@ -222,17 +285,19 @@ class DesktopContract(unittest.TestCase):
                 for key, value in updates.items():
                     self.assertEqual(saved['values'][key], value)
                 config = json.loads(store.raw('ai'))
-                self.assertEqual(config['review']['codex_effort'], 'xhigh')
+                self.assertEqual(config['review']['codex_effort'], 'high')
+                self.assertEqual(config['review']['codex_high_risk_effort'], 'xhigh')
                 self.assertEqual(config['claude_relay']['implementation']['effort'], 'high')
 
     def test_app_save_preserves_agy_relay(self):
         store = Store(self.root)
         agy_relay = {
-            'review': {'provider': 'codex', 'model': 'agy-review-model', 'effort': 'xhigh'},
+            'review': {'provider': 'codex', 'model': 'agy-review-model', 'effort': 'high', 'high_risk_effort': 'xhigh'},
             'implementation': {'provider': 'codex', 'model': 'agy-implementation-model', 'effort': 'high'},
         }
         atomic(store.paths['ai'], json.dumps({'agy_relay': agy_relay}).encode())
         state = store.read()
+        self.assertFalse(state['values']['agy_relay_error'])
         saved = store.save(dict(state['values'], mode='auto', reviewer_model='gpt-6.2-astra'), state['fingerprints'])
         self.assertEqual(saved['values']['mode'], 'auto')
         self.assertEqual(saved['values']['reviewer_model'], 'gpt-6.2-astra')
@@ -503,6 +568,10 @@ class DesktopContract(unittest.TestCase):
             None, '', False, [], 3, 'white space', 'a\tb', 'a\u2003b', 'a\u3000b', 'custom/model:tag'))
         routes.extend({'provider': 'codex', 'model': 'model', 'effort': effort} for effort in (
             None, *cli.EFFORTS, 'XHIGH', '', [], 2))
+        routes.extend({'provider': 'codex', 'model': 'model', 'effort': effort, 'high_risk_effort': elevated}
+                      for effort, elevated in ((None, 'low'), ('high', None), ('high', 'high'),
+                                               ('high', 'xhigh'), ('xhigh', 'high'),
+                                               ('high', 'XHIGH'), ('high', []), ('high', 2)))
         for route in ('review', 'implementation'):
             samples.extend({'agy_relay': {route: value}} for value in routes)
         mixed = (
@@ -524,6 +593,10 @@ class DesktopContract(unittest.TestCase):
                         self.assertEqual(actual_parser(sample, StoreError), expected)
         self.assertEqual(desktop.parse_review(mixed[0], StoreError)['model'], 'valid')
         self.assertEqual(desktop.parse_implementation(mixed[1], StoreError)['model'], 'valid')
+        with self.assertRaisesRegex(StoreError, r"agy_relay\.implementation has unknown keys: 'high_risk_effort'"):
+            desktop.parse_implementation({'agy_relay': {'implementation': {
+                'provider': 'codex', 'model': 'model', 'high_risk_effort': 'xhigh',
+            }}}, StoreError)
         for sample, bad in zip(mixed, ('implementation', 'review')):
             with self.subTest(bad=bad), self.assertRaisesRegex(StoreError, rf'agy_relay\.{bad} has unknown keys'):
                 desktop.parse(sample, StoreError)

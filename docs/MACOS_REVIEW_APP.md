@@ -31,7 +31,9 @@ Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停�
 
 双方案配置无效时，该下拉选项停用并提示对应字段。普通保存保留原配置，恢复按原始字节还原。
 
-选择 AGY 保存 `desktop.primary_host = "agy"`。主模型 ID 由 AGY 设置管理，在应用中只读。AGY 的评审与独立实施固定使用 Codex，模型可从目录选择或输入自定义 ID，思考深度仅供查看。应用按 CLI 同样的规则校验 `agy_relay`。发生错误时，应用显示出错字段并阻止切入 AGY 或写入其接力模型；其他宿主仍可保存与检测，恢复沿用备份原字节。
+选择 AGY 保存 `desktop.primary_host = "agy"`。主模型 ID 由 AGY 设置管理，在应用中只读。AGY 的评审与独立实施固定使用 Codex，模型可从目录选择或输入自定义 ID，界面仅显示常规思考深度。应用按 CLI 同样的规则校验 `agy_relay`。发生错误时，应用显示出错字段并阻止切入 AGY 或写入其接力模型；其他宿主仍可保存与检测，恢复沿用备份原字节。
+
+保存时保留手工设置的 `review.codex_high_risk_effort` 与 `agy_relay.review.high_risk_effort`，界面不显示高风险档。启用 AGY 高风险键前先用新源码重建 App。
 
 仅 `agy_relay.dual_plan` 损坏时，应用停用 AGY 双方案下拉并显示出错字段，仍可切入 AGY、保存其他设置或执行 Claude/Codex 宿主的检测。回滚到尚未支持 AGY 双方案的旧版源码前，须从 `~/.config/ai-anti/config.json` 手工删除 `agy_relay.dual_plan` 并保留同级的 `review` 和 `implementation`。切换到 `disable` 后该键仍存在，`last-save.json` 仅保存最近一次修改前的配置。
 

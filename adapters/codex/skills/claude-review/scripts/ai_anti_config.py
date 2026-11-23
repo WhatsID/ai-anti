@@ -17,6 +17,7 @@ class ConfigError(ValueError):
 # must be a value the CLI itself accepts: an alias or a full model name.
 ALIAS = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:-]*')
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
+RISK_TIERS = ('standard', 'high_risk')
 AGY_EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 CLAUDE_EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max')
 AGY_DUAL_PLAN_PARTNERS = ('claude',)
@@ -107,9 +108,22 @@ def _codex_effort(data, key):
     return value
 
 
-def review_codex_effort(data):
-    """Return the optional Codex effort for Claude-led review."""
-    return _codex_effort(data, 'review.codex_effort')
+def _tiered_effort(base, elevated, base_key, elevated_key, risk_tier):
+    if risk_tier is not None and risk_tier not in RISK_TIERS:
+        raise ConfigError('review risk tier must be one of ' + ', '.join(RISK_TIERS))
+    if base is not None and elevated is not None and EFFORTS.index(elevated) < EFFORTS.index(base):
+        raise ConfigError('ai-anti config: ' + elevated_key + ' must not be lower than ' + base_key)
+    if risk_tier == 'standard':
+        return base
+    return base if elevated is None else elevated
+
+
+def review_codex_effort(data, risk_tier=None):
+    """Return the optional Codex effort for the Claude-led review tier."""
+    base_key = 'review.codex_effort'
+    elevated_key = 'review.codex_high_risk_effort'
+    return _tiered_effort(_codex_effort(data, base_key), _codex_effort(data, elevated_key),
+                          base_key, elevated_key, risk_tier)
 
 
 def claude_implementation(data):
@@ -144,10 +158,13 @@ def agy_relay_section(data):
 
 def _agy_codex(data, route):
     key = 'agy_relay.' + route
-    value = _agy_object((agy_relay_section(data) or {}).get(route), key, {'provider', 'model', 'effort'})
     reviewing = route == 'review'
+    allowed = {'provider', 'model', 'effort'}
+    if reviewing:
+        allowed.add('high_risk_effort')
+    value = _agy_object((agy_relay_section(data) or {}).get(route), key, allowed)
     if value is None:
-        return {'provider': 'codex', 'model': None, 'effort': None} if reviewing else None
+        return {'provider': 'codex', 'model': None, 'effort': None, 'high_risk_effort': None} if reviewing else None
     provider = value.get('provider')
     if provider != 'codex' and not (reviewing and provider is None):
         raise ConfigError('ai-anti config: ' + key + '.provider must be codex')
@@ -155,12 +172,26 @@ def _agy_codex(data, route):
     if not (reviewing and model is None):
         if not isinstance(model, str) or not model or any(c.isspace() for c in model):
             raise ConfigError('ai-anti config: ' + key + '.model must be a non-empty string without whitespace')
-    return {'provider': 'codex', 'model': model, 'effort': _codex_effort(data, key + '.effort')}
+    base_key = key + '.effort'
+    effort = _codex_effort(data, base_key)
+    result = {'provider': 'codex', 'model': model, 'effort': effort}
+    if reviewing:
+        elevated_key = key + '.high_risk_effort'
+        elevated = _codex_effort(data, elevated_key)
+        _tiered_effort(effort, elevated, base_key, elevated_key, risk_tier='standard')
+        result['high_risk_effort'] = elevated
+    return result
 
 
 def agy_review(data):
     """Select the independent AGY review route, with Codex defaults."""
     return _agy_codex(data, 'review')
+
+
+def agy_review_effort(review, risk_tier=None):
+    """Select the effort for a parsed AGY review route."""
+    return _tiered_effort(review['effort'], review['high_risk_effort'], 'agy_relay.review.effort',
+                          'agy_relay.review.high_risk_effort', risk_tier)
 
 
 def agy_implementation(data):

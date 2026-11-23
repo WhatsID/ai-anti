@@ -252,13 +252,15 @@ Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独
 | 键 | 含义 | 默认 |
 |----|------|------|
 | `review.channels` | 仅 Claude 主导路径的评审通道顺序 | `["codex", "same-family"]` |
-| `review.codex_effort` | Claude 主导 `/codex-review` 的思考深度，可独立于 `review.codex_model` 设置 | 缺失/null → Codex CLI 默认 |
+| `review.codex_effort` | Claude 主导 `/codex-review` 的常规思考深度，可独立于 `review.codex_model` 设置 | 缺失/null → Codex CLI 默认 |
+| `review.codex_high_risk_effort` | Claude 主导 `/codex-review` 的高风险思考深度 | 缺失/null → `review.codex_effort` |
 | `defaults.deployment_scale` | 项目未声明时传给评审方的部署规模 | 未设置 → 评审提示写明「未声明部署规模」 |
 | `claude_review.model_families`（仅 Claude 通道） | `$claude-review` 接受的 `--model` 取值，及实际模型 ID 必须全匹配的正则 | `opus`、`fable` |
 | `claude_relay.implementation` | Claude 主导时设为 `{"provider":"codex","model":"gpt-6.2-sol"}`，在隔离工作树固定模型实施（CLI 钉 0.169.1，真实探针待验） | 缺失/null → implementer |
 | `claude_relay.implementation.effort` | Claude 主导时按配置调用 Codex 实施的思考深度 | 缺失/null → Codex CLI 默认 |
 | `claude_relay.dual_plan` | Claude 主导可选 AGY 双方案规划（`enabled`、`partner="agy"`、可选 `model`/`effort` 取 `low\|medium\|high\|xhigh\|max`、`synthesizer="claude"\|"agy"`、`on_failure="stop"\|"fallback"`）；会话级临时禁用命令 `/disable-dual-plan` | 缺失/null/`enabled: false` → Claude 单方案 |
 | `agy_relay.dual_plan` | AGY 主导可选 Claude 双方案规划（`enabled`、`partner="claude"`、可选 `model`、`effort` 取 `low\|medium\|high\|xhigh\|max`、`synthesizer="agy"\|"claude"`、`on_failure="stop"\|"fallback"`） | 缺失/null/`enabled: false` → AGY 单方案 |
+| `agy_relay.review.high_risk_effort` | AGY 主导 Codex 方案评审的高风险思考深度 | 缺失/null → `agy_relay.review.effort` |
 | `plugins.qwen.claude_executor` | Claude 主导的 Qwen 执行器，可显式选 `codex` 走 Responses | `claude` |
 | `codex_relay.review_channel` | Codex 主导的评审通道；显式参数优先 | `claude` |
 | `codex_relay.implementation_provider` | Codex 主导实施来源：`codex` 原生代理、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅固定逻辑 `glm-5.3` | 缺失/null → `codex` |
@@ -267,7 +269,13 @@ Claude 主导的 Codex 评审可选目录模型或自定义 ID，实施可单独
 | `plugins.qwen.responses_base_url` | Codex 执行器独立的 Responses 地址 | 无 |
 | `plugins.<name>` | 插件配置，如 qwen 的 `model`、`base_url`、`credential_paths` | 无 |
 
-两个思考深度键仅接受 `low`、`medium`、`high`、`xhigh`、`max`、`ultra`，非法值会在启动 Codex 前报错。评审汇报注明传入值或「CLI 默认」，实施 manifest 记录 `requested_effort`（沿用 CLI 默认时为 `null`）。
+上述 Codex 思考深度键仅接受 `low`、`medium`、`high`、`xhigh`、`max`、`ultra`，非法值会在启动 Codex 前报错。AGY 常规档用 `agy_relay.review.effort`，缺失或为 null 时用 CLI 默认。仅当同一通道的两个深度键都显式设置为非 null 时，高风险档必须达到或超过常规档。
+
+送审编排者按 R3 判档，未传档位按 `high_risk` 处理。评审汇报注明风险档和传入深度，沿用 CLI 默认时也注明。实施 manifest 记录 `requested_effort`（CLI 默认为 `null`）。[共用评审原则](core/REVIEW_PRINCIPLES.md)
+
+示例的常规 high、高风险 xhigh 主要为业务项目的常规评审节省耗时与额度。本仓库的机制文件改动命中高风险触发器。
+
+启用 `agy_relay.review.high_risk_effort` 前先用新源码重建 macOS App，旧 App 后端和旧 CLI 会拒绝该键。回滚前手工删除 AGY 高风险键，并把两个常规档恢复为升级前的值。
 
 凭证放在仓库之外，例如 `~/.config/ai-anti/secrets.json`；插件只读取你配置的路径。
 

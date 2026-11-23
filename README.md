@@ -313,13 +313,15 @@ silently falling back.
 | Key | Meaning | Default |
 |-----|---------|---------|
 | `review.channels` | Claude-led review channel order only | `["codex", "same-family"]` |
-| `review.codex_effort` | Reasoning effort for Claude-led `/codex-review`, independent of `review.codex_model` | missing/null → Codex CLI default |
+| `review.codex_effort` | Standard reasoning effort for Claude-led `/codex-review`, independent of `review.codex_model` | missing/null → Codex CLI default |
+| `review.codex_high_risk_effort` | High-risk reasoning effort for Claude-led `/codex-review` | missing/null → `review.codex_effort` |
 | `defaults.deployment_scale` | Deployment scale passed to reviewers when a project does not declare one | unset → reviewers are told "deployment scale not declared" |
 | `claude_review.model_families` (Claude channel only) | `--model` values accepted by `$claude-review` and the regex their actual model IDs must fully match | `opus`, `fable` |
 | `claude_relay.implementation` | Set `{"provider":"codex","model":"gpt-6.2-sol"}` to implement in an isolated worktree (CLI pin 0.169.1, live probe pending) | missing/null → implementer |
 | `claude_relay.implementation.effort` | Reasoning effort for configured Claude-led Codex implementation | missing/null → Codex CLI default |
 | `claude_relay.dual_plan` | Opt-in Claude-led dual planning with AGY (`enabled`, `partner="agy"`, optional `model`/`effort` in `low\|medium\|high\|xhigh\|max`, `synthesizer="claude"\|"agy"`, `on_failure="stop"\|"fallback"`); session override via `/disable-dual-plan` | missing/null/`enabled: false` → Claude single plan |
 | `agy_relay.dual_plan` | Opt-in AGY-led dual planning with Claude (`enabled`, `partner="claude"`, optional `model`, `effort` in `low\|medium\|high\|xhigh\|max`, `synthesizer="agy"\|"claude"`, `on_failure="stop"\|"fallback"`) | missing/null/`enabled: false` → AGY single plan |
+| `agy_relay.review.high_risk_effort` | High-risk reasoning effort for AGY-led Codex plan review | missing/null → `agy_relay.review.effort` |
 | `plugins.qwen.claude_executor` | Claude-led Qwen executor. Set `codex` to use Responses | `claude` |
 | `codex_relay.review_channel` | Codex-led reviewer; explicit CLI selection wins | `claude` |
 | `codex_relay.implementation_provider` | Codex-led implementation: native `codex`, Token Plan (`glm-5.3` / `qwen4-max`) or Qoder subscription fixed logical `glm-5.3` | missing/null → `codex` |
@@ -328,7 +330,13 @@ silently falling back.
 | `plugins.qwen.responses_base_url` | Separate Responses URL for the Codex executor | none |
 | `plugins.<name>` | Plugin settings, e.g. qwen `model`, `base_url`, `credential_paths` | none |
 
-Both effort keys accept `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` exactly. Invalid values stop the call before Codex starts. Review reports list the effort passed to Codex or indicate the CLI default. Implementation records `requested_effort` in the manifest (`null` for the CLI default).
+The Codex effort keys above accept `low`, `medium`, `high`, `xhigh`, `max`, or `ultra` exactly. Invalid values stop the call before Codex starts. AGY's standard effort is `agy_relay.review.effort`, which uses the CLI default when missing or null. When both effort keys for a route are explicitly set to non-null values, the high-risk effort must be at least as high as the standard effort.
+
+The orchestrator selects the review tier under R3. An omitted tier is treated as `high_risk`. Review reports include the tier and the effort passed to Codex, or indicate the CLI default. Implementation records `requested_effort` in the manifest (`null` for the CLI default). [Shared review principles](core/REVIEW_PRINCIPLES.md)
+
+The `high`/`xhigh` example primarily saves review time and quota for routine work in business projects. Changes to this repository's workflow mechanism trigger high-risk review.
+
+Rebuild the macOS App from the updated source before enabling `agy_relay.review.high_risk_effort`. Older App backends and CLI versions reject this key. Before rolling back, remove the AGY high-risk key and restore both standard effort settings to their pre-upgrade values.
 
 Credentials live outside the repository, e.g. `~/.config/ai-anti/secrets.json`; plugins only read
 the paths you configure.

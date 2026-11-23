@@ -60,7 +60,7 @@ class ConfigTests(unittest.TestCase):
             'claude_relay': {'implementation': {'provider': 'codex', 'model': 'other-implementation'}},
             'codex_relay': {'implementation_provider': 'qoder'},
         }
-        default = {'provider': 'codex', 'model': None, 'effort': None}
+        default = {'provider': 'codex', 'model': None, 'effort': None, 'high_risk_effort': None}
         for extra in ({}, {'agy_relay': None}, {'agy_relay': {}}, {'agy_relay': {'review': None}}):
             with self.subTest(extra=extra):
                 self.assertEqual(agy_review(dict(config, **extra)), default)
@@ -69,7 +69,7 @@ class ConfigTests(unittest.TestCase):
         review = {'provider': 'codex', 'model': 'review-model', 'effort': 'xhigh'}
         implementation = {'provider': 'codex', 'model': 'impl-model', 'effort': 'high'}
         config['agy_relay'] = {'review': dict(review, provider=None), 'implementation': implementation}
-        self.assertEqual(agy_review(config), review)
+        self.assertEqual(agy_review(config), dict(review, high_risk_effort=None))
         self.assertEqual(agy_implementation(config), implementation)
 
     def test_invalid_routes_fail_closed(self):
@@ -102,6 +102,12 @@ class ConfigTests(unittest.TestCase):
                 self.assertEqual(agy_implementation(config), implementation)
         with self.assertRaisesRegex(ConfigError, 'agy_relay.dual_plan'):
             agy_dual_plan(config)
+
+    def test_high_risk_effort_is_review_only(self):
+        route = {'provider': 'codex', 'model': 'fixture', 'effort': 'high', 'high_risk_effort': 'xhigh'}
+        self.assertEqual(agy_review({'agy_relay': {'review': route}}), route)
+        with self.assertRaisesRegex(ConfigError, r"agy_relay\.implementation has unknown keys: 'high_risk_effort'"):
+            agy_implementation({'agy_relay': {'implementation': route}})
 
 
 class PlanReviewTests(unittest.TestCase):
@@ -284,6 +290,8 @@ class PlanReviewTests(unittest.TestCase):
         for rule in (1, 4, 6, 7, 8, 10):
             section = re.search(r'^## R' + str(rule) + r'｜.*?(?=^## R|\Z)', source, re.M | re.S)
             self.assertIn(section.group(0).rstrip(), prompt)
+        self.assertNotIn('## R3｜', prompt)
+        self.assertNotIn('支持风险分档的评审入口', prompt)
         self.assertNotIn('合成附录', prompt)
 
     def test_readonly_arguments_and_version_evidence(self):
@@ -314,6 +322,55 @@ class PlanReviewTests(unittest.TestCase):
         self.assertNotIn('features.code_mode_host=false', args)
         self.assertEqual(args[:-1], expected)
         self.assertEqual(args[-1], (self.out / 'prompt.txt').read_text())
+
+    def test_plan_review_risk_tiers_in_argv_and_evidence(self):
+        for elevated in (False, True):
+            route = {'model': 'fixture-review', 'effort': 'high'}
+            if elevated:
+                route['high_risk_effort'] = 'xhigh'
+            self.config.write_text(json.dumps({'agy_relay': {'review': route}}))
+            previous_argv = None
+            for flags, requested, effective, effort in (
+                ((), 'unspecified', 'high_risk', 'xhigh' if elevated else 'high'),
+                (('--risk-tier', 'standard'), 'standard', 'standard', 'high'),
+                (('--risk-tier', 'high_risk'), 'high_risk', 'high_risk', 'xhigh' if elevated else 'high'),
+            ):
+                with self.subTest(elevated=elevated, requested=requested):
+                    self.out = self.base / f'out-{elevated}-{requested}'
+                    self.calls.unlink(missing_ok=True)
+                    run = self.run_review(*flags)
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    argv = json.loads(self.calls.read_text())
+                    effort_option = 'model_reasoning_effort=' + json.dumps(effort)
+                    self.assertEqual([arg for arg in argv if arg.startswith('model_reasoning_effort=')],
+                                     [effort_option])
+                    self.assertEqual(argv[argv.index(effort_option) - 1], '-c')
+                    evidence = self.evidence()
+                    self.assertTrue(evidence['completed'])
+                    self.assertEqual(evidence['risk_tier'], requested)
+                    self.assertEqual(evidence['effective_risk_tier'], effective)
+                    self.assertEqual(evidence['requested_effort'], effort)
+                    if not elevated and previous_argv is not None:
+                        self.assertEqual(argv, previous_argv)
+                    previous_argv = argv
+
+    def test_plan_review_rejects_inverted_effort_before_output_or_cli(self):
+        self.config.write_text('{"agy_relay":{"review":{"effort":"xhigh","high_risk_effort":"high"}}}')
+        for flags, label in (((), 'unspecified'), (('--risk-tier', 'standard'), 'standard'),
+                             (('--risk-tier', 'high_risk'), 'high_risk')):
+            with self.subTest(tier=label):
+                self.out = self.base / f'out-{label}'
+                self.calls = self.base / f'calls-{label}'
+                self.env['AGY_TEST_CALLS'] = str(self.calls)
+                run = self.run_review(*flags)
+                self.assert_unstarted(run)
+                self.assertIn('ai-anti config: agy_relay.review.high_risk_effort '
+                              'must not be lower than agy_relay.review.effort', run.stderr)
+
+    def test_plan_review_rejects_unknown_risk_tier(self):
+        run = self.run_review('--risk-tier', 'bogus')
+        self.assert_unstarted(run)
+        self.assertIn('invalid choice', run.stderr)
 
     def test_unrecognized_version_is_a_nonblocking_warning(self):
         self.env['AGY_TEST_VERSION'] = 'codex-cli 9.1.2-rc.1'

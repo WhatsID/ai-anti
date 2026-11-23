@@ -5,7 +5,8 @@
       "same-family"
     ],
     "codex_model": "gpt-6-astra",
-    "codex_effort": "xhigh",
+    "codex_effort": "high",
+    "codex_high_risk_effort": "xhigh",
     "timeout": 1800,
     "idle_timeout": 900
   },
@@ -41,7 +42,8 @@
     "review": {
       "provider": "codex",
       "model": "gpt-6.2-astra",
-      "effort": "xhigh"
+      "effort": "high",
+      "high_risk_effort": "xhigh"
     },
     "implementation": {
       "provider": "codex",

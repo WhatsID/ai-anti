@@ -217,9 +217,37 @@ class ClaudeImplementationConfig(unittest.TestCase):
         for value in ('low', 'medium', 'high', 'xhigh', 'max', 'ultra'):
             with self.subTest(value=value):
                 self.assertEqual(ai_anti_config.review_codex_effort({'review': {'codex_effort': value}}), value)
-        for value in ('XHIGH', 'x high', 1, 'minimal', 'high ', '', [], {}, True):
-            with self.subTest(value=value), self.assertRaisesRegex(ConfigError, r'review\.codex_effort'):
-                ai_anti_config.review_codex_effort({'review': {'codex_effort': value}})
+        for key in ('codex_effort', 'codex_high_risk_effort'):
+            for value in ('XHIGH', 'x high', 1, 'minimal', 'high ', '', [], {}, True):
+                for tier in (None, 'standard', 'high_risk'):
+                    with self.subTest(key=key, value=value, tier=tier):
+                        with self.assertRaisesRegex(ConfigError, rf'review\.{key} must be one of '):
+                            ai_anti_config.review_codex_effort({'review': {key: value}}, risk_tier=tier)
+
+    def test_review_effort_selects_tier_and_handles_null(self):
+        for base, elevated, standard, high_risk in (
+            ('high', 'xhigh', 'high', 'xhigh'),
+            ('high', None, 'high', 'high'),
+            (None, 'low', None, 'low'),
+            ('high', 'high', 'high', 'high'),
+            (None, None, None, None),
+        ):
+            config = {'review': {'codex_effort': base, 'codex_high_risk_effort': elevated}}
+            for tier, expected in (('standard', standard), ('high_risk', high_risk), (None, high_risk)):
+                with self.subTest(base=base, elevated=elevated, tier=tier):
+                    self.assertEqual(ai_anti_config.review_codex_effort(config, risk_tier=tier), expected)
+
+    def test_review_effort_rejects_inverted_or_invalid_tier(self):
+        config = {'review': {'codex_effort': 'xhigh', 'codex_high_risk_effort': 'high'}}
+        for tier in (None, 'standard', 'high_risk'):
+            with self.subTest(tier=tier):
+                with self.assertRaises(ConfigError) as error:
+                    ai_anti_config.review_codex_effort(config, risk_tier=tier)
+                self.assertEqual(str(error.exception), 'ai-anti config: review.codex_high_risk_effort '
+                                 'must not be lower than review.codex_effort')
+        for tier in ('bogus', '', [], 1):
+            with self.subTest(tier=tier), self.assertRaisesRegex(ConfigError, '^review risk tier must be one of '):
+                ai_anti_config.review_codex_effort({}, risk_tier=tier)
 
     def test_missing_null_and_invalid_implementation(self):
         for config in ({}, {'claude_relay': None}, {'claude_relay': {'implementation': None}}):

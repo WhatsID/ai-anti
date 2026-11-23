@@ -55,7 +55,7 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(updated['fingerprints']['claude'], initial['fingerprints']['claude'])
 
     def test_agy_single_key_edits_preserve_other_route_and_efforts(self):
-        review = {'provider': None, 'model': 'old-review', 'effort': 'ultra'}
+        review = {'provider': None, 'model': 'old-review', 'effort': 'xhigh', 'high_risk_effort': 'ultra'}
         implementation = {'provider': 'codex', 'model': 'old-impl', 'effort': 'xhigh'}
         self.write('ai', {'agy_relay': {'review': review, 'implementation': implementation}})
         for changed_key, model_key, new_model in (
@@ -125,7 +125,8 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(values.pop('agy_review_model'), '')
         self.assertEqual(values.pop('agy_implementation_model'), '')
         self.assertIn('agy_relay.implementation', values['agy_relay_error'])
-        self.assertEqual(values['agy_relay']['review'], {'provider': 'codex', 'model': None, 'effort': None})
+        self.assertEqual(values['agy_relay']['review'],
+                         {'provider': 'codex', 'model': None, 'effort': None, 'high_risk_effort': None})
         self.assertIsNone(values['agy_relay']['implementation'])
         with self.assertRaisesRegex(StoreError, '不能切换为 AGY 主模型'):
             self.store.save(dict(values, host='agy'), snap['fingerprints'])

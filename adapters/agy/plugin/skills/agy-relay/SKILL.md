@@ -101,11 +101,13 @@ git -C "$repo" status --short
 ## 第 2 步：Codex 只读评审
 
 读取 codex-review 技能。按 R3 在发起评审前核对必要材料、路径、规模、配置与输出目录。
+按 R3 根据方案改动清单判定风险档，将 `risk_tier` 设为 `standard` 或 `high_risk`。
 每一轮使用仓库外新目录，提示词和完整日志留证。
 
 ```bash
 python3 "$mechanism/adapters/agy/scripts/codex_review.py" plan \
-  --repo "$repo" --plan "$plan" --scale "$scale" --out "$review_out" < /dev/null
+  --repo "$repo" --plan "$plan" --scale "$scale" --out "$review_out" \
+  --risk-tier "$risk_tier" < /dev/null
 ```
 
 需要时用 --files 加入仓库内相对文件；总材料至多 2 MiB。--prepare-only 仅准备材料。
@@ -166,7 +168,7 @@ AGY 对照候选基线独立读取全部增量。用 git status --short、git di
 
 ## 第 6 步：汇报
 
-汇报需求及第 3b 步裁决、逐条评审意见与分诊、实际通道和请求模型/深度、修改文件与理由、
+汇报需求及第 3b 步裁决、逐条评审意见与分诊、实际通道、请求模型、评审风险档与实际传入的思考深度、修改文件与理由、
 验证命令与结果、版本或工具警告、未覆盖项、产物路径，以及落回和工作树处置状态。
 双方案规划注明协作方 Claude、请求模型和实际模型（`actual_model`）、请求深度、综合方及
 实际调用目录。执行过双方案调用时同时注明规划工作树的处置状态，保留时附路径。

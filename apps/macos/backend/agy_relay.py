@@ -2,7 +2,7 @@
 
 KEY = 'agy_relay'
 EFFORTS = ('low', 'medium', 'high', 'xhigh', 'max', 'ultra')
-REVIEW_DEFAULT = {'provider': 'codex', 'model': None, 'effort': None}
+REVIEW_DEFAULT = {'provider': 'codex', 'model': None, 'effort': None, 'high_risk_effort': None}
 CHANGE_KEYS = ('agy_review_model', 'agy_implementation_model')
 
 
@@ -23,13 +23,22 @@ def _model(value, key, error):
         raise error('ai-anti config: ' + key + '.model must be a non-empty string without whitespace')
 
 
+def _effort(value, key, error):
+    if value is not None and (not isinstance(value, str) or value not in EFFORTS):
+        raise error('ai-anti config: ' + key + ' must be one of ' + ', '.join(EFFORTS))
+    return value
+
+
 def _parse_route(ai, route, error):
     if ai is not None and not isinstance(ai, dict):
         raise error('ai-anti config: ' + KEY + ' parent is not an object')
     relay = _object(ai.get(KEY) if ai is not None else None, KEY, {'review', 'implementation', 'dual_plan'}, error)
     key = KEY + '.' + route
-    value = _object((relay or {}).get(route), key, {'provider', 'model', 'effort'}, error)
     reviewing = route == 'review'
+    allowed = {'provider', 'model', 'effort'}
+    if reviewing:
+        allowed.add('high_risk_effort')
+    value = _object((relay or {}).get(route), key, allowed, error)
     if value is None:
         return dict(REVIEW_DEFAULT) if reviewing else None
     provider = value.get('provider')
@@ -38,10 +47,14 @@ def _parse_route(ai, route, error):
     model = value.get('model')
     if not (reviewing and model is None):
         _model(model, key, error)
-    effort = value.get('effort')
-    if effort is not None and (not isinstance(effort, str) or effort not in EFFORTS):
-        raise error('ai-anti config: ' + key + '.effort must be one of ' + ', '.join(EFFORTS))
-    return {'provider': 'codex', 'model': model, 'effort': effort}
+    effort = _effort(value.get('effort'), key + '.effort', error)
+    result = {'provider': 'codex', 'model': model, 'effort': effort}
+    if reviewing:
+        elevated = _effort(value.get('high_risk_effort'), key + '.high_risk_effort', error)
+        if effort is not None and elevated is not None and EFFORTS.index(elevated) < EFFORTS.index(effort):
+            raise error('ai-anti config: ' + key + '.high_risk_effort must not be lower than ' + key + '.effort')
+        result['high_risk_effort'] = elevated
+    return result
 
 
 def parse_review(ai, error):
