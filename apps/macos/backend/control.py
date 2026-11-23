@@ -16,6 +16,8 @@ def dispatch(store, request, source=None):
         return {'signature': snap['signature'], 'fingerprints': snap['fingerprints']}
     if action == 'load':
         return store.read()
+    if action == 'cli_status':
+        return checks.cli_status(request.get('names'))
     if action == 'save':
         return store.save(request['values'], request['fingerprints'], request.get('secret', ''), request.get('secret_actions'))
     if action == 'restore':

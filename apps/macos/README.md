@@ -18,7 +18,7 @@ bash apps/macos/build-app.sh /private/tmp/ai-anti-app-build
 自己本机使用不需要 iOS 式开发者账号；ad-hoc 签名不等于 Apple 公证，跨机器分发的签名/公证另行处理。
 应用不会登录自启，也不自动更新。Python 不打包在应用中；Finder 启动时按显式 `--python`、Homebrew
 常见绝对路径、PATH 候选顺序寻找并有界验证 Python 3.11+，缺失时设置窗口显示原因。
-Claude、Codex、AGY（`agy`）和 Qoder（`qodercli`）CLI 的发现同样覆盖 `/opt/homebrew/bin` 和 `/usr/local/bin`；AGY 和 Qoder 还会查找 `~/.local/bin`。
+Claude、Codex、AGY（`agy`）和 Qoder（`qodercli`）按 `/opt/homebrew/bin`、`/usr/local/bin`、`PATH`、`~/.local/bin` 的顺序查找。
 
 ```bash
 /private/tmp/ai-anti-app-build/AIAnti.app/Contents/MacOS/AIAnti \
@@ -43,6 +43,21 @@ Claude、Codex、AGY（`agy`）和 Qoder（`qodercli`）CLI 的发现同样覆�
 Qwen 使用现有正式 `review.py diff --channel qwen` 全部门禁；Codex 需要支持隔离检测参数的新版本，
 验证 JSON 最终 turn 与随机合成文件读取得到的值，不能只凭退出码为零。实际模型没有结构化证据则标“未知”。
 检测结果只保存在内存；重启归未检测，配置/端点/凭证文件 stat 改变后失效。
+
+### 设置中的 CLI 安装
+
+打开设置后，「主模型」下方显示当前草稿所需 CLI 的版本与状态，覆盖评审、实施、双方案规划及 Claude 评审回退。`solo` 仅显示主模型所需 CLI。旧配置中的 Qwen 执行器仍使用 Claude 时，保存前会标注「保存后改用 Codex」。
+
+版本探测仅在打开设置、草稿引入尚未检测的 CLI 或点击「重新检测」时运行。菜单栏冷启动和后台配置轮询只读配置。探测只运行 `--version`，每个 CLI 限时 3 秒，终止宽限 1 秒。配置尚未读入时，「重新检测」会先重试读取。
+
+缺失时可点「安装…」查看并复制命令、打开官方来源，或确认在系统「终端」中执行。安装完成后按回车启动登录，输入 `s` 可跳过，随后回到设置点「重新检测」。版本读取失败时可重试检测。
+
+- Claude Code 使用 `curl -fsSL https://claude.ai/install.sh | bash`。[官方安装说明](https://code.claude.com/docs/en/setup)
+- Codex 检测到 Homebrew 时使用 `brew install --cask codex`，其余情况使用 `curl -fsSL https://chatgpt.com/codex/install.sh | sh`。[官方安装说明](https://github.com/openai/codex)
+- AGY 使用 `curl -fsSL https://antigravity.google/cli/install.sh | bash`。[官方安装说明](https://antigravity.google/docs/cli/install)
+- Qoder CLI 缺失时可点「打开官方安装说明」，手动安装后点「重新检测」。[官方安装说明](https://docs.qoder.com/cli/installation)
+
+安装取得官方当前版本，具体工作流的实测版本见兼容性说明。版本显示仅确认 CLI 可执行并返回可识别版本号。
 
 评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen4-Max（qwen4-max）、Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3.1-Pro（kmodel_latest；CLI 明确准入 1.1.74 / 1.1.77，1.1.77 已完成正式 bug-review 实测；桌面路由仅离线验证）；Codex 评审目录含 gpt-6.2-sol、gpt-6.2-astra 等六个模型，支持 CLI 默认及自定义模型 ID；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Claude 可选择 Codex 评审，AGY 固定使用 Codex 评审；既有其他路由保留显示。
 
@@ -83,11 +98,12 @@ model_services（version=1、active_api、固定 token_plan/custom_api profiles�
 
 ## 离线测试
 
-AppModel 状态验收使用可手动完成请求的 fake client，不调用 Python 或模型。独立编译并运行：
+AppModel 状态验收使用可手动完成请求的 fake client 和终端替身，覆盖探测状态与安装确认。独立编译并运行：
 
 ```bash
 mkdir -p /private/tmp/ai-anti-app-checks
 swiftc -parse-as-library -module-cache-path /private/tmp/ai-anti-app-checks/module-cache \
+  apps/macos/Sources/AIReviewBar/CLITool.swift \
   apps/macos/Sources/AIReviewBar/ReviewService.swift \
   apps/macos/Sources/AIReviewBar/ModelCatalog.swift \
   apps/macos/Sources/AIReviewBar/AppModel.swift \

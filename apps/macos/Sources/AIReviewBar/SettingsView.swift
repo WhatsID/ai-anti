@@ -59,7 +59,7 @@ enum SettingsSummary {
     }
 }
 
-private enum SettingsColumns {
+enum SettingsColumns {
     static let labelWidth: CGFloat = 132
     static let spacing: CGFloat = 12
 }
@@ -122,6 +122,7 @@ struct SettingsView: View {
     @State private var confirmReal = false
     @State private var confirmRestore = false
     @State private var confirmRefresh = false
+    @State private var installTarget: RequiredCLI?
     @State private var customReview = false
     @State private var customClaudeImplementation = false
     @State private var customCodexImplementation = false
@@ -209,6 +210,7 @@ struct SettingsView: View {
                                 Text("AGY").tag("agy")
                             }
                         }
+                        CLIStatusSection(model: model) { installTarget = $0 }
                         modelPicker("主模型 ID", selection: $model.draft.primaryModel, options: model.primaryOptions)
                             .disabled(model.draft.host == "agy")
                         field("协作模式") {
@@ -410,7 +412,13 @@ struct SettingsView: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
         }.padding(20).frame(width: 740, height: 760)
         .onChange(of: model.saved) { _ in closeCustomEditors() }
+        .onChange(of: model.requiredCLINames) { _ in model.ensureCLIStatus() }
         .disabled(model.busy && !model.checking)
+        .sheet(item: $installTarget) { item in
+            if let method = CLICatalog.tool(item.id).installMethod(homebrewAvailable: model.homebrewAvailable) {
+                CLIInstallSheet(model: model, item: item, method: method)
+            }
+        }
         .alert("测试会消耗模型额度", isPresented: $confirmReal) {
             Button("开始合成检测") { model.check(real: true) }; Button("取消", role: .cancel) {}
         } message: { Text("仅使用临时合成仓库；不读取业务材料。统一使用评审预算配置（默认总时长 30 分钟、空闲 15 分钟），无自动重试或降级。") }

@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- AIAnti 0.3.10（构建号 17）在设置窗口显示当前配置所需 CLI 的版本与状态。缺失时可确认后在系统终端运行官方安装命令，Qoder CLI 提供官方安装说明链接。
+- AIAnti 的 CLI 发现为 Claude Code 和 Codex CLI 补上 `~/.local/bin` 兜底，Finder 启动时也能识别官方独立安装器安装的 CLI。
+
 - AIAnti 0.3.9（构建号 16）菜单栏「当前配置」拆为主模型、评审服务、实施服务、协作模式四行，solo 模式下评审与实施显示为停用。
 - AIAnti 0.3.8（构建号 15）菜单栏下拉只保留当前配置、设置与退出：移除主模型、评审服务、协作模式三个快捷子菜单及正常状态说明，读取或保存出错时仍显示一行错误。具体设置在设置窗口中修改。
 - Claude 主导的 Qwen 执行器配置键改为 `claude_relay.qwen_executor`。旧键 `plugins.qwen.claude_executor` 仍可读取，新旧键取值冲突时报错。

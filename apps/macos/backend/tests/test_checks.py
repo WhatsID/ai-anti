@@ -6,7 +6,7 @@ import sys
 import tempfile
 import time
 import unittest
-from unittest.mock import patch
+from unittest.mock import call, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import checks
 from config_store import Store, StoreError, atomic
@@ -43,6 +43,100 @@ class CheckTests(unittest.TestCase):
         local.chmod(0o700)
         with patch('checks.shutil.which', return_value=None), patch('checks.Path.home', return_value=self.root), patch('checks.os.path.isfile', side_effect=lambda value: value == str(local)):
             self.assertEqual(checks.discover('agy'), str(local))
+
+    def test_claude_local_bin_discovery(self):
+        for name in ('claude', 'codex'):
+            with self.subTest(name=name):
+                local = self.root / '.local/bin' / name
+                local.parent.mkdir(parents=True, exist_ok=True)
+                local.write_text('#!/bin/sh\nexit 0\n')
+                local.chmod(0o700)
+                with patch('checks.Path.home', return_value=self.root), \
+                     patch('checks.os.path.isfile', side_effect=lambda path: path == str(local)), \
+                     patch('checks.shutil.which', return_value=None):
+                    self.assertEqual(checks.discover(name), str(local))
+
+    def test_cli_status_versions_missing_and_brew(self):
+        cli = self.root / 'fake-codex'
+        cli.write_text('''#!/bin/sh
+[ "$#:$1" = "1:--version" ] || exit 11
+if read -r input; then exit 12; fi
+echo 'warning: cannot update PATH aliases (os error 1)' >&2
+echo 'codex-cli 0.169.1'
+''')
+        cli.chmod(0o700)
+        brew = self.root / 'fake-brew'
+        brew.write_text('#!/bin/sh\ntouch "$0.called"\n')
+        brew.chmod(0o700)
+        path = {'codex': str(cli), 'brew': str(brew)}
+        is_file = os.path.isfile
+        with patch('checks.Path.home', return_value=self.root), \
+             patch('checks.os.path.isfile', side_effect=lambda candidate: not candidate.startswith(('/opt/', '/usr/local/')) and is_file(candidate)), \
+             patch('checks.shutil.which', side_effect=path.get) as which:
+            status = checks.cli_status(['codex', 'claude', 'codex'])
+        self.assertEqual(list(status['items']), ['codex', 'claude'])
+        self.assertEqual(status, {'items': {'codex': {'state': 'installed', 'version': '0.169.1'},
+                                           'claude': {'state': 'missing'}},
+                                  'package_managers': {'brew': True}})
+        self.assertEqual(which.call_args_list, [call('codex'), call('claude'), call('brew')])
+        self.assertFalse(brew.with_suffix('.called').exists())
+
+    def test_cli_status_rejects_unlisted_names_before_discovery(self):
+        with patch('checks.discover') as discover, patch('checks.run') as run:
+            for names in (None, [], 'claude', {'claude': True}, ['claude', 1],
+                          ['claude', []], ['claude', 'git'], ['../claude']):
+                with self.subTest(names=names), self.assertRaisesRegex(StoreError, 'CLI 名称列表无效'):
+                    checks.cli_status(names)
+            discover.assert_not_called()
+            run.assert_not_called()
+
+    def test_cli_status_redacts_errors_and_keeps_probing(self):
+        def probe(argv, cwd, log, **kwargs):
+            self.assertEqual(argv[1:], ['--version'])
+            self.assertEqual(kwargs, {'timeout': 3, 'limit': 65536, 'termination_grace': 1})
+            self.assertEqual(Path(log).parent, Path(cwd))
+            Path(log).write_text('private-fixture-path and output')
+            name = Path(argv[0]).name
+            if name == 'claude':
+                raise checks.CheckError('超时 private-fixture-path')
+            if name == 'codex':
+                raise OSError('private-fixture-path')
+            if name == 'agy':
+                raise checks.CheckError('超过上限 private-fixture-path')
+            return 7
+
+        with patch('checks.discover', side_effect=lambda name: name), \
+             patch('checks.shutil.which', return_value=None), patch('checks.os.path.isfile', return_value=False), \
+             patch('checks.run', side_effect=probe) as run:
+            result = checks.cli_status(['claude', 'codex', 'agy', 'qodercli'])
+            self.assertEqual(result['items'], {
+                'claude': {'state': 'error', 'reason': '版本检测超时'},
+                'codex': {'state': 'error', 'reason': '无法执行 CLI'},
+                'agy': {'state': 'error', 'reason': '版本输出超过上限'},
+                'qodercli': {'state': 'error', 'reason': '版本命令退出异常'},
+            })
+            self.assertEqual(result['package_managers'], {'brew': False})
+            logs = {entry.args[2] for entry in run.call_args_list}
+            self.assertTrue(all(not Path(log).exists() for log in logs))
+            def no_version(argv, cwd, log, **kwargs):
+                Path(log).write_bytes(b'no-version\xff')
+                return 0
+
+            run.side_effect = no_version
+            self.assertEqual(checks.cli_status(['qodercli'])['items']['qodercli'],
+                             {'state': 'error', 'reason': '无法识别版本号'})
+
+    def test_cli_status_cancellation_stops_discovery_and_remaining_probes(self):
+        with patch('checks.discover', side_effect=lambda name: name) as discover, \
+             patch('checks.run', side_effect=checks.CheckError('检测已取消')):
+            with self.assertRaisesRegex(checks.CheckError, '检测已取消'):
+                checks.cli_status(['claude', 'codex'])
+            discover.assert_called_once_with('claude')
+            discover.reset_mock()
+            checks.stop()
+            with self.assertRaisesRegex(checks.CheckError, '检测已取消'):
+                checks.cli_status(['codex'])
+            discover.assert_not_called()
 
     def test_agy_source_discovery_prioritizes_plugin_checkout(self):
         store = Store(self.root / 'home')

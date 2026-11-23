@@ -12,8 +12,26 @@ import Combine
     func complete(_ result: Result<[String: Any], Error>) { completions.removeFirst()(result) }
 }
 
+@MainActor final class FakeTerminalLauncher: TerminalLaunching {
+    var requests: [(CLIToolID, CLIInstallMethod)] = []
+    var failure: BridgeFailure?
+
+    func launch(toolID: CLIToolID, method: CLIInstallMethod) async throws {
+        requests.append((toolID, method))
+        if let failure { throw failure }
+    }
+}
+
 @main struct AppModelChecks {
-    @MainActor static func main() {
+    @MainActor static func main() async {
+        checkRequiredCLIs()
+        checkLegacyCLIExecutorMigration()
+        checkCLIProbeLifecycle()
+        checkCLIAutomaticReloadStaysReadOnly()
+        checkCLIProbeQueueAndErrors()
+        checkCLIConfigurationLoadRetry()
+        checkCLIInstallScript()
+        await checkCLIInstallActions()
         let front = FakeClient(), back = FakeClient()
         let model = AppModel(foreground: front, background: back, automatic: false)
         let snapshot: [String: Any] = ["signature": "a", "fingerprints": ["fixture": "a"], "can_restore": true,
@@ -493,6 +511,268 @@ import Combine
         assert(agentSave["claude_implementation_provider"] as? String == "claude-agent")
         claudeFront.complete(.failure(BridgeFailure(message: "fixture end")))
         print("PASS: AppModel quiet inspect, single flight, foreground priority, stale callbacks, draft/save/refresh/restore/cancel")
+    }
+
+    private static func cliSnapshot(host: String = "claude", channel: String = "codex", mode: String = "rules",
+                                    extras: [String: Any] = [:]) -> [String: Any] {
+        let values: [String: Any] = [
+            "host": host, "channel": channel, "mode": mode,
+            "claude_qwen_executor": "codex", "qwen_executor": "codex"
+        ]
+        return ["signature": "cli-fixture", "values": values.merging(extras) { _, new in new }]
+    }
+
+    private static func cliReply(_ items: [String: [String: String]], brew: Bool = false) -> [String: Any] {
+        ["items": items, "package_managers": ["brew": brew]]
+    }
+
+    @MainActor private static func checkRequiredCLIs() {
+        let cases: [(String, String, String, [String: Any], [String])] = [
+            ("claude", "codex", "rules", [:], ["claude", "codex"]),
+            ("claude", "qwen", "auto", [:], ["claude", "codex"]),
+            ("claude", "same-family", "force", [:], ["claude"]),
+            ("claude", "qoder", "rules", [:], ["claude"]),
+            ("claude", "same-family", "rules", ["claude_implementation_provider": "codex"], ["claude", "codex"]),
+            ("claude", "same-family", "rules", ["fallback_channels": ["qwen"], "dual_plan_enabled": true],
+             ["claude", "agy", "codex"]),
+            ("claude", "codex", "rules", ["dual_plan_enabled": true, "dual_plan_error": "fixture"], ["claude", "codex"]),
+            ("claude", "qwen", "solo", ["dual_plan_enabled": true], ["claude"]),
+            ("codex", "qwen", "rules", ["implementation_provider": "token_plan"], ["codex"]),
+            ("codex", "qoder", "rules", ["implementation_provider": "qoder"], ["codex", "qodercli"]),
+            ("codex", "qwen", "rules", ["implementation_provider": "qoder"], ["codex", "qodercli"]),
+            ("codex", "claude", "rules", [:], ["codex", "claude"]),
+            ("codex", "qoder", "solo", ["implementation_provider": "qoder"], ["codex"]),
+            ("agy", "codex", "rules", [:], ["agy", "codex"]),
+            ("agy", "codex", "force", ["agy_dual_plan_enabled": true], ["agy", "codex", "claude"]),
+            ("agy", "codex", "rules", ["agy_dual_plan_enabled": true, "agy_dual_plan_error": "fixture"], ["agy", "codex"]),
+            ("agy", "codex", "solo", ["agy_dual_plan_enabled": true], ["agy"])
+        ]
+        let front = FakeClient()
+        let model = AppModel(foreground: front, cliProbe: FakeClient(), automatic: false)
+        for (host, channel, mode, extras, expected) in cases {
+            model.refresh()
+            front.complete(.success(cliSnapshot(host: host, channel: channel, mode: mode, extras: extras)))
+            assert(model.requiredCLINames == expected, "Unexpected CLI list for \(host), \(channel), \(mode), \(extras)")
+        }
+        model.refresh()
+        front.complete(.success(cliSnapshot(extras: ["claude_implementation_provider": "codex"])))
+        assert(model.requiredCLIs.last?.roles == ["评审", "实施"])
+        model.draft.dualPlanEnabled = true
+        assert(model.requiredCLINames == ["claude", "codex", "agy"])
+        model.draft.mode = "solo"
+        assert(model.requiredCLIs.first?.roles == ["主模型"] && model.requiredCLINames == ["claude"])
+        model.refresh()
+        front.complete(.success(cliSnapshot(host: "codex", channel: "qoder", extras: ["implementation_provider": "qoder"])))
+        assert(model.requiredCLIs.last?.roles == ["评审", "实施"])
+        print("PASS: checkRequiredCLIs")
+    }
+
+    @MainActor private static func checkLegacyCLIExecutorMigration() {
+        let front = FakeClient()
+        let model = AppModel(foreground: front, cliProbe: FakeClient(), automatic: false)
+        let legacyRole = "评审（保存后改用 Codex）"
+        let legacyCodex = cliSnapshot(host: "codex", channel: "qwen", extras: ["qwen_executor": "claude"])
+        model.refresh(); front.complete(.success(legacyCodex))
+        assert(model.dirty && model.requiredCLINames == ["codex", "claude"])
+        assert(model.requiredCLIs.last?.roles == [legacyRole])
+        model.switchHost("claude")
+        model.draft.channel = "qwen"
+        assert(model.requiredCLIs.first?.roles == ["主模型"], "Only the current host's legacy executor applies")
+        model.switchHost("codex")
+        model.save()
+        assert(front.requests.last?["action"] as? String == "save")
+        front.complete(.success(cliSnapshot(host: "codex", channel: "qwen")))
+        assert(!model.executorMigrationPending && model.requiredCLINames == ["codex"])
+
+        model.refresh()
+        front.complete(.success(cliSnapshot(extras: ["claude_qwen_executor": "claude", "fallback_channels": ["qwen"]])))
+        assert(model.requiredCLIs.first?.roles == ["主模型", legacyRole])
+        model.save()
+        front.complete(.success(cliSnapshot(extras: ["fallback_channels": ["qwen"]])))
+        assert(model.requiredCLIs.first?.roles == ["主模型"])
+        print("PASS: checkLegacyCLIExecutorMigration")
+    }
+
+    @MainActor private static func checkCLIProbeLifecycle() {
+        let front = FakeClient(), back = FakeClient(), probe = FakeClient()
+        let model = AppModel(foreground: front, background: back, cliProbe: probe)
+        let snapshot = cliSnapshot()
+        assert(front.requests.last?["action"] as? String == "load" && probe.requests.isEmpty)
+        front.complete(.success(snapshot))
+        model.inspect(); back.complete(.success(["signature": "cli-fixture"]))
+        model.ensureCLIStatus()
+        assert(probe.requests.isEmpty)
+
+        model.refreshOnOpen(); model.probeOnSettingsOpen()
+        assert(front.completions.count == 1 && probe.requests.isEmpty)
+        front.complete(.success(snapshot))
+        model.ensureCLIStatus()
+        assert(probe.completions.count == 1 && !model.busy && model.cliProbing)
+        assert(probe.requests.last?["action"] as? String == "cli_status")
+        assert(probe.requests.last?["names"] as? [String] == ["claude", "codex"])
+        probe.complete(.success(cliReply(["claude": ["state": "installed", "version": "2.1.326"],
+                                         "codex": ["state": "missing"]], brew: true)))
+        assert(!model.cliProbing && model.cliStatuses[.claude] == .installed("2.1.326") && model.homebrewAvailable)
+        model.ensureCLIStatus()
+        assert(probe.requests.count == 1)
+
+        model.settingsDidClose()
+        model.draft.dualPlanEnabled = true
+        model.ensureCLIStatus()
+        assert(probe.requests.count == 1, "A closed settings window must not start a probe")
+        model.refreshOnOpen(); model.probeOnSettingsOpen()
+        assert(back.completions.count == 1 && !model.busy)
+        assert(probe.requests.last?["names"] as? [String] == ["claude", "codex", "agy"])
+        back.complete(.success(["signature": "cli-fixture"]))
+        assert(probe.requests.count == 2, "Inspect must leave the active probe alone")
+        probe.complete(.success(cliReply(["claude": ["state": "installed", "version": "2.1.326"],
+                                         "codex": ["state": "installed", "version": "0.169.1"],
+                                         "agy": ["state": "missing"]])))
+        assert(model.cliStatuses[.codex] == .installed("0.169.1"))
+        model.stopBackground()
+        print("PASS: checkCLIProbeLifecycle")
+    }
+
+    @MainActor private static func checkCLIProbeQueueAndErrors() {
+        let front = FakeClient(), probe = FakeClient()
+        let model = AppModel(foreground: front, cliProbe: probe, automatic: false)
+        model.refresh(); front.complete(.success(cliSnapshot(mode: "solo")))
+        let configurationMessage = model.message
+        model.probeOnSettingsOpen()
+        probe.complete(.success(cliReply(["claude": ["state": "missing"]])))
+        model.switchHost("codex"); model.ensureCLIStatus()
+        assert(probe.requests.last?["names"] as? [String] == ["codex"])
+        model.switchHost("agy"); model.ensureCLIStatus()
+        model.recheckCLIs()
+        model.switchHost("claude"); model.ensureCLIStatus()
+        assert(probe.completions.count == 1 && probe.cancellations == 1)
+        probe.complete(.success(cliReply(["codex": ["state": "installed", "version": "0.169.1"]], brew: true)))
+        assert(probe.completions.count == 1 && probe.requests.last?["names"] as? [String] == ["claude"])
+        assert(model.cliStatuses[.codex] == nil && !model.homebrewAvailable)
+        probe.complete(.failure(BridgeFailure(message: "fixture probe failure")))
+        assert(!model.cliProbing && !model.busy && model.cliProbeError == "fixture probe failure")
+        assert(model.message == configurationMessage && !model.messageIsError)
+
+        model.recheckCLIs()
+        probe.complete(.success(cliReply(["claude": ["state": "error", "reason": "版本检测超时"]])))
+        assert(model.cliProbeError == nil && model.cliStatuses[.claude] == .error("版本检测超时"))
+        model.recheckCLIs()
+        probe.complete(.success(cliReply([:])))
+        assert(model.cliProbeError == "CLI 检测响应无效" && model.cliStatuses[.claude] == .error("版本检测超时"))
+        model.recheckCLIs()
+        model.switchHost("agy"); model.ensureCLIStatus()
+        let requests = probe.requests.count
+        model.stopBackground()
+        assert(probe.cancellations > 1 && !model.cliProbing)
+        probe.complete(.failure(BridgeFailure(message: "late failure")))
+        assert(model.cliProbeError == nil && probe.requests.count == requests)
+        print("PASS: checkCLIProbeQueueAndErrors")
+    }
+
+    @MainActor private static func checkCLIAutomaticReloadStaysReadOnly() {
+        let front = FakeClient(), back = FakeClient(), probe = FakeClient()
+        let model = AppModel(foreground: front, background: back, cliProbe: probe, automatic: false)
+        model.refresh(); front.complete(.success(cliSnapshot()))
+        model.probeOnSettingsOpen()
+        probe.complete(.success(cliReply(["claude": ["state": "installed", "version": "2.1.326"],
+                                         "codex": ["state": "installed", "version": "0.169.1"]])))
+        model.inspect(); back.complete(.success(["signature": "external"]))
+        assert(back.requests.last?["action"] as? String == "load")
+        var external = cliSnapshot(host: "codex", channel: "qoder")
+        external["signature"] = "external"
+        back.complete(.success(external))
+        assert(model.requiredCLINames == ["codex", "qodercli"])
+        model.ensureCLIStatus() // The settings view observes the new list.
+        assert(model.cliStatuses[.qodercli] == nil && probe.requests.count == 1)
+        model.recheckCLIs()
+        assert(probe.requests.last?["names"] as? [String] == ["codex", "qodercli"])
+        probe.complete(.success(cliReply(["codex": ["state": "installed", "version": "0.169.1"],
+                                         "qodercli": ["state": "missing"]])))
+        print("PASS: checkCLIAutomaticReloadStaysReadOnly")
+    }
+
+    @MainActor private static func checkCLIConfigurationLoadRetry() {
+        let front = FakeClient(), probe = FakeClient()
+        let model = AppModel(foreground: front, cliProbe: probe)
+        model.probeOnSettingsOpen()
+        front.complete(.failure(BridgeFailure(message: "fixture load failure")))
+        assert(!model.loaded && model.cliConfigurationLoadFailed && !model.cliProbing && probe.requests.isEmpty)
+        model.recheckCLIs()
+        assert(front.requests.last?["action"] as? String == "load" && !model.cliConfigurationLoadFailed)
+        front.complete(.success([:]))
+        assert(model.cliConfigurationLoadFailed && probe.requests.isEmpty)
+        model.recheckCLIs()
+        front.complete(.success(cliSnapshot(host: "agy", channel: "codex", mode: "solo")))
+        assert(model.loaded && !model.cliConfigurationLoadFailed)
+        assert(probe.requests.last?["names"] as? [String] == ["agy"])
+        model.stopBackground()
+        probe.complete(.failure(BridgeFailure(message: "cancelled")))
+        print("PASS: checkCLIConfigurationLoadRetry")
+    }
+
+    private static func checkCLIInstallScript() {
+        let cases: [(CLIToolID, CLIInstallMethod)] = [
+            (.claude, .claudeNative), (.codex, .codexHomebrew), (.codex, .codexStandalone), (.agy, .agyNative)
+        ]
+        for (tool, method) in cases {
+            let script = CLIInstallScript.render(toolID: tool.rawValue, method: method)!
+            assert(script.hasPrefix("#!/bin/bash\nset -o pipefail\n"), "Download failure must fail the pipeline")
+            assert(script.contains("if \(method.command); then"))
+            assert(script.contains("export PATH=\"/opt/homebrew/bin:/usr/local/bin:$HOME/.local/bin:$PATH\""))
+            assert(script.contains("if command -v \(tool.rawValue) "))
+            assert(script.contains("while IFS= read -r answer") && script.contains("'') \(tool.rawValue); break ;;"))
+            assert(script.contains("s|S) break ;;") && script.contains("重新检测"))
+            assert(script.contains("trap cleanup EXIT") && script.contains("    cleanup\n    trap - EXIT\n    exec "))
+            assert(script.contains("rm -f -- \"$SCRIPT_PATH\"") && script.contains("rmdir -- \"$SCRIPT_DIR\""))
+            assert(!script.contains("rm -rf") && !script.contains("set -e"))
+            assert(script.contains("command -v brew") == (method == .codexHomebrew))
+        }
+        assert(CLIInstallScript.render(toolID: "qodercli", method: .codexHomebrew) == nil)
+        assert(CLIInstallScript.render(toolID: "claude", method: .codexStandalone) == nil)
+        assert(CLIInstallScript.render(toolID: "../claude", method: .claudeNative) == nil)
+        print("PASS: checkCLIInstallScript")
+    }
+
+    @MainActor private static func checkCLIInstallActions() async {
+        assert(CLIStatus.missing.offersInstallation)
+        assert(!CLIStatus.error("版本检测超时").offersInstallation, "Version errors must never expose the install action")
+        assert(!CLIStatus.installed("1.2.3").offersInstallation)
+        let codex = CLICatalog.tool(.codex)
+        assert(codex.installMethod(homebrewAvailable: true) == .codexHomebrew)
+        assert(codex.installMethod(homebrewAvailable: false) == .codexStandalone)
+        let qoder = CLICatalog.tool(.qodercli)
+        assert(qoder.installMethod(homebrewAvailable: true) == nil)
+        assert(qoder.docsURL.absoluteString == "https://docs.qoder.com/cli/installation")
+
+        let front = FakeClient(), probe = FakeClient(), terminal = FakeTerminalLauncher()
+        let model = AppModel(foreground: front, cliProbe: probe, terminalLauncher: terminal, automatic: false)
+        model.refresh(); front.complete(.success(cliSnapshot(host: "codex", channel: "qoder")))
+        model.probeOnSettingsOpen()
+        probe.complete(.success(cliReply(["codex": ["state": "error", "reason": "版本检测超时"],
+                                         "qodercli": ["state": "missing"]])))
+        for tool in [CLIToolID.codex, .qodercli] {
+            do {
+                try await model.launchCLIInstaller(toolID: tool, method: .codexStandalone)
+                assertionFailure("An ineligible tool reached the installer")
+            } catch {}
+        }
+        assert(terminal.requests.isEmpty)
+
+        model.recheckCLIs()
+        probe.complete(.success(cliReply(["codex": ["state": "missing"], "qodercli": ["state": "missing"]])))
+        let configurationMessage = model.message
+        terminal.failure = BridgeFailure(message: "fixture terminal failure")
+        do {
+            try await model.launchCLIInstaller(toolID: .codex, method: .codexStandalone)
+            assertionFailure("Terminal launch failure must reach the sheet")
+        } catch { assert(error.localizedDescription == "fixture terminal failure") }
+        assert(model.message == configurationMessage)
+        terminal.failure = nil
+        try! await model.launchCLIInstaller(toolID: .codex, method: .codexStandalone)
+        assert(terminal.requests.count == 2 && terminal.requests.last?.0 == .codex)
+        assert(terminal.requests.last?.1 == .codexStandalone && model.message.contains("重新检测"))
+        assert(model.cliStatuses[.codex] == .missing && probe.requests.count == 2)
+        print("PASS: checkCLIInstallActions (fake Terminal)")
     }
 
     @MainActor static func checkExternalChanges() {

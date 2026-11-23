@@ -170,6 +170,11 @@ struct Draft: Equatable {
     @Published var sources: [String: String] = [:]
     @Published var elapsed = 0
     @Published var checking = false
+    @Published private(set) var cliStatuses: [CLIToolID: CLIStatus] = [:]
+    @Published private(set) var cliProbing = false
+    @Published private(set) var cliProbeError: String?
+    @Published private(set) var cliConfigurationLoadFailed = false
+    @Published private(set) var homebrewAvailable = false
     private var fingerprints: [String: Any] = [:]
     private var fingerprintValues: [String: String?] = [:]
     private var signature = ""
@@ -179,6 +184,16 @@ struct Draft: Equatable {
     private var defaults: [String: String] = [:]
     private let foreground: AppRequesting
     private let background: AppRequesting
+    private let cliProbe: AppRequesting
+    private let terminalLauncher: TerminalLaunching
+    private var settingsOpen = false
+    private var loadingConfiguration = false
+    private var probeOnNextLoad = false
+    private var automaticallyLoadedCLINames: [String]?
+    private var cliProbeGeneration = 0
+    private var cliProbeInFlight: (names: [String], force: Bool)?
+    private var pendingCLIProbe: (names: [String], force: Bool)?
+    private var legacyQwenExecutorHosts: Set<String> = []
     private var inspectInFlight = false
     private var inspectGeneration = 0
     private var failedAutoRefreshSnapshot: (signature: String?, fingerprints: [String: String?]?)?
@@ -209,6 +224,49 @@ struct Draft: Equatable {
         if draft.host == "agy" { return false }
         return draft.channel == "qwen" || (draft.host == "claude" && claudeFallbacks.contains("qwen"))
     }
+    var requiredCLIs: [RequiredCLI] {
+        guard let host = CLIToolID(rawValue: draft.host), host != .qodercli else { return [] }
+        var tools = [RequiredCLI(id: host, roles: ["主模型"])]
+        guard draft.mode != "solo" else { return tools }
+
+        func add(_ id: CLIToolID, _ role: String) {
+            if let index = tools.firstIndex(where: { $0.id == id }) {
+                tools[index].roles.append(role)
+            } else {
+                tools.append(RequiredCLI(id: id, roles: [role]))
+            }
+        }
+
+        switch (host, draft.channel) {
+        case (.claude, "codex"), (.claude, "qwen"), (.codex, "qwen"), (.agy, _):
+            add(.codex, "评审")
+        case (.claude, "same-family"), (.codex, "claude"):
+            add(.claude, "评审")
+        case (.codex, "qoder"):
+            add(.qodercli, "评审")
+        default:
+            break
+        }
+        if reviewUsesQwen && legacyQwenExecutorHosts.contains(draft.host) {
+            add(.claude, RequiredCLI.legacyQwenReviewRole)
+        }
+
+        if host == .codex {
+            add(draft.implementationProvider == "qoder" ? .qodercli : .codex, "实施")
+        } else if host == .agy || draft.claudeImplementationProvider == "codex" {
+            add(.codex, "实施")
+        }
+
+        if host == .claude {
+            if draft.dualPlanEnabled && draft.dualPlanError.isEmpty { add(.agy, "双方案规划") }
+            if claudeFallbacks.contains(where: { $0 == "codex" || $0 == "qwen" }),
+               !tools.contains(where: { $0.id == .codex }) { add(.codex, "回退评审") }
+        } else if host == .agy && draft.agyDualPlanEnabled && draft.agyDualPlanError.isEmpty {
+            add(.claude, "双方案规划")
+        }
+        return tools
+    }
+    var requiredCLINames: [String] { requiredCLIs.map { $0.id.rawValue } }
     var showsReviewAddress: Bool {
         reviewUsesQwen && !(draft.host == "claude" && draft.channel == "codex")
     }
@@ -281,12 +339,114 @@ struct Draft: Equatable {
         status = "未检测（服务已变化）"; checkSignature = nil
     }
     let modes = [("solo", "独立完成"), ("auto", "自动判断"), ("rules", "按规模评审"), ("force", "始终评审")]
-    init(foreground: AppRequesting? = nil, background: AppRequesting? = nil, automatic: Bool = true) {
+    init(foreground: AppRequesting? = nil, background: AppRequesting? = nil, cliProbe: AppRequesting? = nil,
+         terminalLauncher: TerminalLaunching? = nil, automatic: Bool = true) {
         self.foreground = foreground ?? BridgeClient(); self.background = background ?? BridgeClient()
+        self.cliProbe = cliProbe ?? BridgeClient()
+        self.terminalLauncher = terminalLauncher ?? TerminalLauncher()
         if automatic {
             refresh()
             watching = Timer.scheduledTimer(withTimeInterval: 5, repeats: true) { [weak self] _ in Task { @MainActor in self?.inspect() } }
         }
+    }
+    func probeOnSettingsOpen() {
+        settingsOpen = true
+        recheckCLIs()
+    }
+    func settingsDidClose() {
+        settingsOpen = false
+        probeOnNextLoad = false
+        automaticallyLoadedCLINames = nil
+    }
+    func ensureCLIStatus() {
+        guard settingsOpen, loaded, !loadingConfiguration else { return }
+        let names = requiredCLINames
+        let automaticallyLoaded = automaticallyLoadedCLINames
+        automaticallyLoadedCLINames = nil
+        guard names != automaticallyLoaded else { return }
+        requestCLIStatus(names: names, force: false)
+    }
+    func recheckCLIs() {
+        automaticallyLoadedCLINames = nil
+        if loadingConfiguration || !loaded {
+            probeOnNextLoad = true
+            if !busy { refresh() }
+            return
+        }
+        requestCLIStatus(names: requiredCLINames, force: true)
+    }
+    private func finishCLILoad(succeeded: Bool) {
+        loadingConfiguration = false
+        let shouldProbe = probeOnNextLoad
+        probeOnNextLoad = false
+        if !loaded && !succeeded { cliConfigurationLoadFailed = true }
+        if succeeded && shouldProbe { recheckCLIs() }
+    }
+    private func requestCLIStatus(names: [String], force: Bool) {
+        if let active = cliProbeInFlight {
+            // A settings redraw after load can request the selection already being probed.
+            if pendingCLIProbe == nil && names == active.names && (active.force || !force) { return }
+            let cancelActive = pendingCLIProbe == nil
+            pendingCLIProbe = (names, force || (pendingCLIProbe?.force ?? false))
+            cliProbeGeneration += 1
+            if cancelActive { cliProbe.cancel() }
+            return
+        }
+        let uncached = names.filter { name in
+            CLIToolID(rawValue: name).map { cliStatuses[$0] == nil } ?? false
+        }
+        let requested = force ? names : uncached
+        if cliProbeError != nil { cliProbeError = nil }
+        guard !requested.isEmpty else {
+            if cliProbing { cliProbing = false }
+            return
+        }
+        cliProbeInFlight = (names, force)
+        let generation = cliProbeGeneration
+        if !cliProbing { cliProbing = true }
+        cliProbe.start(["action": "cli_status", "names": requested]) { [weak self] result in
+            guard let self else { return }
+            self.cliProbeInFlight = nil
+            if generation == self.cliProbeGeneration {
+                switch result {
+                case .success(let data):
+                    self.applyCLIStatus(data, requested: requested)
+                case .failure(let error):
+                    self.cliProbeError = (error as? BridgeFailure)?.message ?? "CLI 检测请求失败"
+                }
+            }
+            if let pending = self.pendingCLIProbe {
+                self.pendingCLIProbe = nil
+                self.requestCLIStatus(names: pending.names, force: pending.force)
+            } else if self.cliProbing {
+                self.cliProbing = false
+            }
+        }
+    }
+    private func applyCLIStatus(_ data: [String: Any], requested: [String]) {
+        guard let items = data["items"] as? [String: [String: Any]],
+              let managers = data["package_managers"] as? [String: Bool], let brew = managers["brew"] else {
+            cliProbeError = "CLI 检测响应无效"
+            return
+        }
+        var statuses = cliStatuses
+        for name in requested {
+            guard let id = CLIToolID(rawValue: name), let item = items[name], let status = CLIStatus(item) else {
+                cliProbeError = "CLI 检测响应无效"
+                return
+            }
+            statuses[id] = status
+        }
+        cliStatuses = statuses
+        homebrewAvailable = brew
+    }
+    func launchCLIInstaller(toolID: CLIToolID, method: CLIInstallMethod) async throws {
+        guard cliStatuses[toolID]?.offersInstallation == true,
+              CLICatalog.tool(toolID).methods.contains(method) else {
+            throw BridgeFailure(message: "此 CLI 当前没有可用的内置安装方式")
+        }
+        try await terminalLauncher.launch(toolID: toolID, method: method)
+        setMessage("已在终端中打开安装脚本。完成安装和登录后请点击「重新检测」。")
     }
     private static func normalizeFingerprints(_ data: [String: Any]?) -> [String: String?]? {
         data?.mapValues { $0 as? String }
@@ -349,7 +509,14 @@ struct Draft: Equatable {
                     guard generation == self.inspectGeneration, !self.busy, self.isUntouched else { return }
                     switch result {
                     case .success(let data):
-                        if self.apply(data) { self.setMessage("检测到外部配置变化，已自动重新读取") }
+                        let previousNames = self.settingsOpen ? self.requiredCLINames : []
+                        if self.apply(data) {
+                            if self.settingsOpen && previousNames != self.requiredCLINames {
+                                // The settings view also observes reloads caused by the background timer.
+                                self.automaticallyLoadedCLINames = self.requiredCLINames
+                            }
+                            self.setMessage("检测到外部配置变化，已自动重新读取")
+                        }
                     case .failure:
                         self.failedAutoRefreshSnapshot = (observedSignature, observedFingerprints)
                         self.markConfigurationUnverifiable()
@@ -368,10 +535,22 @@ struct Draft: Equatable {
         if inspectInFlight { background.cancel() }
         // Keep the flight occupied until its completion, even after cancellation.
     }
-    func stopBackground() { watching?.invalidate(); watching = nil; invalidateInspect() }
+    func stopBackground() {
+        watching?.invalidate(); watching = nil; invalidateInspect()
+        settingsDidClose()
+        cliProbeGeneration += 1
+        pendingCLIProbe = nil
+        if cliProbeInFlight != nil { cliProbe.cancel() }
+        if cliProbing { cliProbing = false }
+    }
     func operation(_ payload: [String: Any], checked: Bool = false) {
         guard !busy else { return }
         invalidateInspect()
+        let isLoad = payload["action"] as? String == "load"
+        if isLoad {
+            loadingConfiguration = true
+            if cliConfigurationLoadFailed { cliConfigurationLoadFailed = false }
+        }
         busy = true; checking = checked
         if checked {
             elapsed = 0
@@ -380,6 +559,8 @@ struct Draft: Equatable {
         }
         foreground.start(payload) { [weak self] result in
                 guard let self else { return }
+                var configurationRead = false
+                defer { if isLoad { self.finishCLILoad(succeeded: configurationRead) } }
                 self.busy = false; self.checking = false; self.timer?.invalidate(); self.timer = nil
                 switch result {
                 case .failure(let error):
@@ -407,6 +588,7 @@ struct Draft: Equatable {
                         let menuAPI = self.menuSaving && self.draft.channel == "qwen"
                         self.menuSaving = false
                         guard self.apply(data) else { return }
+                        configurationRead = true
                         let message = payload["action"] as? String == "load" ? "已读取默认配置" : "配置已回读确认；用于后续启动或调用"
                         self.setMessage(message + (menuAPI ? "；请确认服务地址和密钥支持所选模型" : ""))
                     }
@@ -465,7 +647,10 @@ struct Draft: Equatable {
             d.agyDualPlanSynthesizer = plan["synthesizer"] as? String ?? "agy"
         }
         d.codexModels = v["codex_models"] as? [String] ?? ModelCatalog.codex
-        executorMigrationPending = text("qwen_executor") == "claude" || text("claude_qwen_executor") == "claude"
+        legacyQwenExecutorHosts = []
+        if text("qwen_executor") == "claude" { legacyQwenExecutorHosts.insert("codex") }
+        if text("claude_qwen_executor") == "claude" { legacyQwenExecutorHosts.insert("claude") }
+        executorMigrationPending = !legacyQwenExecutorHosts.isEmpty
         saved = d
         // Legacy configurations may only contain the endpoint for one host.
         // Suggest missing Token Plan defaults in the draft; keep the disk snapshot intact.

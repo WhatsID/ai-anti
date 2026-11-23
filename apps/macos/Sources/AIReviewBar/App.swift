@@ -1,7 +1,7 @@
 import SwiftUI
 import AppKit
 
-@MainActor final class Delegate: NSObject, NSApplicationDelegate {
+@MainActor final class Delegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     var model: AppModel?
     var window: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -14,12 +14,15 @@ import AppKit
         if window == nil {
             let created = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 740, height: 760), styleMask: [.titled, .closable, .miniaturizable], backing: .buffered, defer: false)
             created.title = "设置"; created.isReleasedWhenClosed = false
+            created.delegate = self
             created.contentView = NSHostingView(rootView: SettingsView(model: model))
             created.center(); window = created
         }
         window?.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true)
         model.refreshOnOpen()
+        model.probeOnSettingsOpen()
     }
+    func windowWillClose(_ notification: Notification) { model?.settingsDidClose() }
     func applicationWillTerminate(_ notification: Notification) { model?.stopBackground(); model?.cancel() }
 }
 
@@ -57,7 +60,9 @@ import AppKit
             SettingsView(model: model).onAppear {
                 delegate.model = model
                 model.refreshOnOpen()
+                model.probeOnSettingsOpen()
             }
+            .onDisappear { model.settingsDidClose() }
         }
     }
     init() { }

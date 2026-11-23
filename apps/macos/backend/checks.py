@@ -15,6 +15,8 @@ import uuid
 from config_store import StoreError, model, effective_executor
 
 OPTIONAL_SAVE_KEYS = ('dual_plan_enabled', 'agy_dual_plan_enabled', 'agy_review_model', 'agy_implementation_model')
+CLI_PROBE_NAMES = ('claude', 'codex', 'agy', 'qodercli')
+SEMVER_RE = re.compile(r'\b([0-9]+\.[0-9]+\.[0-9]+)\b')
 
 
 class CheckError(StoreError):
@@ -39,14 +41,23 @@ def stop(signum=None, frame=None):
         except ProcessLookupError:
             pass
 
-def discover(name):
-    local = str(Path.home() / '.local/bin' / name) if name in ('qodercli', 'agy') else None
+def _find_executable(name, local=None):
     for candidate in ('/opt/homebrew/bin/' + name, '/usr/local/bin/' + name, shutil.which(name), local):
         if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK):
             return candidate
-    raise CheckError('未找到 ' + name + ' CLI；请安装或设置启动环境')
+    return None
 
-def run(argv, cwd, log, timeout=8, limit=2*1024*1024, env=None, idle_timeout=None):
+def discover(name):
+    local = str(Path.home() / '.local/bin' / name) if name in CLI_PROBE_NAMES else None
+    candidate = _find_executable(name, local)
+    if candidate is None:
+        raise CheckError('未找到 ' + name + ' CLI；请安装或设置启动环境')
+    return candidate
+
+def _has_tool(name):
+    return _find_executable(name) is not None
+
+def run(argv, cwd, log, timeout=8, limit=2*1024*1024, env=None, idle_timeout=None, termination_grace=5):
     global _active
     if _cancelled:
         raise CheckError('检测已取消')
@@ -72,9 +83,12 @@ def run(argv, cwd, log, timeout=8, limit=2*1024*1024, env=None, idle_timeout=Non
                 elif Path(log).stat().st_size > limit:
                     reason = '检测输出超过上限，已终止进程'
                 if reason:
-                    os.killpg(_active.pid, signal.SIGINT)
                     try:
-                        _active.wait(timeout=5)
+                        os.killpg(_active.pid, signal.SIGINT)
+                    except ProcessLookupError:
+                        pass
+                    try:
+                        _active.wait(timeout=termination_grace)
                     except subprocess.TimeoutExpired:
                         os.killpg(_active.pid, signal.SIGKILL)
                         _active.wait()
@@ -93,6 +107,40 @@ def run(argv, cwd, log, timeout=8, limit=2*1024*1024, env=None, idle_timeout=Non
             except ProcessLookupError:
                 pass
             _active = None
+
+def cli_status(names):
+    if not isinstance(names, list) or not names or any(
+            not isinstance(name, str) or name not in CLI_PROBE_NAMES for name in names):
+        raise StoreError('CLI 名称列表无效')
+    items = {}
+    with tempfile.TemporaryDirectory(prefix='ai-anti-cli-') as temp:
+        for name in dict.fromkeys(names):
+            if _cancelled:
+                raise CheckError('检测已取消')
+            items[name] = _cli_status_item(name, temp)
+        if _cancelled:
+            raise CheckError('检测已取消')
+    return {'items': items, 'package_managers': {'brew': _has_tool('brew')}}
+
+def _cli_status_item(name, temp):
+    try:
+        cli = discover(name)
+        log = Path(temp) / 'version.log'
+        if run([os.path.abspath(cli), '--version'], temp, log, timeout=3, limit=65536, termination_grace=1) != 0:
+            return {'state': 'error', 'reason': '版本命令退出异常'}
+        match = SEMVER_RE.search(log.read_text('utf-8', errors='replace'))
+        if match:
+            return {'state': 'installed', 'version': match.group(1)}
+        reason = '无法识别版本号'
+    except CheckError as exc:
+        if exc.category == 'cancelled':
+            raise
+        if exc.category == 'cli_unavailable':
+            return {'state': 'missing'}
+        reason = {'timeout': '版本检测超时', 'output_limit': '版本输出超过上限'}.get(exc.category, '无法执行 CLI')
+    except OSError:
+        reason = '无法执行 CLI'
+    return {'state': 'error', 'reason': reason}
 
 def source_root(store, explicit=None, host=None):
     candidates = []
@@ -131,7 +179,7 @@ def agy_entry(store, root):
 
 def planning_version(root, log, cli):
     label = 'AGY' if cli == 'agy' else 'Claude'
-    match = re.search(r'\b([0-9]+\.[0-9]+\.[0-9]+)\b', log.read_text('utf-8', errors='replace'))
+    match = SEMVER_RE.search(log.read_text('utf-8', errors='replace'))
     if not match:
         raise CheckError(f'{label} CLI 版本输出无效')
     version = match.group(1)

@@ -662,9 +662,23 @@ class StoreTests(unittest.TestCase):
                 self.assertEqual(backup.read_bytes(), backup_bytes)
 
     def test_first_load_is_read_only(self):
-        reply = dispatch(self.store, {'action':'load'})
+        with patch('checks.subprocess.Popen', side_effect=AssertionError('unexpected CLI process')):
+            reply = dispatch(self.store, {'action':'load'})
+            dispatch(self.store, {'action': 'inspect'})
         self.assertEqual(reply['values']['mode'], 'rules')
         self.assertEqual(list(self.root.iterdir()), [])
+
+    def test_cli_status_dispatch_does_not_open_configuration_or_secrets(self):
+        self.write('ai', b'invalid JSON')
+        self.write('secrets', b'fixture-secret')
+        before = {path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}
+        with patch.object(self.store, 'read', side_effect=AssertionError('unexpected config read')), \
+             patch.object(Path, 'read_bytes', side_effect=AssertionError('unexpected file read')), \
+             patch('checks.discover', return_value='/fixture/claude'), \
+             patch('checks.run', return_value=1), patch('checks.shutil.which', return_value=None):
+            result = dispatch(self.store, {'action': 'cli_status', 'names': ['claude']})
+        self.assertEqual(result['items'], {'claude': {'state': 'error', 'reason': '版本命令退出异常'}})
+        self.assertEqual({path: path.read_bytes() for path in self.root.rglob('*') if path.is_file()}, before)
     def test_load_does_not_read_secret(self):
         self.write('secrets', {'tokenplan': {'value':'SENTINEL'}})
         original = Path.read_bytes

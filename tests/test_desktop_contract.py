@@ -99,6 +99,59 @@ class DesktopContract(unittest.TestCase):
         self.assertEqual(menu.count('Button('), 2)
         self.assertLess(menu.index('Button("设置")'), menu.index('Button("退出"'))
         self.assertNotIn('评审模式', app)
+    def test_cli_status_is_under_primary_picker_and_uses_settings_lifecycle(self):
+        sources = ROOT / 'apps/macos/Sources/AIReviewBar'
+        view = (sources / 'SettingsView.swift').read_text()
+        app = (sources / 'App.swift').read_text()
+        cli = (sources / 'CLIInstallView.swift').read_text()
+        rows = ('Picker("主模型"', 'CLIStatusSection(model: model)', 'modelPicker("主模型 ID"')
+        positions = [view.index(row) for row in rows]
+        self.assertEqual(positions, sorted(positions))
+        self.assertIn('SettingsColumns.labelWidth + SettingsColumns.spacing', cli)
+        self.assertIn('.sheet(item: $installTarget)', view)
+        self.assertIn('.onChange(of: model.requiredCLINames) { _ in model.ensureCLIStatus() }', view)
+        self.assertEqual(len(re.findall(r'model\.refreshOnOpen\(\)\s+model\.probeOnSettingsOpen\(\)', app)), 2)
+        self.assertIn('windowWillClose', app)
+        self.assertIn('Text(installedVersions).font(.caption).foregroundStyle(.secondary)', cli)
+        self.assertIn('RequiredCLI.legacyQwenReviewRole', cli)
+        self.assertIn('尚未检测当前配置所需的 CLI', cli)
+        self.assertIn('配置尚未读入，无法检测 CLI', cli)
+        self.assertIn('已找到，版本读取失败', cli)
+        self.assertIn('if status.offersInstallation', cli)
+        self.assertIn('Link("打开官方安装说明", destination: tool.docsURL)', cli)
+        self.assertIn('Button("重新检测", action: model.recheckCLIs)', cli)
+
+    def test_cli_install_uses_documented_official_commands_and_system_terminal(self):
+        sources = ROOT / 'apps/macos/Sources/AIReviewBar'
+        catalog = (sources / 'CLITool.swift').read_text()
+        sheet = (sources / 'CLIInstallView.swift').read_text()
+        readme = (ROOT / 'apps/macos/README.md').read_text()
+        general = (ROOT / 'README.zh-CN.md').read_text().replace(r'\|', '|')
+        commands = (
+            'curl -fsSL https://claude.ai/install.sh | bash',
+            'brew install --cask codex',
+            'curl -fsSL https://chatgpt.com/codex/install.sh | sh',
+            'curl -fsSL https://antigravity.google/cli/install.sh | bash',
+        )
+        for command in commands:
+            with self.subTest(command=command):
+                self.assertIn(f'"{command}"', catalog)
+                self.assertIn(f'`{command}`', readme)
+        for command in (commands[0], commands[1], commands[3]):
+            self.assertIn(command, general)
+        self.assertIn('"Qoder CLI", "https://docs.qoder.com/cli/installation", methods: []', catalog)
+        self.assertNotIn('npm', catalog + sheet)
+        for removed in ('osascript', 'rm -rf', 'NSAppleEventsUsageDescription'):
+            self.assertNotIn(removed, catalog + sheet + (ROOT / 'apps/macos/build-app.sh').read_text())
+        self.assertIn('mkdtemp(', catalog)
+        self.assertIn('O_CREAT | O_EXCL | O_WRONLY, 0o700', catalog)
+        self.assertIn('withBundleIdentifier: "com.apple.Terminal"', catalog)
+        self.assertIn('withApplicationAt: terminal', catalog)
+        self.assertIn('Link(tool.docsURL.absoluteString, destination: tool.docsURL)', sheet)
+        self.assertIn('NSPasteboard.general.setString(method.command, forType: .string)', sheet)
+        self.assertIn('Button("在终端中打开并安装", action: launch)', sheet)
+        self.assertIn('Text(launchError).foregroundStyle(.red)', sheet)
+
     def test_ui_independent_service_groups(self):
         view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
         review = 'ServiceSettingsGroup("评审服务", summary: SettingsSummary.review(model.draft), isExpanded: $reviewExpanded)'
@@ -672,8 +725,8 @@ for event in [
         self.assertRegex(view, r'Button\("测试评审模型".*\.disabled\([^\n]+\|\| model\.draft\.host == "agy"\)')
         self.assertNotIn('model.menuHost(', app)
         self.assertIn('"$source_dir/backend/agy_relay.py"', build)
-        self.assertIn('<key>CFBundleVersion</key><string>16</string>', build)
-        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.9</string>', build)
+        self.assertIn('<key>CFBundleVersion</key><string>17</string>', build)
+        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.10</string>', build)
 
     def test_agy_dual_plan_matches_cli_validation(self):
         import ai_anti_config as cli
