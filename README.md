@@ -5,7 +5,7 @@ English | [简体中文](README.zh-CN.md)
 Cross-model relay for AI-assisted coding: one model plans, a **different** model reviews it
 adversarially, a separate implementer writes the code, and the primary model does the final check.
 
-## Why
+## What problem it solves
 
 When a single model does "plan → write code → accept" on its own, its blind spots travel all the way
 into the result. ai-anti splits that chain across roles with different stances:
@@ -166,7 +166,7 @@ authoritative. The most common setup is "Claude Code leads, Codex reviews": inst
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
 cd ~/ai-anti
-./install.sh                 # required: Claude Code side
+./install.sh                 # required: Claude Code as the primary model
 ./install.sh --with-codex    # optional: let Codex lead as well
 ./install.sh --with-agy      # optional: let AGY lead as well
 ./install.sh --with-hook     # optional: announce the relay mode at session start
@@ -180,7 +180,7 @@ models themselves.
   relay when it leads.
 - `--with-codex` / `--with-agy` add the same rules for **Codex / AGY**, so they run the relay when **you
   work in them directly**. If you only use Claude Code, you don't need them.
-- A tool that is only **called** to review or implement (e.g. Codex reviewing for Claude) just needs its
+- If a tool is only **called** to review or implement (e.g. Codex reviewing for Claude) just needs its
   CLI from step 1; no `--with-xxx` required.
 - Options can be added at any time; reinstalling keeps components already installed.
 
@@ -195,7 +195,7 @@ entry edge cases, what `--status` does and does not prove, and uninstall details
 leading tool decides from the relay mode and task size: small tasks are done directly, large or high-risk
 tasks go through the relay automatically, and it tells you its decision before starting.
 
-To override that decision, just say so in your message:
+To change its decision for a particular run, just say so in your message:
 
 | You say | Effect |
 |---------|--------|
@@ -258,6 +258,13 @@ its place in the fallback order. `["qwen", "codex", "same-family"]` puts cost fi
 `["codex", "qwen", "same-family"]` puts quality first with the plugin as backup. The available plugin is
 `qwen`; the contract for writing your own is in [docs/PLUGINS.md](docs/PLUGINS.md).
 
+A plugin is only configuration and calling rules; requests are still sent by a CLI on your machine, so
+**besides the API URL, model and key, you need an executor CLI installed**. By default the qwen plugin
+borrows the Claude Code CLI (`claude -p`), redirecting it to your configured endpoint with your API key,
+so it uses no Claude subscription quota. Alternatively set `plugins.qwen.claude_executor` to `codex` to
+use Codex CLI's Responses executor (with `plugins.qwen.responses_base_url`). On the Claude-led path Claude
+Code is already installed, so usually nothing extra is needed.
+
 ### Example: the qwen plugin
 
 1. Install: `./install.sh --with-plugin qwen`
@@ -300,12 +307,21 @@ editing settings in a GUI. Skip it if none apply.
   `plugins.qwen.responses_base_url`). Usage and version pins: the
   [codex-relay skill](adapters/codex/skills/codex-relay/SKILL.md) and
   [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
-- **Codex-led implementation sources** (to write code with a cheaper model). Native Codex, Token Plan (`glm-5.3` / `qwen4-max`), or a Qoder
-  subscription. Token Plan supports a primary and a backup account with failover on quota exhaustion.
+- **Codex-led implementation sources** (to write code with a cheaper model). Native Codex, Qwen Token Plan (`glm-5.3` / `qwen4-max` and other
+  models), or a Qoder subscription. Qwen Token Plan supports a primary and a backup account with failover on quota exhaustion.
   Contracts and verification limits: the [codex-relay skill](adapters/codex/skills/codex-relay/SKILL.md)
   and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
-- **Problem second opinions** (when debugging, to have another model check an existing analysis). `$bug-review` (Codex) or `/bug-review` (Claude Code) reviews an
-  existing analysis in two fresh stages, without requiring Git. See [docs/BUG_REVIEW.md](docs/BUG_REVIEW.md).
+- **Problem second opinions** (when debugging, to have another model check an existing analysis). This
+  runs only when you explicitly ask for it; it never triggers on its own while debugging. After the model
+  has produced a problem analysis, say "use /bug-review to check this analysis" in Claude Code, or "Use
+  $bug-review to check ..." in Codex. The model packages your original words, its analysis and the
+  evidence, and another model reviews them in two stages: first it sees only the problem and evidence and
+  lists possible causes independently; then it checks the original analysis item by item as supported,
+  needs verification, or rejected. The result is a second opinion and never changes code. The reviewer
+  comes from `codex_relay.review_channel` (`claude`, `qwen` or `qoder`; default `claude`), not
+  `review.channels`; if it is Claude while Claude Code leads, it counts only as same-family review. On
+  the Codex side, run `./install.sh --with-codex` first to install the skill. Git is not required. See
+  [docs/BUG_REVIEW.md](docs/BUG_REVIEW.md).
 - **macOS menu bar app** (if you prefer not to edit JSON by hand). The optional [menu bar app](apps/macos/README.md) edits default models,
   review channels and relay mode, and runs local checks; business reviews still start from the CLI
   entries. See [the product notes](docs/MACOS_REVIEW_APP.md).
