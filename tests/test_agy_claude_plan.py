@@ -33,6 +33,27 @@ FLAGS = (
 ACTUAL = 'claude-sonnet-4-6'
 DEFAULTS = {'enabled': False, 'partner': 'claude', 'model': None, 'effort': None,
             'synthesizer': 'agy', 'on_failure': 'stop'}
+RATE_LIMIT_WARNING = {
+    'type': 'rate_limit_event',
+    'rate_limit_info': {
+        'status': 'allowed_warning',
+        'resetsAt': 1795766400,
+        'rateLimitType': 'seven_day',
+        'utilization': 0.77,
+        'overageStatus': 'rejected',
+        'overageDisabledReason': 'org_level_disabled',
+        'isUsingOverage': False,
+        'surpassedThreshold': 0.75,
+        'unifiedWindows': {
+            'five_hour': {'utilization': 0.08, 'resetsAt': 1795435200, 'status': 'allowed'},
+            'seven_day': {'utilization': 0.77, 'resetsAt': 1795766400,
+                          'status': 'allowed_warning', 'surpassedThreshold': 0.75},
+        },
+        'overageEnabled': False,
+    },
+    'uuid': 'rate-1',
+    'session_id': 'fixture',
+}
 
 FAKE_CLAUDE = r'''
 import json, os, stat, subprocess, sys, time
@@ -696,15 +717,52 @@ class ClaudePlanTests(SnapshotOmissionsTests, unittest.TestCase):
                 self.scenario(events)
                 self.invoke(1)
 
-    def test_quota_exhaustion_and_allowed_rate_event(self):
+    def test_allowed_rate_events(self):
         allowed = {'type': 'rate_limit_event', 'rate_limit_info': {'status': 'allowed'}}
-        self.scenario([init(), allowed, terminal()])
-        self.assertIn({'kind': 'rate_limit_event', 'status': 'allowed'}, self.invoke(0)['warnings'])
-        for index, event in enumerate(({'error': 'rate_limit'},
-                                       {'type': 'rate_limit_event', 'rate_limit_info': {'status': 'rejected'}})):
-            self.out = self.base / f'quota-{index}'
-            self.scenario([init(), event], code=1)
-            self.assertEqual(self.invoke(1)['error_kind'], 'quota_exhausted')
+        top_level_allowed = {'type': 'rate_limit_event', 'status': 'allowed'}
+        self.scenario([init(), allowed, top_level_allowed, terminal()])
+        evidence = self.invoke(0)
+        self.assertEqual([warning for warning in evidence['warnings'] if warning['kind'] == 'rate_limit_event'],
+                         [{'kind': 'rate_limit_event', 'status': 'allowed'}] * 2)
+
+    def test_allowed_warning_rate_events(self):
+        self.scenario([init(), RATE_LIMIT_WARNING, {**RATE_LIMIT_WARNING, 'uuid': 'rate-2'}, terminal()])
+        evidence = self.invoke(0)
+        self.assertTrue(evidence['completed'])
+        self.assertEqual([warning for warning in evidence['warnings'] if warning['kind'] == 'rate_limit_event'],
+                         [{'kind': 'rate_limit_event', 'status': 'allowed_warning'}] * 2)
+
+    def test_quota_exhaustion_rate_events(self):
+        cases = (
+            {'error': 'rate_limit'},
+            {'type': 'rate_limit_event', 'rate_limit_info': {'status': 'rejected'}},
+            {'type': 'rate_limit_event', 'status': 'rejected'},
+        )
+        for index, event in enumerate(cases):
+            with self.subTest(event=event):
+                self.out = self.base / f'quota-{index}'
+                self.scenario([init(), event], code=1)
+                self.assertEqual(self.invoke(1)['error_kind'], 'quota_exhausted')
+
+    def test_invalid_rate_events(self):
+        invalid_events = {
+            'throttled': {'type': 'rate_limit_event', 'rate_limit_info': {'status': 'throttled'}},
+            'empty_status': {'type': 'rate_limit_event', 'rate_limit_info': {'status': ''}},
+            'null_status': {'type': 'rate_limit_event', 'rate_limit_info': {'status': None}},
+            'non_string_status': {'type': 'rate_limit_event', 'rate_limit_info': {'status': 1}},
+            'missing_status': {'type': 'rate_limit_event', 'rate_limit_info': {}},
+            'top_level_warning': {'type': 'rate_limit_event', 'status': 'allowed_warning'},
+            'non_object_info': {'type': 'rate_limit_event', 'status': 'allowed_warning', 'rate_limit_info': []},
+        }
+        cases = {name: ([init(), event, terminal()], 'unknown stream event')
+                 for name, event in invalid_events.items()}
+        cases['before_init'] = ([RATE_LIMIT_WARNING, init(), terminal()], 'missing or invalid init event')
+        cases['after_result'] = ([init(), terminal(), RATE_LIMIT_WARNING], 'unexpected event after terminal result')
+        for name, (events, error) in cases.items():
+            with self.subTest(case=name):
+                self.out = self.base / name
+                self.scenario(events)
+                self.assertEqual(self.invoke(1)['error'], error)
 
     def test_input_and_prompt_limits_are_distinct(self):
         with self.request.open('wb') as handle:

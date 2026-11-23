@@ -465,7 +465,7 @@ for _ in range(12):
                        [{**ui, 'subtype': 'thinking_tokens'}, *data[1:]],
                        [rate, *data], [ui, init, assistant, result, rate],
                        [ui, init, assistant, {**rate, 'extra': True}, result],
-                       [ui, init, assistant, {**rate, 'rate_limit_info': {'status': 'allowed_warning'}}, result]):
+                       [ui, init, assistant, {**rate, 'rate_limit_info': {'status': 'throttled'}}, result]):
             with self.assertRaises(RunError):
                 self.stream(sample)
         with self.assertRaises(RunError) as caught:

@@ -238,8 +238,10 @@ def validate_stream(logfile, code, staging, evidence, requested, family):
             evidence.update(actual_model=actual, model_evidence='actual', conversation_id=event.get('session_id'))
         elif actual is None:
             raise RunError('missing or invalid init event')
-        elif kind == 'rate_limit_event' and status == 'allowed':
-            evidence['warnings'].append({'kind': 'rate_limit_event', 'status': 'allowed'})
+        elif kind == 'rate_limit_event' and (
+                status == 'allowed'
+                or (isinstance(info, dict) and info.get('status') == 'allowed_warning')):
+            evidence['warnings'].append({'kind': 'rate_limit_event', 'status': status})
         elif kind == 'system' and subtype == 'thinking_tokens':
             estimates = (event.get('estimated_tokens'), event.get('estimated_tokens_delta'))
             if any(type(value) is not int or value < 0 for value in estimates):

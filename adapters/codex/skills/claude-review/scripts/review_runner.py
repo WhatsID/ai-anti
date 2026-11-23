@@ -18,6 +18,7 @@ class RunError(RuntimeError):
 
 
 ALLOWED = {'Read', 'Glob', 'Grep'}
+ALLOWED_RATE_LIMIT_STATUSES = ('allowed', 'allowed_warning')
 # Built-in accepted actual model IDs per requested alias: same family, numeric version
 # segments only (optional 8-digit date). Cross-family or non-numeric suffixes fail closed.
 # claude_review.model_families in the user config may override or add aliases.
@@ -314,11 +315,12 @@ def validate(logfile, code, requested, cwd, families=None, expected_model=None, 
             raise RunError('non-object stream event')
         kind = event.get('type')
         if kind == 'rate_limit_event':
+            rate_status = rate_info.get('status') if isinstance(rate_info, dict) else None
             if (set(event) != {'type', 'rate_limit_info', 'uuid', 'session_id'}
-                    or not isinstance(rate_info, dict) or rate_info.get('status') != 'allowed'
+                    or rate_status not in ALLOWED_RATE_LIMIT_STATUSES
                     or not inits or finals):
                 raise RunError('unknown stream event')
-            warnings.append({'kind': 'rate_limit_event', 'status': 'allowed'})
+            warnings.append({'kind': 'rate_limit_event', 'status': rate_status})
             continue
         if kind == 'system' and event.get('subtype') == 'ui_invalidate':
             if (set(event) != {'type', 'subtype', 'event', 'session_id', 'uuid'}
