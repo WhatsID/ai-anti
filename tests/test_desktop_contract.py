@@ -392,19 +392,16 @@ for event in [
         self.assertEqual((scratch/'qwen_report.txt').read_text(),'offline report')
 
     def test_qwen_command_responses_branch_contract(self):
-        from ai_anti_config import ConfigError, claude_qwen_executor
+        from ai_anti_config import claude_qwen_executor
         from review import parser
         command = (ROOT/'plugins/qwen/commands/qwen-review.md').read_text()
         self.assertIn('claude_qwen_executor(ai_anti_config.load())', command)
+        self.assertIn('claude_relay.qwen_executor', command)
         self.assertIn('审指定已提交 commit 时停止', command)
         for executor in (None, 'claude', 'codex'):
-            config = {'plugins': {'qwen': {'claude_executor': executor}},
+            config = {'claude_relay': {'qwen_executor': executor},
                       'codex_relay': {'qwen_executor': 'codex' if executor != 'codex' else 'claude'}}
             self.assertEqual(claude_qwen_executor(config), executor or 'claude')
-        self.assertEqual(claude_qwen_executor({}), 'claude')
-        for value in ('responses', False, {'provider': 'codex'}):
-            with self.assertRaises(ConfigError):
-                claude_qwen_executor({'plugins': {'qwen': {'claude_executor': value}}})
         import shlex
         block = next(b for b in re.findall(r'```bash\n(.*?)```', command, re.S)
                      if '--qwen-executor codex' in b)
@@ -488,21 +485,56 @@ for event in [
                     self.assertEqual(desktop.claude_implementation(sample),
                                      ('claude-agent', '') if expected is None else ('codex', expected['model']))
 
-        executor_samples = [
-            {}, {'plugins': None}, {'plugins': 3}, {'plugins': {'qwen': None}}, {'plugins': {'qwen': []}},
-            *[{'plugins': {'qwen': {'claude_executor': value}}} for value in (
-                None, 'claude', 'codex', '', ' codex', 'Responses', True, 2, [], {},
-            )],
+        # Executor function contract. Store.read() also validates the full Qwen section.
+        new_key = 'claude_relay.qwen_executor'
+        old_key = 'plugins.qwen.claude_executor'
+        new_codex = {'claude_relay': {'qwen_executor': 'codex'}}
+        old_codex = {'plugins': {'qwen': {'claude_executor': 'codex'}}}
+        both_null = {'claude_relay': {'qwen_executor': None}, 'plugins': {'qwen': {'claude_executor': None}}}
+        null_qwen = dict(new_codex, plugins={'qwen': None})
+        valid_samples = [
+            (None, 'claude'), ({}, 'claude'), ({'claude_relay': {}}, 'claude'),
+            ({'claude_relay': None, 'plugins': None}, 'claude'), (both_null, 'claude'),
+            (null_qwen, 'codex'),
+            (dict(new_codex, plugins=None), 'codex'),
+            (dict(old_codex, claude_relay=None), 'codex'),
         ]
-        for sample in [None, [], *executor_samples]:
-            with self.subTest(executor=sample):
-                try:
-                    expected = cli.claude_qwen_executor(sample)
-                except cli.ConfigError:
-                    with self.assertRaises(desktop.StoreError):
-                        desktop.claude_qwen_executor(sample)
-                else:
-                    self.assertEqual(desktop.claude_qwen_executor(sample), expected)
+        for value in ('claude', 'codex'):
+            new = {'claude_relay': {'qwen_executor': value}}
+            old = {'plugins': {'qwen': {'claude_executor': value}}}
+            valid_samples.extend([
+                (new, value), (old, value), ({**new, **old}, value),
+                (dict(both_null, **new), value), (dict(both_null, **old), value),
+            ])
+        invalid_samples = [
+            ([], (new_key,)),
+            (dict(old_codex, claude_relay=[]), (new_key,)),
+            (dict(new_codex, plugins=3), (old_key,)),
+            (dict(new_codex, plugins={'qwen': []}), (old_key,)),
+            (dict(old_codex, claude_relay={'qwen_executor': 'claude'}), (new_key, old_key)),
+            (dict(new_codex, plugins={'qwen': {'claude_executor': 'claude'}}), (new_key, old_key)),
+        ]
+        for value in ('', ' ', ' codex', 'CODEX', 'responses', False, 2, [], {}):
+            invalid_samples.extend([
+                (dict(old_codex, claude_relay={'qwen_executor': value}), (new_key,)),
+                (dict(new_codex, plugins={'qwen': {'claude_executor': value}}), (old_key,)),
+            ])
+        for resolve_executor, error in ((cli.claude_qwen_executor, cli.ConfigError),
+                                        (desktop.claude_qwen_executor, desktop.StoreError)):
+            for sample, expected in valid_samples:
+                with self.subTest(parser=resolve_executor.__module__, executor=sample):
+                    self.assertEqual(resolve_executor(sample), expected)
+            for sample, keys in invalid_samples:
+                with self.subTest(parser=resolve_executor.__module__, executor=sample):
+                    with self.assertRaises(error) as raised:
+                        resolve_executor(sample)
+                    for key in keys:
+                        self.assertIn(key, str(raised.exception))
+
+        store = Store(self.root)
+        atomic(store.paths['ai'], json.dumps(null_qwen).encode())
+        with self.assertRaisesRegex(desktop.StoreError, '配置节必须为对象：qwen'):
+            store.read()
 
     def test_dual_plan_matches_cli_validation(self):
         import ai_anti_config as cli

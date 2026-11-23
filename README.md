@@ -261,9 +261,10 @@ its place in the fallback order. `["qwen", "codex", "same-family"]` puts cost fi
 A plugin is only configuration and calling rules; requests are still sent by a CLI on your machine, so
 **besides the API URL, model and key, you need an executor CLI installed**. By default the qwen plugin
 borrows the Claude Code CLI (`claude -p`), redirecting it to your configured endpoint with your API key,
-so it uses no Claude subscription quota. Alternatively set `plugins.qwen.claude_executor` to `codex` to
+so it uses no Claude subscription quota. Alternatively set `claude_relay.qwen_executor` to `codex` to
 use Codex CLI's Responses executor (with `plugins.qwen.responses_base_url`). On the Claude-led path Claude
 Code is already installed, so usually nothing extra is needed.
+The older `plugins.qwen.claude_executor` remains readable. Conflicting values cause a configuration error.
 
 ### Example: the qwen plugin
 
@@ -303,8 +304,8 @@ editing settings in a GUI. Skip it if none apply.
 
 - **Codex-led path** (when you mainly work in Codex). The reviewer is chosen by `--channel claude|qwen`, then
   `codex_relay.review_channel`; failures never fall back automatically. Qwen can run through Claude CLI
-  or Codex CLI's Responses executor (`codex_relay.qwen_executor`, `plugins.qwen.claude_executor`,
-  `plugins.qwen.responses_base_url`). Usage and version pins: the
+  or Codex CLI's Responses executor (`codex_relay.qwen_executor`, `plugins.qwen.responses_base_url`).
+  The Claude-led executor is configured separately through `claude_relay.qwen_executor`. Usage and version pins: the
   [codex-relay skill](adapters/codex/skills/codex-relay/SKILL.md) and
   [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 - **Codex-led implementation sources** (to write code with a cheaper model). Native Codex, Qwen Token Plan (`glm-5.3` / `qwen4-max` and other

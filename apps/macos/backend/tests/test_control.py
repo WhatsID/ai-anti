@@ -273,8 +273,7 @@ class StoreTests(unittest.TestCase):
                 })
                 self.store.save(values, self.snapshot()['fingerprints'])
                 config = json.loads(self.store.raw('ai'))
-                self.assertEqual('claude_relay' in config, 'claude_relay' in data)
-                self.assertEqual(config.get('claude_relay'), data.get('claude_relay'))
+                self.assertEqual(config['claude_relay'], dict(data.get('claude_relay') or {}, qwen_executor='codex'))
 
     def test_invalid_dual_plan_allows_unrelated_save_and_byte_exact_restore(self):
         self.write('claude', {'model': 'old-claude'})
@@ -290,7 +289,8 @@ class StoreTests(unittest.TestCase):
                 self.assertIn('claude_relay.dual_plan.' + key, values['dual_plan_error'])
                 saved = self.store.save(values, state['fingerprints'])
                 self.assertEqual(saved['values']['mode'], 'auto')
-                self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay']['dual_plan'], plan)
+                self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay'],
+                                 {'dual_plan': plan, 'qwen_executor': 'codex'})
                 before = {k: self.store.raw(k) for k in ('ai', 'claude', 'codex')}
                 edits = {'claude': {'primary_model': 'new-claude'}, 'codex': {'primary_model': 'new-codex'}}
                 with self.assertRaisesRegex(StoreError, r'双方案配置无效.*claude_relay\.dual_plan'):
@@ -308,7 +308,8 @@ class StoreTests(unittest.TestCase):
                 saved = self.save(claude_implementation_provider='claude-agent', dual_plan_enabled=True)
                 plan = {'enabled': True, 'partner': 'agy', 'model': None, 'effort': None,
                         'synthesizer': 'claude', 'on_failure': 'stop'}
-                self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay'], {'dual_plan': plan})
+                self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay'],
+                                 {'dual_plan': plan, 'qwen_executor': 'codex'})
                 self.assertEqual(saved['values']['dual_plan'], plan)
                 self.assertIs(saved['values']['dual_plan_enabled'], True)
 
@@ -326,7 +327,7 @@ class StoreTests(unittest.TestCase):
         values = dict(state['values'], claude_implementation_provider='claude-agent')
         values.pop('dual_plan_enabled')
         self.store.save(values, state['fingerprints'])
-        self.assertEqual(json.loads(self.store.raw('ai')).get('claude_relay'), kept)
+        self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay'], dict(kept, qwen_executor='codex'))
 
     def test_dual_plan_save_rejects_non_boolean(self):
         for invalid in (1, 'true', None):
@@ -346,22 +347,57 @@ class StoreTests(unittest.TestCase):
         self.assertEqual(values['codex_models'],
                          ['gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol', 'gpt-6-astra', 'gpt-6-sol', 'gpt-6-luna'])
         saved = self.save(reviewer_model='custom-review')
-        original_section = before.split(b'  "claude_relay": ', 1)[1].split(b'\n  },', 1)[0]
-        updated_section = self.store.raw('ai').split(b'  "claude_relay": ', 1)[1].split(b'\n  },', 1)[0]
-        self.assertEqual(original_section, updated_section)
+        written = json.loads(self.store.raw('ai'))
+        self.assertEqual(written['claude_relay']['implementation'], route)
+        self.assertEqual(written['claude_relay']['qwen_executor'], 'codex')
+        self.assertNotIn('claude_executor', written['plugins']['qwen'])
         self.assertEqual(saved['values']['reviewer_model'], 'custom-review')
         self.store.restore(saved['fingerprints'])
         saved = self.save(claude_implementation_model='custom-implementation', claude_qwen_executor='claude')
         written = json.loads(self.store.raw('ai'))
         self.assertEqual(written['claude_relay']['implementation'], dict(route, model='custom-implementation'))
-        self.assertEqual(written['plugins']['qwen']['claude_executor'], 'codex')
+        self.assertEqual(written['claude_relay']['qwen_executor'], 'codex')
+        self.assertNotIn('claude_executor', written['plugins']['qwen'])
         self.assertEqual(saved['values']['reviewer_model'], 'gpt-6.2-astra')
         restored = self.store.restore(saved['fingerprints'])
         self.assertEqual(self.store.raw('ai'), before)
         self.assertEqual(restored['values']['claude_implementation_model'], 'gpt-6.2-sol')
         self.assertEqual(restored['values']['claude_qwen_executor'], 'codex')
         self.assertEqual(self.save(claude_implementation_provider='claude-agent')['values']['claude_implementation_model'], '')
-        self.assertNotIn('claude_relay', json.loads(self.store.raw('ai')))
+        self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay'], {'qwen_executor': 'codex'})
+
+    def test_legacy_claude_qwen_executor_migrates_and_restores_bytes(self):
+        original = (b'{ "plugins": {"qwen":{"claude_executor":"claude",'
+                    b'"responses_base_url":"https://example.invalid/v1","custom":7}} }\n')
+        self.write('ai', original)
+        saved = self.save(mode='auto')
+        config = json.loads(self.store.raw('ai'))
+        self.assertEqual(saved['values']['claude_qwen_executor'], 'codex')
+        self.assertEqual(config.get('claude_relay', {}).get('qwen_executor'), 'codex')
+        self.assertNotIn('claude_executor', config['plugins']['qwen'])
+        self.assertEqual(config['plugins']['qwen']['custom'], 7)
+        self.assertEqual(config['plugins']['qwen']['responses_base_url'], 'https://example.invalid/v1')
+        restored = self.store.restore(saved['fingerprints'])
+        self.assertEqual(restored['values']['claude_qwen_executor'], 'claude')
+        self.assertEqual(self.store.raw('ai'), original)
+
+    def test_claude_qwen_conflict_rejects_read_and_save(self):
+        saved = self.save()
+        config = json.loads(self.store.raw('ai'))
+        config['claude_relay'] = {'qwen_executor': 'codex'}
+        config['plugins']['qwen']['claude_executor'] = 'claude'
+        self.write('ai', config)
+        before = {key: self.store.raw(key) for key in self.store.paths}
+        expected = dict(saved['fingerprints'], ai=hashlib.sha256(before['ai']).hexdigest())
+        backup = self.store.desktop / 'last-save.json'
+        backup_bytes = backup.read_bytes()
+        conflict = r'claude_relay\.qwen_executor.*plugins\.qwen\.claude_executor.*冲突'
+        with self.assertRaisesRegex(StoreError, conflict):
+            self.store.read()
+        with self.assertRaisesRegex(StoreError, conflict):
+            self.store.save(saved['values'], expected)
+        self.assertEqual({key: self.store.raw(key) for key in self.store.paths}, before)
+        self.assertEqual(backup.read_bytes(), backup_bytes)
 
     def test_claude_legacy_save_preserves_implementation_and_channels(self):
         channels = ['codex', 'qwen', 'same-family']
@@ -374,12 +410,12 @@ class StoreTests(unittest.TestCase):
             'claude_implementation_provider', 'claude_implementation_model', 'claude_qwen_executor', 'codex_models')}
         self.store.save(dict(legacy, reviewer_model='review-edited'), snap['fingerprints'])
         config = json.loads(self.store.raw('ai'))
-        self.assertEqual(config['claude_relay'], {'implementation': route, 'other': 5})
-        self.assertEqual(config['plugins']['qwen']['claude_executor'], 'codex')
+        self.assertEqual(config['claude_relay'], {'implementation': route, 'other': 5, 'qwen_executor': 'codex'})
+        self.assertNotIn('claude_executor', config['plugins']['qwen'])
         self.save(claude_qwen_executor='claude')
         self.assertEqual(json.loads(self.store.raw('ai'))['review']['channels'], channels)
         self.save(claude_implementation_provider='claude-agent')
-        self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay'], {'other': 5})
+        self.assertEqual(json.loads(self.store.raw('ai'))['claude_relay'], {'other': 5, 'qwen_executor': 'codex'})
 
     def test_claude_implementation_rejects_invalid_stored_provider(self):
         self.write('ai', {'claude_relay': {'implementation': {'provider': 'bad', 'model': 'valid'}}})
@@ -411,7 +447,8 @@ class StoreTests(unittest.TestCase):
                 before = {key: self.store.raw(key) for key in ('claude', 'codex')}
                 self.save(primary_model='')
                 config = json.loads(self.store.raw('ai'))
-                self.assertEqual(config['plugins']['qwen']['claude_executor'], 'codex')
+                self.assertEqual(config['claude_relay']['qwen_executor'], 'codex')
+                self.assertNotIn('claude_executor', config['plugins']['qwen'])
                 self.assertEqual(config['codex_relay']['qwen_executor'], 'codex')
                 self.assertEqual(config['review']['channels'], channels)
                 self.assertEqual(config['codex_relay']['review_channel'], 'qwen')
@@ -602,6 +639,27 @@ class StoreTests(unittest.TestCase):
             before = self.store.raw('ai'); snap = self.snapshot()
             with self.assertRaises(StoreError): self.store.restore(snap['fingerprints'])
             self.assertEqual(self.store.raw('ai'), before)
+
+    def test_restore_rejects_invalid_claude_qwen_executor_before_write(self):
+        saved = self.save(primary_model='fixture')
+        backup = self.store.desktop / 'last-save.json'
+        record = json.loads(backup.read_bytes())
+        before = {key: self.store.raw(key) for key in self.store.paths}
+        for new, old, message in (
+            ('codex', 'claude', r'claude_relay\.qwen_executor.*plugins\.qwen\.claude_executor.*冲突'),
+            ('invalid', 'codex', r'claude_relay\.qwen_executor.*无效'),
+            ('codex', False, r'plugins\.qwen\.claude_executor.*无效'),
+        ):
+            with self.subTest(new=new, old=old):
+                invalid = {'claude_relay': {'qwen_executor': new}, 'plugins': {'qwen': {'claude_executor': old}}}
+                record['before']['ai'] = encode(invalid).hex()
+                backup_bytes = encode(record)
+                atomic(backup, backup_bytes)
+                with patch('config_store.atomic', side_effect=AssertionError('unexpected write')):
+                    with self.assertRaisesRegex(StoreError, message):
+                        self.store.restore(saved['fingerprints'])
+                self.assertEqual({key: self.store.raw(key) for key in self.store.paths}, before)
+                self.assertEqual(backup.read_bytes(), backup_bytes)
 
     def test_first_load_is_read_only(self):
         reply = dispatch(self.store, {'action':'load'})

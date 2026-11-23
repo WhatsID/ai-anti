@@ -201,13 +201,20 @@ def agy_implementation(data):
 
 def claude_qwen_executor(data):
     """Select the Claude-led Qwen executor independently of codex_relay."""
-    key = 'plugins.qwen.claude_executor'
-    value = lookup(data, key)
-    if value is None:
-        return 'claude'
-    if value not in ('claude', 'codex'):
-        raise ConfigError('ai-anti config: ' + key + ' must be claude or codex')
-    return value
+    new_key = 'claude_relay.qwen_executor'
+    old_key = 'plugins.qwen.claude_executor'
+    new_value = lookup(data, new_key)
+    old_value = lookup(data, old_key)
+    for key, value in ((new_key, new_value), (old_key, old_value)):
+        if value is not None and (not isinstance(value, str) or value not in ('claude', 'codex')):
+            raise ConfigError('ai-anti config: ' + key + ' must be claude or codex')
+    if new_value is not None and old_value is not None and new_value != old_value:
+        raise ConfigError('ai-anti config: ' + new_key + ' conflicts with ' + old_key)
+    if new_value is not None:
+        return new_value
+    if old_value is not None:
+        return old_value
+    return 'claude'
 
 
 def claude_dual_plan_defaults():

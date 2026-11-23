@@ -9,9 +9,9 @@ description: qwen 插件评审通道:经 anthropic 兼容端点让用户配置�
 **调用形态先读 `core/CLI_DISCIPLINE.md`（外部 CLI 的调用纪律）**（四条，唯一权威）。
 `claude -p` 与 `codex exec` 同属非交互 CLI，同样适用——下面的命令已按那四条写好。
 
-**执行器选择**：先按下文从命令 symlink 解析 `ai_anti_root`，将其 `adapters/codex/skills/claude-review/scripts` 加入 Python 导入路径，调用 `ai_anti_config.claude_qwen_executor(ai_anti_config.load())`。缺失/null/`claude` 进入下文默认 Anthropic 分支。配置错误停止并报告。`codex` 只执行本节 Responses 分支，独立于 `codex_relay.qwen_executor`。
+**执行器选择**：先按下文从命令 symlink 解析 `ai_anti_root`，将其 `adapters/codex/skills/claude-review/scripts` 加入 Python 导入路径，调用 `ai_anti_config.claude_qwen_executor(ai_anti_config.load())`。规范键为 `claude_relay.qwen_executor`，兼容旧键 `plugins.qwen.claude_executor`。两键都缺失或为 null 时默认使用 `claude`，进入下文 Anthropic 分支。任一键无效或两键均有值且取值冲突时，停止并报告配置错误。`codex` 只执行本节 Responses 分支，独立于 `codex_relay.qwen_executor`。
 
-AIAnti 设置固定使用 Codex Responses。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `plugins.qwen.claude_executor=claude`，Codex 主模型手动设置 `codex_relay.qwen_executor=claude`。再次用 App 保存会将两项写回 `codex`。
+AIAnti 设置固定使用 Codex Responses。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `claude_relay.qwen_executor = "claude"`，如仍有旧键则一并移除；Codex 主模型手动设置 `codex_relay.qwen_executor = "claude"`。再次用新版 App 保存会将两项写回 `codex`，并移除旧键。
 
 Responses 使用 `plugins.qwen.responses_base_url`，缺失则本档不可用。凭证相对路径以 `--repo` 为基准，推荐绝对路径或 `~`。审指定已提交 commit 时停止并说明：本分支仅支持相对 HEAD 的工作树增量，可选默认 Anthropic 路径或其他通道。
 

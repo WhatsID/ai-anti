@@ -226,9 +226,10 @@ Codex 不可用（没装、额度用完）时就只能退到 Claude 自己审自
 
 插件只是配置和调用规则，真正发请求的仍是本机的 CLI，所以**除了 API 地址、模型和密钥，还需要装好一个
 执行器 CLI**：qwen 插件默认借用 Claude Code CLI（`claude -p`），把请求转到你配置的地址、用你的 API key
-认证，不消耗 Claude 订阅额度；也可以设 `plugins.qwen.claude_executor` 为 `codex`，改用 Codex CLI 的
+认证，不消耗 Claude 订阅额度；也可以设 `claude_relay.qwen_executor` 为 `codex`，改用 Codex CLI 的
 Responses 执行器（另配 `plugins.qwen.responses_base_url`）。Claude 主导时本来就装着 Claude Code，
 通常无需额外安装。
+旧键 `plugins.qwen.claude_executor` 仍可读取，新旧键取值冲突时会报配置错误。
 
 ### 接入示例：qwen 插件
 
@@ -266,7 +267,7 @@ Responses 执行器（另配 `plugins.qwen.responses_base_url`）。Claude 主�
 
 - **Codex 主导的路径**（主要用 Codex 干活时）：评审通道由 `--channel claude|qwen` 选择，其次是 `codex_relay.review_channel`，
   失败不自动降级。Qwen 可以选 Claude CLI 或 Codex CLI 的 Responses 执行器
-  （`codex_relay.qwen_executor`、`plugins.qwen.claude_executor`、`plugins.qwen.responses_base_url`）。
+  （`codex_relay.qwen_executor`、`plugins.qwen.responses_base_url`）。Claude 主导的执行器由 `claude_relay.qwen_executor` 单独配置。
   调用方式与版本钉见 [codex-relay 技能](adapters/codex/skills/codex-relay/SKILL.md) 和 [兼容性说明](docs/COMPATIBILITY.md)。
 - **Codex 主导的实施来源**（想用更便宜的模型写代码时）：可选原生 Codex、千问 Token Plan（`glm-5.3` / `qwen4-max`等模型）或 Qoder 订阅，
   千问 Token Plan 还支持主、备两个账号在额度耗尽时自动切换。契约与验证边界见[codex-relay 技能](adapters/codex/skills/codex-relay/SKILL.md) 和 [兼容性说明](docs/COMPATIBILITY.md)。

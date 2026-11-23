@@ -46,7 +46,11 @@ Qwen 使用现有正式 `review.py diff --channel qwen` 全部门禁；Codex 需
 
 评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen4-Max（qwen4-max）、Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3.1-Pro（kmodel_latest；CLI 明确准入 1.1.74 / 1.1.77，1.1.77 已完成正式 bug-review 实测；桌面路由仅离线验证）；Codex 评审目录含 gpt-6.2-sol、gpt-6.2-astra 等六个模型，支持 CLI 默认及自定义模型 ID；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Claude 可选择 Codex 评审，AGY 固定使用 Codex 评审；既有其他路由保留显示。
 
-API 服务显示服务地址和“认证 / API 密钥”，CLI 服务使用现有 CLI 登录，仅 Qoder 显示“登录状态未检测”。AIAnti 设置窗口对两种主模型的 Qwen 评审统一使用 Codex CLI · Responses。Qwen 为首选或回退时，窗口显示「评审服务地址（Responses）」，Claude 主模型选 Codex 评审服务时隐藏该字段。任一主模型的通道含 Qwen 时，保存需要填写 Responses 地址，保存保留通道顺序。发现旧执行器配置时，保存后才能检测。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `plugins.qwen.claude_executor=claude`，Codex 主模型手动设置 `codex_relay.qwen_executor=claude`。再次用 AIAnti 保存会将两项都写回 `codex`。Responses 路径不支持评审已提交的 commit。 所有真实合成检测统一读取用户配置 `review.timeout` / `review.idle_timeout`（默认1800/900秒，上限3600/900秒，先到者终止）。Qwen/Qoder正式入口外围为总时间+60秒，界面3700秒覆盖最大3600+60并支持取消；极慢本地准备仍可能触发外围预算。Qoder保留2MiB输出上限，保留正式 runner 全部门禁和实际 Kimi-K3.1-Pro 证据校验。
+API 服务显示服务地址和“认证 / API 密钥”，CLI 服务使用现有 CLI 登录，仅 Qoder 显示“登录状态未检测”。AIAnti 设置窗口对两种主模型的 Qwen 评审统一使用 Codex CLI · Responses。Qwen 为首选或回退时，窗口显示「评审服务地址（Responses）」，Claude 主模型选 Codex 评审服务时隐藏该字段。任一主模型的通道含 Qwen 时，保存需要填写 Responses 地址，保存保留通道顺序。两侧生效的执行器均为 `codex` 时，执行器配置不会阻断检测。任一侧生效值为 `claude` 时，保存后才能检测。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `claude_relay.qwen_executor = "claude"` 并移除旧键，Codex 主模型手动设置 `codex_relay.qwen_executor = "claude"`。新版 AIAnti 保存会将两项都写回 `codex` 并移除旧键。Responses 路径不支持评审已提交的 commit。 所有真实合成检测统一读取用户配置 `review.timeout` / `review.idle_timeout`（默认1800/900秒，上限3600/900秒，先到者终止）。Qwen/Qoder正式入口外围为总时间+60秒，界面3700秒覆盖最大3600+60并支持取消；极慢本地准备仍可能触发外围预算。Qoder保留2MiB输出上限，保留正式 runner 全部门禁和实际 Kimi-K3.1-Pro 证据校验。
+
+旧键 `plugins.qwen.claude_executor` 仍可读取，新旧键取值冲突时会报配置错误。迁移前先在仓库根目录用新源码运行 `bash apps/macos/build-app.sh <输出目录>`，并替换已安装的 AIAnti。旧版 App 保存时仍会写旧键为 `codex`，如果此时新键为 `claude` 就会冲突。
+
+回滚前先手工把 `claude_relay.qwen_executor` 的值写回 `plugins.qwen.claude_executor` 并删除新键。确知上次 App 保存就是迁移时，也可用「恢复上次保存」。两种方式都须确认磁盘上的旧键等于期望值，再回退代码。若已替换新版 App，用回退后的源码重建并替换。
 
 Claude 主模型的「双方案规划」提供 `enable` / `disable` 下拉选项，只修改 `claude_relay.dual_plan.enabled`，选择 `enable` 时下方显示当前配置摘要。协作方、模型、深度、综合方与失败处置在 `~/.config/ai-anti/config.json` 中编辑，编辑后重新读取配置。按 solo 运行的任务跳过双方案，当次指令与会话内 `/disable-dual-plan` 优先。
 
@@ -56,7 +60,7 @@ Claude 主模型选 Codex 评审服务且回退含 Qwen 时，如 Responses 地�
 
 认证动作默认为保留；更换后输入非空新密钥，空输入仍保留；清除须显式选择并保存。密钥按服务写入 secrets.json 的 model_services.token_plan.value / model_services.custom_api.value，0600受限明文。清除删除该服务应用管理槽的值、清空其凭证路径并切换为独立键，防止外部旧密钥复活；不删除外部文件，也不删除 legacy tokenplan.value。首次加载只查文件 stat，不读取密钥正文，因此“发现凭证文件”不表示已配置或已登录。动作通过独立 secret_actions 请求传递，不写入公共 values、argv 或日志。
 
-model_services（version=1、active_api、固定 token_plan/custom_api profiles）是 API 配置真源，plugins.qwen 为同次事务更新的兼容投影；入口仍为 channel=qwen。每个 profile 包含 model/base_url/responses_base_url/credential_paths/credential_key，不存明文 token。credential_key 仅允许 tokenplan.value、model_services.token_plan.value、model_services.custom_api.value；指定键缺失不回退，只有旧配置缺字段时使用 legacy。旧客户端不懂新槽，请使用配套源码；不承诺新配置兼容旧 runner，新密钥不复制到 legacy。
+model_services（version=1、active_api、固定 token_plan/custom_api profiles）是 API 配置真源。保存时，plugins.qwen 的五个公开字段 model/base_url/responses_base_url/credential_paths/credential_key 与活动 profile 同步，其他用户字段保留。入口仍为 channel=qwen，profile 不存明文 token。credential_key 仅允许 tokenplan.value、model_services.token_plan.value、model_services.custom_api.value；指定键缺失不回退，只有旧配置缺字段时使用 legacy。旧客户端不懂新槽，请使用配套源码；不承诺新配置兼容旧 runner，新密钥不复制到 legacy。
 
 旧配置首次加载只在内存迁移：所有非空端点必须精确等于已知千问默认地址才归千问，否则（包括空端点、混合地址、尾斜杠）归自定义 API 并保留模型/地址/路径顺序。只有迁移到的一个 profile 继承旧凭证键及路径；另一个没有 legacy 凭证。首次保存才持久化。未知版本、字段错误或 profile/投影冲突拒绝写入。冲突错误只列字段名；修复时备份配置，然后按 model_services.active_api 对应 profile 将 model、base_url、responses_base_url、credential_paths、credential_key 同步到 plugins.qwen，保留其他配置和密钥，再重新读取；不要删除配置或密钥来绕过错误。
 

@@ -56,10 +56,12 @@ plugins/<name>/
 ## Claude 主导的 Qwen 执行器
 
 默认 `/qwen-review` 使用 Claude CLI 与 `plugins.qwen.base_url`（Anthropic）。显式设置
-`plugins.qwen.claude_executor="codex"` 后，通道调用 `review.py --channel qwen --qwen-executor codex`，
+`claude_relay.qwen_executor = "codex"` 后，通道调用 `review.py --channel qwen --qwen-executor codex`，
 使用 `plugins.qwen.responses_base_url`，凭证相对路径以 `--repo` 为基准。默认路径仍按调用 cwd，
 均可使用绝对路径或 `~`。Responses 支持方案与相对 HEAD 的工作树增量，审指定提交需选择其他路径。
-该键缺失、null 或 `"claude"` 时沿用默认执行器，其他值报配置错误。Codex 主导的执行器单独配置。
+旧键 `plugins.qwen.claude_executor` 仍可读取。两键都缺失或为 null 时默认用 `"claude"`，
+两键都有值时必须一致，任一键无效或值冲突都会报配置错误。Codex 主导的执行器单独配置。
+新版 AIAnti 保存时将 `claude_relay.qwen_executor` 写为 `"codex"` 并移除旧键。
 
 ## Codex 主导的 Qwen 接入
 

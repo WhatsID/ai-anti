@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Claude 主导的 Qwen 执行器配置键改为 `claude_relay.qwen_executor`。旧键 `plugins.qwen.claude_executor` 仍可读取，新旧键取值冲突时报错。
+- 迁移前先用新源码重建并替换 AIAnti。新版保存会写入 `claude_relay.qwen_executor = "codex"` 并移除旧键。
+- 回滚前先手工把新键值写回旧键并删除新键。确知上次 App 保存就是迁移时，也可用「恢复上次保存」。两种方式都须确认磁盘上的 `plugins.qwen.claude_executor` 等于期望值，再回退代码。若已替换新版 App，用回退后的源码重建并替换。
 - Claude 与 AGY 主导的终审返工可在同一隔离工作树续接最近一次成功的 Codex 实施会话。会话缺失时保留候选树并停下交用户裁决。
 - Codex 0.169.1 兼容校验在实施侧将已知的 `apply_patch` 预校验失败和 `write_stdin` 未知进程日志记录为警告，实施与评审均识别已取证的 TLS `close_notify` 缺失重连事件。
 - Claude 与 AGY 主导的 Codex 评审支持按任务风险配置独立的思考深度。漏传风险档按高风险处理，倒挂配置在启动前报错。

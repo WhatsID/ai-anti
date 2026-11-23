@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import checks
-from config_store import Store, atomic
+from config_store import Store, StoreError, atomic
 ROOT = Path(__file__).resolve().parents[4]
 AGY_PLUGIN = Path('adapters/agy/plugin')
 
@@ -365,7 +365,7 @@ class CheckTests(unittest.TestCase):
         for host, executor in (('codex', 'codex'), ('claude', 'claude'), ('claude', 'codex')):
             store = self.api_store(host)
             data=json.loads(store.paths['ai'].read_text()); data['review'].update(timeout=321,idle_timeout=45)
-            data['plugins']['qwen']['claude_executor'] = 'claude'
+            data['claude_relay']['qwen_executor'] = 'claude'
             data['codex_relay']['qwen_executor'] = 'claude'
             atomic(store.paths['ai'],json.dumps(data).encode())
             if executor == 'codex':
@@ -554,11 +554,33 @@ class CheckTests(unittest.TestCase):
         self.assertIn('未验证登录',value['message'])
     def test_local_qwen_skips_relative_and_uses_global(self):
         store=Store(self.root/'home')
-        atomic(store.paths['ai'],b'{"review":{"channels":["qwen"]},"plugins":{"qwen":{"model":"qwen-fixture","claude_executor":"codex","responses_base_url":"https://example.invalid/v1","credential_paths":["project/credentials.json","~/.config/ai-anti/secrets.json"]}}}')
+        atomic(store.paths['ai'],b'{"review":{"channels":["qwen"]},"claude_relay":{"qwen_executor":"codex"},"plugins":{"qwen":{"model":"qwen-fixture","responses_base_url":"https://example.invalid/v1","credential_paths":["project/credentials.json","~/.config/ai-anti/secrets.json"]}}}')
         atomic(store.paths['secrets'],b'{"tokenplan":{"value":"fake-global"}}')
         with patch('checks.discover',return_value='/usr/bin/true'):
             value=checks.local(store,str(ROOT))
         self.assertEqual(value['state'],'passed')
+
+    def test_qwen_checks_accept_legacy_executor_and_reject_conflict(self):
+        store = self.api_store('claude')
+        config = json.loads(store.raw('ai'))
+        config.pop('claude_relay', None)
+        config['plugins']['qwen']['claude_executor'] = 'codex'
+        atomic(store.paths['ai'], json.dumps(config).encode())
+        with patch('checks.discover', return_value='/usr/bin/true') as discover:
+            self.assertEqual(checks.local(store, str(ROOT))['state'], 'passed')
+        self.assertEqual({call.args[0] for call in discover.call_args_list}, {'claude', 'codex'})
+
+        config['claude_relay'] = {'qwen_executor': 'claude'}
+        raw = json.dumps(config).encode()
+        atomic(store.paths['ai'], raw)
+        conflict = r'claude_relay\.qwen_executor.*plugins\.qwen\.claude_executor.*冲突'
+        for check in (checks.local, checks.real):
+            with self.subTest(check=check.__name__), patch('checks.discover', side_effect=AssertionError('unexpected CLI discovery')) as discover:
+                with self.assertRaisesRegex(StoreError, conflict):
+                    check(store, str(ROOT))
+                discover.assert_not_called()
+        self.assertEqual(store.raw('ai'), raw)
+
     def test_real_result_invalidated_by_config_change(self):
         store=Store(self.root/'home'); snap=store.read(); v=snap['values']; v['reviewer_model']='chosen'; store.save(v,snap['fingerprints'])
         def fake_events(path,marker):

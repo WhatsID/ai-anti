@@ -87,12 +87,20 @@ def claude_implementation(ai):
     return 'codex', model(value.get('model'))
 
 def claude_qwen_executor(ai):
-    value = lookup(ai, 'plugins.qwen.claude_executor')
-    if value is None:
-        return 'claude'
-    if value not in ('claude', 'codex'):
-        raise StoreError('plugins.qwen.claude_executor 无效；合法值：claude/codex')
-    return value
+    new_key = 'claude_relay.qwen_executor'
+    old_key = 'plugins.qwen.claude_executor'
+    new_value = lookup(ai, new_key)
+    old_value = lookup(ai, old_key)
+    for key, value in ((new_key, new_value), (old_key, old_value)):
+        if value is not None and (not isinstance(value, str) or value not in ('claude', 'codex')):
+            raise StoreError(key + ' 无效；合法值：claude/codex')
+    if new_value is not None and old_value is not None and new_value != old_value:
+        raise StoreError(new_key + ' 与旧键 ' + old_key + ' 取值冲突')
+    if new_value is not None:
+        return new_value
+    if old_value is not None:
+        return old_value
+    return 'claude'
 
 def executor_for(host, values, ai):
     if host == 'codex':
@@ -411,11 +419,7 @@ class Store:
             elif chosen_model != stored_model:
                 ai['claude_relay']['implementation']['model'] = chosen_model
         elif 'claude_implementation_provider' in values and isinstance(ai.get('claude_relay'), dict):
-            claude_relay = ai['claude_relay']
-            if 'implementation' in claude_relay:
-                del claude_relay['implementation']
-                if not claude_relay:
-                    del ai['claude_relay']
+            ai['claude_relay'].pop('implementation', None)
         if 'dual_plan_enabled' in values:
             dual_plan.apply_enabled(ai, values['dual_plan_enabled'], StoreError)
         if 'agy_dual_plan_enabled' in values:
@@ -457,7 +461,10 @@ class Store:
         qwen['model'] = values['qwen_model']
         qwen.update(urls)
         relay['qwen_executor'] = 'codex'
-        qwen['claude_executor'] = 'codex'
+        if ai.get('claude_relay') is None:
+            ai['claude_relay'] = {}
+        section(ai, 'claude_relay')['qwen_executor'] = 'codex'
+        qwen.pop('claude_executor', None)
         paths = qwen.get('credential_paths', ['~/.config/ai-anti/secrets.json'])
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             raise StoreError('凭证路径列表无效')

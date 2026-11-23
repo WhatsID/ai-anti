@@ -180,7 +180,7 @@ invocation only. Use `--channel qwen --qwen-executor codex --responses-base-url
 https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`. Reuse the configured
 Qwen model and credential paths. An Anthropic URL is never rewritten. URL overrides
 are rejected outside Qwen Codex; URLs forbid credentials, whitespace, query and fragment.
-In macOS settings, Claude hosts can select Claude Code CLI (Anthropic) or Codex CLI (Responses) when Qwen is the primary or a fallback review channel. Codex hosts use Codex CLI for API review, and Claude-to-Codex review uses Codex CLI. Legacy Codex API executor changes require an explicit save; Anthropic and Responses URLs remain independent. The CLI executor override remains available.
+For Claude-led Qwen reviews through Anthropic, set `claude_relay.qwen_executor = "claude"` manually because the macOS app writes it back to `"codex"` on every save. Codex hosts use Codex CLI for API review, and Claude-to-Codex review uses Codex CLI. Legacy Codex API executor changes require an explicit save; Anthropic and Responses URLs remain independent. The CLI executor override remains available.
 
 Codex configuration semantics are pinned to `codex-cli 0.160.0` or `codex-cli 0.163.0`; unknown versions
 stop at preflight. Compatibility warnings use `tested.codex`, independently of

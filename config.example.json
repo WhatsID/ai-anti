@@ -20,6 +20,7 @@
     }
   },
   "claude_relay": {
+    "qwen_executor": "claude",
     "implementation": {"provider": "codex", "model": "gpt-6.2-sol",
                        "effort": "high"},
     "dual_plan": {
@@ -61,7 +62,6 @@
   },
   "plugins": {
     "qwen": {
-      "claude_executor": "claude",
       "model": "qwen3.8-max",
       "base_url": "https://token-plan.maas.qianwenaiapi.com/apps/anthropic",
       "responses_base_url": "https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1",
