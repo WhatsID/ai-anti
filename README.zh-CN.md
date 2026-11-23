@@ -123,30 +123,62 @@ AGY 由插件加载同一入口。
 
 ## 安装
 
-前置条件：macOS、Python 3.9+，以及所选路径需要的
-[Claude Code](https://docs.anthropic.com/en/docs/claude-code)、[Codex CLI](https://github.com/openai/codex)
-或 AGY，并完成相应登录或配好 API 凭证。
+### 第一步：先装好要用的模型 CLI
+
+ai-anti 本身不包含任何模型，它是通过调用你电脑上已装好的命令行工具来让模型协作的。**没装、没登录的
+CLI，对应的模型就不会参与。** 至少要装一个作为主导工具；交叉评审需要另一个模型的 CLI。
+
+| 工具 | 在 ai-anti 里的角色 | 安装命令（macOS） | 装完后 |
+|------|-------------------|------------------|--------|
+| [Claude Code](https://code.claude.com/docs/en/setup) | 主导工具；Codex 主导时做评审方 | `curl -fsSL https://claude.ai/install.sh \| bash` | 运行 `claude` 登录 |
+| [Codex CLI](https://github.com/openai/codex) | 主导工具；Claude 或 AGY 主导时做评审方和实施方 | `brew install --cask codex` 或 `npm install -g @openai/codex` | 运行 `codex` 登录 |
+| [AGY（Antigravity CLI）](https://antigravity.google/docs/cli/install) | 主导工具；Claude 主导时可做双方案的协作方 | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | 运行 `agy` 登录 Google 账号 |
+
+另需 macOS 和 Python 3.9+（`python3 --version` 查看）。安装命令以各工具官方文档为准，上表链接即
+官方安装页。
+
+最常见的组合是「Claude Code 主导 + Codex 评审」：两个都装上并登录即可。
+
+### 第二步：安装 ai-anti
 
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
 cd ~/ai-anti
-./install.sh                 # Claude Code：命令、子代理、CLAUDE.md 导入
-./install.sh --with-codex    # 可选：Codex 入口与技能
-./install.sh --with-agy      # 可选：AGY 插件
+./install.sh                 # 必装：Claude Code 侧
+./install.sh --with-codex    # 可选：把 Codex 也作为主导工具
+./install.sh --with-agy      # 可选：把 AGY 也作为主导工具
 ./install.sh --with-hook     # 可选：开会话时播报当前协作模式
 ./install.sh --status        # 只读体检
 ```
+
+**`./install.sh` 和 `--with-xxx` 的区别**：安装器装的是「主导工具读到的规则」，不是模型本身。
+
+- `./install.sh` 只给 **Claude Code** 装规则、命令和子代理，让 Claude Code 主导时会走接力流程。
+- `--with-codex` / `--with-agy` 额外给 **Codex / AGY** 装上同一套规则，让你**直接用 Codex 或 AGY
+  干活时**它们也会走流程。只用 Claude Code 的话不需要装。
+- 某个工具只是**被调用**来评审或实施（比如 Claude 主导时调用 Codex 评审），只要第一步装好它的 CLI
+  就行，不需要 `--with-xxx`。
+- 选项可以随时追加，重装会保留已装的组件。
 
 装完后**新开一个会话**，规则就会生效，在任何仓库里都能用。第一次使用建议按
 [最小上手指南](docs/QUICKSTART.zh-CN.md) 走一遍；安装器的所有权规则、Codex 与 AGY 入口的边界、
 `--status` 的含义、卸载细节，见 [安装细节](docs/INSTALL.zh-CN.md)。
 
-Codex 里的用法示例：
+### 日常怎么用
 
-```text
-使用 $claude-review 评审方案 .claude/plans/20260101-task.md
-使用 $codex-relay 完成下面的任务：……
-```
+**和平时用单个模型一样说话就行，不需要固定句式。** 主导工具每次接到任务，都会按当前协作模式和任务
+规模自己判断：小任务直接做，大任务或高风险任务自动走接力流程，并在动手前告诉你它的判断。
+
+想改变它的判断时，在消息里直接说即可：
+
+| 你说 | 效果 |
+|------|------|
+| 「走流程」 | 这次一定走接力流程 |
+| 「直接改」 | 不按规模走流程；但命中高风险触发器时仍会评审 |
+| 「跳过评审」 | 连高风险任务也不评审 |
+
+也可以手动调用单个环节，例如在 Claude Code 里用 `/codex-review plan <方案.md>` 只做一次方案评审，
+或在 Codex 里说「使用 $claude-review 评审方案 …」。这些是可选的，不是必需的。
 
 ## 配置
 
@@ -175,19 +207,24 @@ Codex 里的用法示例：
 
 ## 评审通道与插件
 
-Claude 主导时内置两个评审通道：
+**评审通道**就是「由谁来审方案」。Claude 主导时内置两个评审通道：
 
 | 通道 | 配置名 | 命令 | 说明 |
 |------|--------|------|------|
 | Codex 评审 | `codex` | `/codex-review` | 跨模型评审，默认第一档 |
 | Claude 自评审 | `same-family` | `/opus-review` | 多个 Claude 子代理从不同视角评审；同族评审，只在全部跨模型通道都不可用时启用 |
 
-其他模型以**插件**接入：放在 `plugins/<name>/`，用 `./install.sh --with-plugin <name>` 安装，再把插件名
-写进 `review.channels`，排第几位就是第几档。插件契约见 [docs/PLUGINS.md](docs/PLUGINS.md)。
+**插件是做什么的**：让 Codex 以外的模型也能当评审方。不用插件的话，Claude 主导时只能找 Codex 评审，
+Codex 不可用（没装、额度用完）时就只能退到 Claude 自己审自己。装上插件后，你可以接入千问等其他厂商
+的模型（任何提供 Anthropic 兼容接口的服务都可以），用途有两个：
 
-评审方只读仓库、挑方案硬伤，价值主要来自**换一个立场、换一套盲区**，用更便宜的模型通常就够。
-例如把 `["qwen", "codex", "same-family"]` 设为成本优先，把 `["codex", "qwen", "same-family"]` 设为质量
-优先、插件兜底。
+- **省钱**：评审方只读代码、挑方案的硬伤，不写代码。它的价值主要来自换一个立场、换一套盲区，
+  用更便宜的模型通常就够。
+- **兜底**：Codex 额度用完时，先降到插件模型，而不是直接降到最贵、又只是同族视角的 Claude 自评审。
+
+用法：用 `./install.sh --with-plugin <name>` 安装，再把插件名写进 `review.channels`，排第几位就是
+第几档。例如 `["qwen", "codex", "same-family"]` 是成本优先，`["codex", "qwen", "same-family"]` 是
+质量优先、插件兜底。目前提供的插件是 `qwen`；自己写插件的契约见 [docs/PLUGINS.md](docs/PLUGINS.md)。
 
 ### 接入示例：qwen 插件
 
@@ -220,18 +257,21 @@ Claude 主导时内置两个评审通道：
 
 ## 进阶
 
-- **Codex 主导的路径**：评审通道由 `--channel claude|qwen` 选择，其次是 `codex_relay.review_channel`，
+以上内容已经够日常使用。本节面向这几种需求：主要用 Codex 干活、想用更便宜的模型做实施、想对已有的
+问题分析再要一份第二意见，或者想用图形界面改配置。用不到可以跳过。
+
+- **Codex 主导的路径**（主要用 Codex 干活时）：评审通道由 `--channel claude|qwen` 选择，其次是 `codex_relay.review_channel`，
   失败不自动降级。Qwen 可以选 Claude CLI 或 Codex CLI 的 Responses 执行器
   （`codex_relay.qwen_executor`、`plugins.qwen.claude_executor`、`plugins.qwen.responses_base_url`）。
   调用方式与版本钉见 [codex-relay 技能](adapters/codex/skills/codex-relay/SKILL.md) 和
   [兼容性说明](docs/COMPATIBILITY.md)。
-- **Codex 主导的实施来源**：可选原生 Codex、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅，
+- **Codex 主导的实施来源**（想用更便宜的模型写代码时）：可选原生 Codex、Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅，
   Token Plan 还支持主、备两个账号在额度耗尽时自动切换。契约与验证边界见
   [codex-relay 技能](adapters/codex/skills/codex-relay/SKILL.md) 和
   [兼容性说明](docs/COMPATIBILITY.md)。
-- **显式问题复核**：Codex 用 `$bug-review`，Claude Code 用 `/bug-review`，分「独立分析 → 结论复核」
+- **显式问题复核**（排查 bug 时，想让另一个模型复核已有的分析结论）：Codex 用 `$bug-review`，Claude Code 用 `/bug-review`，分「独立分析 → 结论复核」
   两阶段审查已有的问题分析，不要求 Git。见 [docs/BUG_REVIEW.md](docs/BUG_REVIEW.md)。
-- **macOS 菜单栏工具**：可选的 [菜单栏应用](apps/macos/README.md)，用来编辑默认模型、评审通道、
+- **macOS 菜单栏工具**（不想手改 JSON 配置时）：可选的 [菜单栏应用](apps/macos/README.md)，用来编辑默认模型、评审通道、
   协作模式并做本地检测；业务评审仍从 CLI 入口发起。见 [产品说明](docs/MACOS_REVIEW_APP.md)。
 
 ## 兼容性

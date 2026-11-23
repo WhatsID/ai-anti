@@ -146,31 +146,65 @@ repository root; the global default is `relay.default_mode`.
 
 ## Install
 
-Prerequisites: macOS, Python 3.9+, and the CLIs for your chosen path
-([Claude Code](https://docs.anthropic.com/en/docs/claude-code), [Codex CLI](https://github.com/openai/codex),
-or AGY), logged in or configured with API credentials.
+### Step 1: install the model CLIs you want to use
+
+ai-anti contains no models. It makes models collaborate by calling the command-line tools already
+installed on your machine, **so a model whose CLI is not installed and logged in cannot take part.** You
+need at least one tool to lead, and cross review needs a second model's CLI.
+
+| Tool | Role in ai-anti | Install (macOS) | Then |
+|------|-----------------|-----------------|------|
+| [Claude Code](https://code.claude.com/docs/en/setup) | Leads; reviews when Codex leads | `curl -fsSL https://claude.ai/install.sh \| bash` | run `claude` to log in |
+| [Codex CLI](https://github.com/openai/codex) | Leads; reviews and implements when Claude or AGY leads | `brew install --cask codex` or `npm install -g @openai/codex` | run `codex` to log in |
+| [AGY (Antigravity CLI)](https://antigravity.google/docs/cli/install) | Leads; dual-planning partner when Claude leads | `curl -fsSL https://antigravity.google/cli/install.sh \| bash` | run `agy` to sign in with Google |
+
+You also need macOS and Python 3.9+ (`python3 --version`). The official install pages linked above are
+authoritative. The most common setup is "Claude Code leads, Codex reviews": install and log in to both.
+
+### Step 2: install ai-anti
 
 ```bash
 git clone https://github.com/WhatsID/ai-anti ~/ai-anti
 cd ~/ai-anti
-./install.sh                 # Claude Code: commands, subagents, CLAUDE.md import
-./install.sh --with-codex    # optional: Codex entry and skills
-./install.sh --with-agy      # optional: AGY plugin
+./install.sh                 # required: Claude Code side
+./install.sh --with-codex    # optional: let Codex lead as well
+./install.sh --with-agy      # optional: let AGY lead as well
 ./install.sh --with-hook     # optional: announce the relay mode at session start
 ./install.sh --status        # read-only health check
 ```
+
+**`./install.sh` vs `--with-xxx`:** the installer installs the *rules a leading tool reads*, not the
+models themselves.
+
+- `./install.sh` installs rules, commands and subagents for **Claude Code** only, so Claude Code runs the
+  relay when it leads.
+- `--with-codex` / `--with-agy` add the same rules for **Codex / AGY**, so they run the relay when **you
+  work in them directly**. If you only use Claude Code, you don't need them.
+- A tool that is only **called** to review or implement (e.g. Codex reviewing for Claude) just needs its
+  CLI from step 1; no `--with-xxx` required.
+- Options can be added at any time; reinstalling keeps components already installed.
 
 Then **open a new session**; the rules apply in any repository. First time? Walk through the
 [minimal quickstart (Chinese)](docs/QUICKSTART.zh-CN.md). The installer's ownership rules, Codex and AGY
 entry edge cases, what `--status` does and does not prove, and uninstall details are in
 [install details (Chinese)](docs/INSTALL.zh-CN.md).
 
-Codex examples:
+### Day-to-day use
 
-```text
-Use $claude-review to review the plan .claude/plans/20260101-task.md
-Use $codex-relay to complete the following task: ...
-```
+**Talk to it exactly as you would to a single model; no special phrasing is needed.** For every task, the
+leading tool decides from the relay mode and task size: small tasks are done directly, large or high-risk
+tasks go through the relay automatically, and it tells you its decision before starting.
+
+To override that decision, just say so in your message:
+
+| You say | Effect |
+|---------|--------|
+| "use the relay" | Always run the relay this time |
+| "just change it" | Skip size-based relay; high-risk triggers are still reviewed |
+| "skip review" | No review, even for high-risk tasks |
+
+You can also call a single step by hand, e.g. `/codex-review plan <plan.md>` in Claude Code for one plan
+review, or "Use $claude-review to review the plan ..." in Codex. These are optional.
 
 ## Configuration
 
@@ -202,20 +236,27 @@ high-risk. All fields and values: the template and
 
 ## Review channels and plugins
 
-Two channels are built in on the Claude-led path:
+A **review channel** is simply "who reviews the plan". Two channels are built in on the Claude-led path:
 
 | Channel | Config name | Command | Notes |
 |---------|-------------|---------|-------|
 | Codex review | `codex` | `/codex-review` | Cross-model; first by default |
 | Claude self-review | `same-family` | `/opus-review` | Several Claude subagents from different perspectives; same-family, so only when every cross-model channel is unavailable |
 
-Other models join as **plugins** under `plugins/<name>/`: install with
-`./install.sh --with-plugin <name>`, then add the name to `review.channels`; its position is its place
-in the fallback order. Plugin contract: [docs/PLUGINS.md](docs/PLUGINS.md).
+**What plugins are for:** they let models other than Codex act as reviewers. Without a plugin, the
+Claude-led path can only ask Codex; when Codex is unavailable (not installed, out of quota) it falls back
+to Claude reviewing itself. A plugin connects another vendor's model, such as Qwen, through any
+Anthropic-compatible API, for two purposes:
 
-A reviewer only reads the repository and looks for flaws. Its value comes from **a different stance and
-different blind spots**, so a cheaper model is usually enough: `["qwen", "codex", "same-family"]` puts
-cost first, `["codex", "qwen", "same-family"]` puts quality first with the plugin as backup.
+- **Lower cost.** A reviewer only reads code and looks for flaws in the plan. Its value comes from a
+  different stance and different blind spots, so a cheaper model is usually enough.
+- **Backup.** When Codex runs out of quota, review falls back to the plugin first, instead of going
+  straight to Claude self-review, which is the most expensive channel and only a same-family view.
+
+Install with `./install.sh --with-plugin <name>`, then add the name to `review.channels`; its position is
+its place in the fallback order. `["qwen", "codex", "same-family"]` puts cost first,
+`["codex", "qwen", "same-family"]` puts quality first with the plugin as backup. The available plugin is
+`qwen`; the contract for writing your own is in [docs/PLUGINS.md](docs/PLUGINS.md).
 
 ### Example: the qwen plugin
 
@@ -249,19 +290,23 @@ Verified reviewer models: [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md#实测�
 
 ## Advanced
 
-- **Codex-led path.** The reviewer is chosen by `--channel claude|qwen`, then
+Everything above is enough for daily use. This section covers four further needs: working mainly in
+Codex, implementing with a cheaper model, getting a second opinion on an existing problem analysis, and
+editing settings in a GUI. Skip it if none apply.
+
+- **Codex-led path** (when you mainly work in Codex). The reviewer is chosen by `--channel claude|qwen`, then
   `codex_relay.review_channel`; failures never fall back automatically. Qwen can run through Claude CLI
   or Codex CLI's Responses executor (`codex_relay.qwen_executor`, `plugins.qwen.claude_executor`,
   `plugins.qwen.responses_base_url`). Usage and version pins: the
   [codex-relay skill](adapters/codex/skills/codex-relay/SKILL.md) and
   [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
-- **Codex-led implementation sources.** Native Codex, Token Plan (`glm-5.3` / `qwen4-max`), or a Qoder
+- **Codex-led implementation sources** (to write code with a cheaper model). Native Codex, Token Plan (`glm-5.3` / `qwen4-max`), or a Qoder
   subscription. Token Plan supports a primary and a backup account with failover on quota exhaustion.
   Contracts and verification limits: the [codex-relay skill](adapters/codex/skills/codex-relay/SKILL.md)
   and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
-- **Problem second opinions.** `$bug-review` (Codex) or `/bug-review` (Claude Code) reviews an
+- **Problem second opinions** (when debugging, to have another model check an existing analysis). `$bug-review` (Codex) or `/bug-review` (Claude Code) reviews an
   existing analysis in two fresh stages, without requiring Git. See [docs/BUG_REVIEW.md](docs/BUG_REVIEW.md).
-- **macOS menu bar app.** The optional [menu bar app](apps/macos/README.md) edits default models,
+- **macOS menu bar app** (if you prefer not to edit JSON by hand). The optional [menu bar app](apps/macos/README.md) edits default models,
   review channels and relay mode, and runs local checks; business reviews still start from the CLI
   entries. See [the product notes](docs/MACOS_REVIEW_APP.md).
 
