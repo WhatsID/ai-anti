@@ -579,6 +579,18 @@ Codex 0.169.1 实施探针在 workspace-write 中记录了配置的远程 MCP �
 rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest("http/request failed: error sending request for url (https://chatgpt.com/backend-api/ps/mcp)")))
 ```
 
+Codex 0.169.1 的三份后续样本由离线回放覆盖。前两条 stderr 消息要求有效的 UTC 时间戳和 ` ERROR ` 分隔符，仅实施校验接收。只读评审遇到这两条仍拒绝。
+
+| 警告 | 精确消息或事件条件 |
+|------|-------------------|
+| `apply_patch_verification` | `codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in <绝对路径>:`，其后至少一行非空白续行。 |
+| `write_stdin_unknown_process` | `codex_core::tools::router: error=write_stdin failed: Unknown process id <PID>`，PID 为无前导零的十进制正整数。 |
+| `reconnect` | 实施与评审共享 Reconnect 原因模板。在既有 `tls handshake eof` 之外，接收 `IO error: peer closed connection without sending TLS close_notify: https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof`。事件须在 turn 内，满足 `1 <= n < total`，且 turn 最终完成。 |
+
+补丁续行在带 UTC 时间戳语法的 `TRACE`、`DEBUG`、`INFO`、`WARN` 或 `ERROR` 行、原样 stdin 提示或文件结束处终止。结束行交回顶层校验，未知日志和非法日期仍拒绝。续行中以 Rust panic 或诊断词开头的行也拒绝。`context_lines` 汇总各块的续行数量，含块内空行，续行原文留在 stderr 原件。
+
+Token Plan 实施入口（准入 Codex 0.160.0/0.163.0）共用 `implementation_protocol`，也会识别上述形态。这两版尚无对应样本。
+
 `compat.json` 据 P1–P4 加入 Claude 2.1.326、Codex 0.169.1；版本集合不代表全部路径，路径边界以本表为准（Token Plan Codex 实施 0.169.1 仍未取证）。
 
 ## 2026-11-20 Claude 主导 AGY 双方案规划（一期）

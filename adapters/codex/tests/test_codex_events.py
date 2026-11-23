@@ -10,6 +10,14 @@ import unittest
 
 TESTS = Path(__file__).resolve().parent
 FIXTURES = TESTS / 'fixtures/cli_20261118'
+APPLY_PATCH_STDERR = FIXTURES / 'codex-implement-apply-patch.stderr.txt'
+WRITE_STDIN_STDERR = FIXTURES / 'codex-implement-write-stdin.stderr.txt'
+RECONNECT_IO_EVENT = {
+    'type': 'error',
+    'message': 'Reconnecting... 2/5 (stream disconnected before completion: '
+               'IO error: peer closed connection without sending TLS close_notify: '
+               'https://docs.rs/rustls/latest/rustls/manual/_03_howto/index.html#unexpected-eof)',
+}
 sys.path[:0] = [str(TESTS.parent / 'skills' / skill / 'scripts') for skill in ('claude-review', 'codex-relay')]
 
 from implementation_protocol import validate as validate_implementation
@@ -119,6 +127,129 @@ class CliReplay(unittest.TestCase):
         result = validate_implementation(self.write_events(events('codex-implement')), 0, stderr_log=stderr)
         self.assertIn({'kind': 'remote_mcp_unavailable', 'stream': 'stderr', 'count': 1}, result['warnings'])
 
+    def test_implementation_replays_apply_patch_stderr(self):
+        log = self.write_events(events('codex-implement'))
+        result = validate_implementation(log, 0, stderr_log=APPLY_PATCH_STDERR)
+        self.assertEqual(result['result'], 'Redacted message item_130')
+        self.assertIn({'kind': 'apply_patch_verification', 'stream': 'stderr', 'count': 1,
+                       'context_lines': 1}, result['warnings'])
+
+    def test_implementation_replays_write_stdin_stderr(self):
+        log = self.write_events(events('codex-implement'))
+        result = validate_implementation(log, 0, stderr_log=WRITE_STDIN_STDERR)
+        self.assertEqual(result['result'], 'Redacted message item_130')
+        self.assertIn({'kind': 'write_stdin_unknown_process', 'stream': 'stderr', 'count': 2}, result['warnings'])
+
+    def test_review_and_implementation_replay_reconnect_io(self):
+        warning = {'kind': 'reconnect', 'message': RECONNECT_IO_EVENT['message']}
+        review = events('codex-review-b')
+        started = next(i for i, event in enumerate(review) if event['type'] == 'turn.started')
+        review.insert(started + 1, RECONNECT_IO_EVENT)
+        result = self.direct(review)
+        self.assertEqual(result['result'], 'Redacted message item_16')
+        self.assertIn(warning, result['transport_warnings'])
+
+        implementation = events('codex-implement')
+        reconnect = next(event for event in implementation if event['type'] == 'error')
+        reconnect['message'] = RECONNECT_IO_EVENT['message']
+        result = validate_implementation(self.write_events(implementation), 0)
+        self.assertEqual(result['result'], 'Redacted message item_130')
+        self.assertIn(warning, result['warnings'])
+
+    def test_readonly_rejects_implementation_stderr(self):
+        review = events('codex-review-b')
+        for stderr in (APPLY_PATCH_STDERR, WRITE_STDIN_STDERR):
+            with self.subTest(fixture=stderr.name):
+                with self.assertRaisesRegex(RunError, 'unknown Codex stderr line'):
+                    self.direct(review, stderr=stderr)
+
+    def test_apply_patch_counts_consecutive_blocks_and_blank_context(self):
+        notice, header, context = APPLY_PATCH_STDERR.read_text().splitlines()
+        _, write_stdin, _ = WRITE_STDIN_STDERR.read_text().splitlines()
+        stderr = self.root / 'stderr.txt'
+        lines = [notice, header, context, '', 'old line', header, 'other old line', write_stdin, notice]
+        stderr.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        log = self.write_events(events('codex-implement'))
+        result = validate_implementation(log, 0, stderr_log=stderr)
+        self.assertEqual([w for w in result['warnings'] if w.get('stream') == 'stderr'], [
+            {'kind': 'stdin_notice', 'stream': 'stderr', 'count': 2},
+            {'kind': 'apply_patch_verification', 'stream': 'stderr', 'count': 2, 'context_lines': 4},
+            {'kind': 'write_stdin_unknown_process', 'stream': 'stderr', 'count': 1},
+        ])
+
+    def assert_rejects_implementation_stderr(self, variants):
+        log = self.write_events(events('codex-implement'))
+        stderr = self.root / 'stderr.txt'
+        for case, lines in variants.items():
+            with self.subTest(case=case):
+                stderr.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+                with self.assertRaisesRegex(RunError, 'unknown Codex stderr line'):
+                    validate_implementation(log, 0, stderr_log=stderr)
+
+    def test_apply_patch_requires_nonblank_context(self):
+        notice, header, _ = APPLY_PATCH_STDERR.read_text().splitlines()
+        _, write_stdin, _ = WRITE_STDIN_STDERR.read_text().splitlines()
+        self.assert_rejects_implementation_stderr({
+            'eof_after_header': [header],
+            'tracing_after_header': [header, write_stdin],
+            'stdin_notice_after_header': [header, notice],
+            'blank_context': [header, '', ' \t'],
+        })
+
+    def test_apply_patch_rejects_other_headers(self):
+        _, header, context = APPLY_PATCH_STDERR.read_text().splitlines()
+        headers = {
+            'relative_path': header.replace('/redacted/', 'redacted/'),
+            'missing_colon': header[:-1],
+            'other_apply_patch_error': header.replace('Failed to find expected lines', 'Failed to read file'),
+            'missing_timestamp': header.split(' ', 1)[1],
+        }
+        self.assert_rejects_implementation_stderr({case: [line, context] for case, line in headers.items()})
+
+    def test_apply_patch_rejects_unknown_tracing_after_context(self):
+        _, header, context = APPLY_PATCH_STDERR.read_text().splitlines()
+        _, write_stdin, _ = WRITE_STDIN_STDERR.read_text().splitlines()
+        stamp, _, _ = write_stdin.partition(' ERROR ')
+        trailing = {
+            'unknown_error': stamp + ' ERROR unknown note',
+            'warn': write_stdin.replace(' ERROR ', ' WARN '),
+            'invalid_date': write_stdin.replace('2026-11-20', '2026-99-20'),
+        }
+        self.assert_rejects_implementation_stderr({
+            case: [header, context, line] for case, line in trailing.items()
+        })
+
+    def test_apply_patch_rejects_panic_and_diagnostic_context(self):
+        notice, header, context = APPLY_PATCH_STDERR.read_text().splitlines()
+        variants = {
+            'panic': [header, "thread 'main' panicked at example.rs:1:"],
+            'appended_warn': [notice, header, context, 'WARN unknown note'],
+            'replacement_warn': [notice, header, 'WARN unknown note'],
+        }
+        for prefix in ('TRACE ', 'DEBUG ', 'INFO ', 'WARNING ', 'ERROR ', 'FATAL ',
+                       'error[', 'warning:', 'Error:', 'Warning['):
+            variants[prefix] = [header, context, prefix + 'unknown note']
+        self.assert_rejects_implementation_stderr(variants)
+
+    def test_write_stdin_rejects_invalid_pid_and_router_variants(self):
+        _, line, _ = WRITE_STDIN_STDERR.read_text().splitlines()
+        prefix, _ = line.rsplit(' ', 1)
+        self.assert_rejects_implementation_stderr({
+            'zero_pid': [prefix + ' 0'],
+            'leading_zero_pid': [prefix + ' 053902'],
+            'nonnumeric_pid': [prefix + ' abc'],
+            'missing_timestamp': [line.split(' ', 1)[1]],
+            'other_router_error': [line.replace('Unknown process id 53902', 'Process already exited')],
+        })
+
+    def test_implementation_stderr_does_not_bypass_terminal_guards(self):
+        data = events('codex-implement')
+        for stderr in (APPLY_PATCH_STDERR, WRITE_STDIN_STDERR):
+            for case, code, sample in (('nonzero_exit', 1, data), ('missing_completion', 0, data[:-1])):
+                with self.subTest(fixture=stderr.name, case=case):
+                    with self.assertRaisesRegex(RunError, 'requires exit 0, one completed turn'):
+                        validate_implementation(self.write_events(sample), code, stderr_log=stderr)
+
     def test_implementation_rejects_remote_mcp_stderr_variants(self):
         sample = (FIXTURES / 'codex-implement-rmcp.stderr.txt').read_text()
         line = next(line for line in sample.splitlines() if 'rmcp::transport::worker:' in line)
@@ -139,9 +270,25 @@ class CliReplay(unittest.TestCase):
     def test_reconnect_rejects_unobserved_reason(self):
         sample = events('codex-implement')
         reconnect = next(e for e in sample if e['type'] == 'error')
-        reconnect['message'] = reconnect['message'].replace('tls handshake eof', 'other disconnect')
+        reconnect['message'] = reconnect['message'].replace('tls handshake eof', 'request timed out')
         with self.assertRaisesRegex(RunError, 'implementation error'):
             validate_implementation(self.write_events(sample), 0)
+
+    def test_reconnect_io_rejects_modified_url_and_counter(self):
+        message = RECONNECT_IO_EVENT['message']
+        for case, variant in (('changed_url', message.replace('docs.rs', 'docs-rs')),
+                              ('last_attempt', message.replace('2/5', '5/5'))):
+            with self.subTest(case=case):
+                review = events('codex-review-b')
+                started = next(i for i, event in enumerate(review) if event['type'] == 'turn.started')
+                review.insert(started + 1, {**RECONNECT_IO_EVENT, 'message': variant})
+                with self.assertRaisesRegex(RunError, 'unknown direct event'):
+                    self.direct(review)
+                implementation = events('codex-implement')
+                reconnect = next(event for event in implementation if event['type'] == 'error')
+                reconnect['message'] = variant
+                with self.assertRaisesRegex(RunError, 'implementation error'):
+                    validate_implementation(self.write_events(implementation), 0)
 
     def test_reconnect_requires_valid_counter_format_and_lifecycle(self):
         sample = events('codex-implement')

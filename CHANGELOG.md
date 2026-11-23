@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Codex 0.169.1 兼容校验在实施侧将已知的 `apply_patch` 预校验失败和 `write_stdin` 未知进程日志记录为警告，实施与评审均识别已取证的 TLS `close_notify` 缺失重连事件。
 - Claude 与 AGY 主导的 Codex 评审支持按任务风险配置独立的思考深度。漏传风险档按高风险处理，倒挂配置在启动前报错。
 - 启用 `agy_relay.review.high_risk_effort` 前先用新源码重建 App，旧 App 后端与旧 CLI 会拒绝该键。回滚前手工删除该键，并把 `review.codex_effort` 与 `agy_relay.review.effort` 恢复为升级前的值。
 - AGY 主导双方案同步使用冻结提交的隔离规划工作树，Claude 规划封装器支持 `--source-repo` 脱敏，两侧拒绝将 `--out` 写入规划树或发起主树，包括大小写别名。

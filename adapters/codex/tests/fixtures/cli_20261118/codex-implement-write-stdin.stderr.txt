@@ -1,0 +1,3 @@
+Reading additional input from stdin...
+2026-11-20T03:47:36.132925Z ERROR codex_core::tools::router: error=write_stdin failed: Unknown process id 53902
+2026-11-20T03:47:36.132932Z ERROR codex_core::tools::router: error=write_stdin failed: Unknown process id 46103

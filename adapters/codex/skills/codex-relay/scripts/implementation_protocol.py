@@ -11,7 +11,7 @@ def validate(logfile, code, requested_model=None, stderr_log=None):
     completed = started = 0
     final = None
     pending = set()
-    warnings = stderr_warnings(stderr_log)
+    warnings = stderr_warnings(stderr_log, implementation=True)
     try:
         lines = logfile.read_text('utf-8').splitlines()
         if lines and lines[0] == 'Reading additional input from stdin...':

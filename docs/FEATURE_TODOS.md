@@ -370,9 +370,9 @@
 - [x] Codex 0.169.1 终审实施样本中的远程 MCP stderr 已加入精确模板。要求 UTC 时间戳和原样 `https://chatgpt.com/backend-api/ps/mcp`，命中记为 `remote_mcp_unavailable`。
 - [ ] Token Plan Anthropic 的 `qwen4-max` 404 待真实复验。已定位样本中的 404 来自本地代理精确路径匹配，查询串修复后待主模型验证主账号额度耗尽及备用接续。
 
-### Codex 0.169.1 噪声行误判（2026-11-20）
+### Codex 0.169.1 噪声行后续（2026-11-23）
 
-- [ ] 中｜两条未登记的 Codex 输出被判为运行失败 — ①评审：`turn.completed` 与完整最终消息之后出现 `error: Reconnecting... (stream disconnected… IO error…)` 事件，解析器报未知事件；②实施：stderr 出现 `ERROR codex_core::tools::router: error=write_stdin failed: Unknown process id <n>`（清理后台命令时），`codex_events.py` 报 `unknown Codex stderr line`，而 JSONL 已有 `turn.completed` 与完整报告。两次均由用户裁决人工采用产物。值得做：按真实样本登记这两个模板并补严格回归（仍须拒绝无 `turn.completed` 的运行），不放宽通配。复核判据：用样本重放时两次运行判 completed，截断样本仍判失败。｜来源：业务仓库接力 2026-11-19/20（方案评审第 1 轮、实施段）
+- [ ] 低｜**其他已观察的 Reconnect 原因仍判失败** — 2026-11-23 已登记 `tls handshake eof` 之外的 rustls `close_notify` 原因及实施侧 `apply_patch` 预校验、`write_stdin` 未知进程 stderr。业务仓库证据中另见 `request timed out`、`Transport error: network error: error decoding response body`、`idle timeout waiting for SSE`、`WebSocket protocol error: Connection reset without closing handshake`、`unexpected status 403 Forbidden` 等原因，尚无对应误判事故记录。值得做的条件：任一原因在 turn 最终完成的运行中导致误判。候选修法：按真实样本逐字登记原因并补回放，不放宽为通配。｜来源：2026-11-23 stderr 误判修复方案非目标
 
 ### Claude 主导 AGY 双方案规划后续（2026-11-20）
 
@@ -392,7 +392,6 @@
 
 - [ ] 低｜**Codex 主导的 Claude/Qwen 评审通道按风险分档** — Claude 与 AGY 两条 Codex 通道已分档（2026-11-23），`claude_review` 与 `plugins.qwen` 仍按硬编码或模型查表取深度。值得做的条件：Codex 主导路径的评审耗时或额度成为负担。注意 Qwen 模型深度目录不一致（README 所列部分 Qwen 模型无 `high` 档）。｜来源：2026-11-23 风险分档方案第 6 轮范围裁决
 - [ ] 低｜**App 显示与编辑高风险评审深度** — App 只读显示常规档，保存时原样保留 `review.codex_high_risk_effort` 与 `agy_relay.review.high_risk_effort`。可与上方「App 增加 Claude 主导的 Codex 思考深度设置」合并做。｜来源：2026-11-23 风险分档方案非目标
-- [ ] 中｜**`codex_implement.py` 把 Codex 非致命内部错误日志判为实施失败** — 2026-11-23 实施中 Codex 退出 0、任务完成，stderr 一行 `ERROR codex_core::tools::router: error=apply_patch verification failed`（补丁预校验未匹配、Codex 自行重打）触发 `unknown Codex stderr line`，`accepted=false`，须用户裁决接受候选。值得做的条件：再次出现同类误判。候选修法：把该已知非致命日志形态加入可识别分类并留证，未知行仍 fail closed。｜来源：2026-11-23 风险分档实施证据 `impl-out-1/status.json`
 - [ ] 中｜**纠正或评审退回即在同一改动内转为机械检查，并收缩被检查守住的文字规则** — `core/RETRO.md` 已有「优先修复现有检查」，但仅在复盘时触发；文字规则只增不减。值得做的条件：同类纠正第二次出现，或机制正文继续膨胀。注意与「规则由来保真纪律」协调：收缩的是正文复述，由来档案保留。｜来源：外部实践对照
 - [ ] 低｜**派给 Codex 实施前按派活成本判断** — 配置 `claude_relay.implementation` 后所有大任务一律派 Codex。失败场景：几十行改动或需与界面来回对接口的任务，写任务、读 diff、复测的成本超过活本身。候选修法：方案里写明派与不派的理由（接口已定、独立成块才派）。｜来源：外部实践对照
 - [ ] 低｜**终审返工时续接 Codex 实施会话** — `codex_implement.py` 无续接，第 5 步返工只能冷启动重建上下文。先实测 Codex 会话续接与隔离工作树、超时外壳的兼容性再评估。｜来源：外部实践对照

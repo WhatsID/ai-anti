@@ -1,0 +1,3 @@
+Reading additional input from stdin...
+2026-11-23T04:25:35.041898Z ERROR codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /redacted/impl-worktree/README.md:
+| `agy_relay.dual_plan` | Optional Claude dual planning for AGY-led workflows (`enabled`, `partner="claude"`, optional `model` and `effort` from `low\|medium\|high\|xhigh\|max`, `synthesizer="agy"\|"claude"`, `on_failure="stop"\|"fallback"`) | missing/null/`enabled: false` → single AGY plan |
