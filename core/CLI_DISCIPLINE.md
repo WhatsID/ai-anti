@@ -87,6 +87,7 @@ AGY 主导的方案评审使用 `adapters/agy/scripts/codex_review.py plan`。�
 
 AGY 实施复用 `adapters/claude-code/scripts/codex_implement.py --relay agy`。从文件传入
 提示词，在隔离关联工作树内有界执行。按本纪律持续监控后台进程并保留完整输出。
+终审返工经新的用户裁决后，在同一工作树以 `--resume-from` 引用最近一次成功的输出目录，另开新的 `--out`。
 失败或中断即停，保留候选树与证据交用户裁决。独立终审由 AGY 完成。
 
 ## AGY 主导调用 Claude 规划入口适用说明

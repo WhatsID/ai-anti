@@ -93,6 +93,7 @@ step() {
 step hygiene bash "$SRC/scripts/check_hygiene.sh" "$@" "$DEST"
 step links bash "$DEST/scripts/check_links.sh" "$DEST"
 step codex-tests sh -c 'cd "$1" && "$2" -m unittest discover -s adapters/codex/tests < /dev/null' _ "$DEST" "$PY"
+step claude-codex-implement-tests sh -c 'cd "$1" && "$2" tests/test_claude_codex_implement.py < /dev/null' _ "$DEST" "$PY"
 step claude-agy-plan-tests sh -c 'cd "$1" && "$2" tests/test_claude_agy_plan.py < /dev/null' _ "$DEST" "$PY"
 step agy-claude-plan-tests sh -c 'cd "$1" && "$2" tests/test_agy_claude_plan.py < /dev/null' _ "$DEST" "$PY"
 step agy-relay-tests sh -c 'cd "$1" && "$2" tests/test_agy_relay.py < /dev/null' _ "$DEST" "$PY"

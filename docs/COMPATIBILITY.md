@@ -593,6 +593,22 @@ Token Plan 实施入口（准入 Codex 0.160.0/0.163.0）共用 `implementation_
 
 `compat.json` 据 P1–P4 加入 Claude 2.1.326、Codex 0.169.1；版本集合不代表全部路径，路径边界以本表为准（Token Plan Codex 实施 0.169.1 仍未取证）。
 
+## 2026-11-23 Codex 0.169.1 实施会话续接
+
+- 探针使用 `gpt-6.2-sol` 和 `low`。首轮与两次续接的 `thread.started` 都报告同一会话 ID。从另一目录续接并忽略用户配置时，进程使用该目录，写入被只读沙箱拒绝。在 `exec` 父命令显式指定 `--sandbox workspace-write -C <工作树>`，把模型与思考深度放在 `resume` 后，续接写入了预期工作树。
+- 两种缺失会话探针的参数都能解析，包括 `resume -- <会话 ID> <提示词>`。虚构会话 ID 返回退出码 1、空 stdout 和单行 stderr，形如 `Error: thread/resume: thread/resume failed: no rollout found for thread id <会话 ID> (code -32600)`。
+- Claude 与 AGY 的共用封装器在终审返工时接受 `--resume-from <上一轮的 --out 目录>` 和新的 `--out`。续接要求最近一次实施已完成，工作树身份、HEAD、工作树 token、relay、模型和记录的 CLI 版本通过预检。冷启动在 Git 私有目录无法创建状态文件时仍可运行，该轮无法续接。升级前缺少 `thread_id` 的日志需从冷启动建立新会话。
+- 封装器在父命令固定工作树与 workspace-write，模型及思考深度放在 `resume` 后，`--` 后传会话 ID 和提示词。续接要求 JSONL 在 turn 开始前报告唯一且匹配的会话 ID。失败证据保留在本轮输出目录。只有非零退出、空 JSONL 和上述唯一非空行逐字匹配本次会话 ID 时才记为 `session_not_found`，随后保留候选树并交用户裁决。
+
+真机验收（2026-11-23，主模型在临时仓库的 linked worktree 中用候选封装器执行，`gpt-6.2-sol`、`low`）：
+
+| 场景 | 结果 |
+|------|------|
+| 冷启动 | completed，记录 UUID 形态的 `thread_id` 与 `worktree_token`，状态文件 `last_out` 指向本轮 |
+| 主模型加一行机械注释后，从非 Git 目录续接，提示词以 `-` 开头 | completed，返回同一 `thread_id`，保留机械注释并写入工作树；会话记录中该轮 turn_context 为工作树路径、workspace-write、`low`；主树无改动 |
+| 已续接后再引用更早的 `out1` | 退出 2：`previous implementation is not the last_out attempt`，未创建 `--out` |
+| 上一轮证据中的会话 ID 改为虚构值后续接 | 退出 1，`error_kind=session_not_found`，JSONL 为空，工作树未变 |
+
 ## 2026-11-20 Claude 主导 AGY 双方案规划（一期）
 
 - `compat.json` 新增 `tested.agy: ["1.5.13"]`，未登记版本在 `agy_plan.py` 中记录 `untested_cli_version` 警告、不阻断，但 `init`/`result`/写工具与完整性门禁仍独立 fail closed。`install.sh --status` 不因未安装可选 `agy` 报警告。

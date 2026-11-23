@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Claude 与 AGY 主导的终审返工可在同一隔离工作树续接最近一次成功的 Codex 实施会话。会话缺失时保留候选树并停下交用户裁决。
 - Codex 0.169.1 兼容校验在实施侧将已知的 `apply_patch` 预校验失败和 `write_stdin` 未知进程日志记录为警告，实施与评审均识别已取证的 TLS `close_notify` 缺失重连事件。
 - Claude 与 AGY 主导的 Codex 评审支持按任务风险配置独立的思考深度。漏传风险档按高风险处理，倒挂配置在启动前报错。
 - 启用 `agy_relay.review.high_risk_effort` 前先用新源码重建 App，旧 App 后端与旧 CLI 会拒绝该键。回滚前手工删除该键，并把 `review.codex_effort` 与 `agy_relay.review.effort` 恢复为升级前的值。

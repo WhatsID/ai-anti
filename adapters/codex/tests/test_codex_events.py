@@ -44,6 +44,40 @@ class CliReplay(unittest.TestCase):
     def direct(self, data, code=0, stderr=None):
         return direct_result(self.write_events(data), code, 'codex-jsonl', stderr)
 
+    def test_implementation_returns_unique_thread_id_and_matches_expected(self):
+        thread = {'type': 'thread.started', 'thread_id': 'fixture-thread'}
+        log = self.write_events([
+            thread, {'type': 'turn.started'},
+            {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'done'}},
+            {'type': 'turn.completed'},
+        ])
+        self.assertEqual(validate_implementation(log, 0)['thread_id'], 'fixture-thread')
+        self.assertEqual(validate_implementation(log, 0, expected_thread_id='fixture-thread')['thread_id'],
+                         'fixture-thread')
+        with self.assertRaises(RunError) as caught:
+            validate_implementation(log, 0, expected_thread_id='wrong-thread')
+        self.assertEqual(caught.exception.kind, 'session_mismatch')
+
+    def test_implementation_checks_thread_position_and_uniqueness_only_on_resume(self):
+        thread = {'type': 'thread.started', 'thread_id': 'fixture-thread'}
+        started = {'type': 'turn.started'}
+        final = {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'done'}}
+        completed = {'type': 'turn.completed'}
+        for label, prefix in (
+            ('duplicate', [thread, thread, started]),
+            ('late', [started, thread]),
+            ('missing', [started]),
+            ('invalid', [{**thread, 'thread_id': '-option'}, started]),
+        ):
+            with self.subTest(label=label):
+                log = self.write_events([*prefix, final, completed])
+                result = validate_implementation(log, 0)
+                self.assertEqual(result['result'], 'done')
+                self.assertIsNone(result['thread_id'])
+                with self.assertRaises(RunError) as caught:
+                    validate_implementation(log, 0, expected_thread_id='fixture-thread')
+                self.assertEqual(caught.exception.kind, 'session_mismatch')
+
     def test_both_original_codex_reviews(self):
         expected = [
             ('codex-review-a', 'Redacted message item_26', ['item_16', 'item_22'], 2, 18),

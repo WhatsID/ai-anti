@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
 """Run one bounded Codex implementation in a prepared linked Git worktree."""
 import argparse
+import fcntl
 import json
 import os
 from pathlib import Path
+import re
+import secrets
 import shutil
 import signal
+import stat
 import subprocess
 import sys
+import tempfile
 import time
 
 SKILLS = Path(__file__).resolve().parents[2] / 'codex' / 'skills'
@@ -15,7 +20,7 @@ sys.path[:0] = [str(SKILLS / skill / 'scripts') for skill in ('claude-review', '
 
 from ai_anti_config import ConfigError, agy_implementation, claude_implementation, load, review_limits
 from implementation import CAP, digest, interrupt, write
-from implementation_protocol import validate
+from implementation_protocol import valid_thread_id, validate
 from review_codex import parse_version_output
 from review_runner import RunError, execute
 
@@ -32,6 +37,88 @@ def git(workspace, *args):
     if result.returncode:
         raise ConfigError('workspace must be a linked Git worktree with a committed HEAD')
     return result.stdout.rstrip('\n')
+
+
+def read_object(path, mode='r'):
+    if not stat.S_ISREG(path.lstat().st_mode):
+        raise ConfigError(f'{path.name} must be a regular file')
+    try:
+        with path.open(mode, encoding='utf-8') as handle:
+            data = json.load(handle)
+    except ValueError as exc:
+        raise ConfigError(f'{path.name} must be a JSON object') from exc
+    if not isinstance(data, dict):
+        raise ConfigError(f'{path.name} must be a JSON object')
+    return data
+
+
+def resume_evidence(source, out, identity, head, relay, model):
+    if source.is_symlink() or not source.is_dir():
+        raise ConfigError('--resume-from must be a directory and cannot be a symlink')
+    source = source.resolve(strict=True)
+    if source == out or source in out.parents or out in source.parents:
+        raise ConfigError('--resume-from and --out must not overlap')
+    try:
+        prior = read_object(source / 'manifest.json')
+        status = read_object(source / 'status.json')
+    except OSError as exc:
+        raise ConfigError('cannot read previous implementation evidence: ' + str(exc)) from exc
+    if prior != status:
+        raise ConfigError('previous manifest.json and status.json differ')
+    for key, expected in dict(provider='codex', relay=relay, requested_model=model).items():
+        if prior.get(key) != expected:
+            raise ConfigError(f'previous implementation {key} does not match')
+    if prior.get('cli_version') not in VERSIONS:
+        raise ConfigError('previous implementation cli_version is unsupported')
+    if prior.get('status') != 'completed' or prior.get('completed') is not True:
+        raise ConfigError('previous implementation must be completed')
+    if not valid_thread_id(prior.get('thread_id')):
+        raise ConfigError('previous implementation lacks a valid thread_id; use a cold start')
+    for key, path in identity.items():
+        try:
+            same = os.path.samefile(prior.get(key), path)
+        except (OSError, TypeError, ValueError):
+            same = False
+        if not same:
+            raise ConfigError(f'previous implementation {key} does not match')
+    if prior.get('head') != head:
+        raise ConfigError('previous implementation HEAD does not match')
+    return source, prior
+
+
+def register_attempt(git_dir, out, source, prior_token):
+    path = git_dir / 'ai-anti-implementation.json'
+    try:
+        # Lock the directory so all callers share the lock across atomic file replacement.
+        lock = os.open(git_dir, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                state = read_object(path, 'r+')
+            except FileNotFoundError:
+                state = None
+            token = secrets.token_hex(16) if state is None else state.get('token')
+            if not isinstance(token, str) or not re.fullmatch(r'[0-9a-f]{32}', token):
+                raise ConfigError('invalid implementation worktree_token in state')
+            if source is not None:
+                if state is None or token != prior_token:
+                    raise ConfigError('previous implementation worktree_token does not match')
+                if state.get('last_out') != str(source):
+                    raise ConfigError('previous implementation is not the last_out attempt')
+            try:
+                with tempfile.TemporaryDirectory(dir=git_dir, prefix='.ai-anti-implementation-') as tmp:
+                    pending = Path(tmp) / path.name
+                    write(pending, dict(token=token, last_out=str(out)))
+                    os.replace(pending, path)
+            except OSError:
+                if state is None and source is None:
+                    return None
+                raise
+        finally:
+            os.close(lock)
+    except OSError as exc:
+        raise ConfigError('cannot update implementation worktree state: ' + str(exc)) from exc
+    return token
 
 
 def run(args):
@@ -62,6 +149,13 @@ def run(args):
     payload = prompt_bytes.decode('utf-8')
     if '\0' in payload:
         raise ConfigError('prompt contains a NUL byte')
+    source = thread_id = prior_token = None
+    if args.resume_from is not None:
+        identity = dict(workspace=workspace, git_dir=git_dir, git_common_dir=common)
+        source, prior = resume_evidence(args.resume_from, out, identity, head, args.relay, model)
+        thread_id = prior['thread_id']
+        prior_token = prior.get('worktree_token')
+    token = register_attempt(git_dir, out, source, prior_token)
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
     saved_prompt = out / 'prompt.txt'
     saved_prompt.write_bytes(prompt_bytes)
@@ -70,6 +164,9 @@ def run(args):
     evidence = dict(relay=args.relay, provider='codex', requested_model=model, requested_effort=effort,
                     model_evidence='requested_only',
                     cli_version=None, prompt_sha256=digest(saved_prompt), workspace=str(workspace),
+                    git_dir=str(git_dir), git_common_dir=str(common), worktree_token=token,
+                    thread_id=None, resumed_from=str(source) if source is not None else None,
+                    requested_thread_id=thread_id,
                     head=head, duration_seconds=0, exit_code=None, log=log.name, log_sha256=None,
                     stderr_log=stderr.name, stderr_sha256=None, warnings=[], status='running',
                     completed=False, accepted=False,
@@ -88,13 +185,26 @@ def run(args):
         evidence['cli_version'] = version
         if version not in VERSIONS:
             raise RunError('Codex implementation verified only for ' + ', '.join(VERSIONS))
-        argv = [cli, 'exec', '--json', '--sandbox', 'workspace-write', '--model', model]
+        argv = [cli, 'exec', '--json', '--sandbox', 'workspace-write']
+        model_args = ['--model', model]
         if effort is not None:
-            argv += ['-c', 'model_reasoning_effort=' + json.dumps(effort)]
-        argv += ['-C', str(workspace), '--', payload]
+            model_args += ['-c', 'model_reasoning_effort=' + json.dumps(effort)]
+        if source is None:
+            argv += [*model_args, '-C', str(workspace), '--', payload]
+        else:
+            argv += ['-C', str(workspace), 'resume', *model_args, '--', thread_id, payload]
         code = execute(argv, workspace, log, timeout, idle, CAP, stderr_log=stderr)
         evidence['exit_code'] = code
-        evidence.update(validate(log, code, stderr_log=stderr), status='completed', completed=True)
+        if source is not None and code:
+            message = ('Error: thread/resume: thread/resume failed: '
+                       f'no rollout found for thread id {thread_id} (code -32600)')
+            if log.stat().st_size == 0:
+                lines = [line for line in stderr.read_bytes().splitlines() if line.strip()]
+                if lines == [message.encode('utf-8')]:
+                    raise RunError(message, kind='session_not_found')
+            raise RunError(f'Codex resume exited with code {code}')
+        evidence.update(validate(log, code, stderr_log=stderr, expected_thread_id=thread_id),
+                        status='completed', completed=True)
     except (RunError, OSError, UnicodeError, KeyboardInterrupt) as exc:
         evidence.update(status='failed', error_kind=getattr(exc, 'kind', 'execution_failed'),
                         error=str(exc))
@@ -112,6 +222,7 @@ def main():
     for name in ('workspace', 'prompt', 'out'):
         parser.add_argument('--' + name, required=True, type=Path)
     parser.add_argument('--config', type=Path)
+    parser.add_argument('--resume-from', type=Path, help='output directory of the last completed attempt')
     parser.add_argument('--relay', choices=('claude', 'agy'), default='claude')
     parser.add_argument('--timeout', type=int)
     parser.add_argument('--idle-timeout', type=int)

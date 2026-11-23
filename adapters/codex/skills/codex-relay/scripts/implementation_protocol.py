@@ -1,5 +1,6 @@
 """Validate a single implementation turn; completion is not primary acceptance."""
 import json
+import unicodedata
 from codex_events import known_item_warning, known_reconnect, stderr_warnings
 from review_runner import RunError
 
@@ -7,9 +8,16 @@ from review_runner import RunError
 METADATA_WARNING = 'Model metadata for `glm-5.3` not found. Defaulting to fallback metadata; this can degrade performance and cause issues.'
 
 
-def validate(logfile, code, requested_model=None, stderr_log=None):
+def valid_thread_id(value):
+    return (isinstance(value, str) and bool(value) and not value.startswith('-')
+            and not any(char.isspace() or unicodedata.category(char) == 'Cc' for char in value))
+
+
+def validate(logfile, code, requested_model=None, stderr_log=None, expected_thread_id=None):
     completed = started = 0
     final = None
+    thread_id = None
+    thread_seen = False
     pending = set()
     warnings = stderr_warnings(stderr_log, implementation=True)
     try:
@@ -23,6 +31,12 @@ def validate(logfile, code, requested_model=None, stderr_log=None):
         if not isinstance(event, dict) or not isinstance(event.get('type'), str):
             raise RunError('malformed implementation event')
         kind = event['type']
+        if kind == 'thread.started':
+            candidate = event.get('thread_id')
+            thread_id = candidate if not (thread_seen or started or completed) and valid_thread_id(candidate) else None
+            thread_seen = True
+            if expected_thread_id is not None and thread_id != expected_thread_id:
+                raise RunError('unexpected implementation thread.started', kind='session_mismatch')
         if completed:
             raise RunError('content after implementation turn.completed')
         warning = known_item_warning(event) if started == 0 else None
@@ -75,6 +89,8 @@ def validate(logfile, code, requested_model=None, stderr_log=None):
             raise RunError('unknown implementation event type: ' + kind)
         if set(event) - {'type', 'thread_id', 'usage', 'item'}:
             warnings.append('unverified event metadata fields: ' + ', '.join(sorted(set(event) - {'type', 'thread_id', 'usage', 'item'})))
+    if expected_thread_id is not None and not thread_seen:
+        raise RunError('missing implementation thread.started', kind='session_mismatch')
     if code or started != 1 or completed != 1 or final is None:
         raise RunError('implementation requires exit 0, one completed turn and a final agent_message')
-    return dict(result=final, warnings=warnings)
+    return dict(result=final, warnings=warnings, thread_id=thread_id)
