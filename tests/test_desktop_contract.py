@@ -90,7 +90,11 @@ class DesktopContract(unittest.TestCase):
         menu = app.split('MenuBarExtra {', 1)[1].split('} label:', 1)[0]
         for item in ('Menu("主模型")', 'Menu("评审服务")', 'Menu("协作模式：', 'Text(model.message)'):
             self.assertNotIn(item, menu)
-        self.assertIn('Text("当前配置：" + model.title)', menu)
+        # 0.3.9 起「当前配置」按主模型、评审服务、实施服务、协作模式分行显示。
+        rows = ['Text("当前配置")', 'Text("主模型：" + model.menuPrimary)', 'Text("评审服务：" + model.menuReview)',
+                'Text("实施服务：" + model.menuImplementation)', 'Text("协作模式：" + model.saved.mode)']
+        self.assertEqual([menu.index(row) for row in rows], sorted(menu.index(row) for row in rows))
+        self.assertLess(menu.index(rows[-1]), menu.index('Button("设置")'))
         self.assertIn('if model.messageIsError { Text("⚠︎ " + model.message) }', menu)
         self.assertEqual(menu.count('Button('), 2)
         self.assertLess(menu.index('Button("设置")'), menu.index('Button("退出"'))
@@ -668,8 +672,8 @@ for event in [
         self.assertRegex(view, r'Button\("测试评审模型".*\.disabled\([^\n]+\|\| model\.draft\.host == "agy"\)')
         self.assertNotIn('model.menuHost(', app)
         self.assertIn('"$source_dir/backend/agy_relay.py"', build)
-        self.assertIn('<key>CFBundleVersion</key><string>15</string>', build)
-        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.8</string>', build)
+        self.assertIn('<key>CFBundleVersion</key><string>16</string>', build)
+        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.9</string>', build)
 
     def test_agy_dual_plan_matches_cli_validation(self):
         import ai_anti_config as cli
