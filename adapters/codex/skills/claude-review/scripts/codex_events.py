@@ -17,6 +17,11 @@ WRITE_STDIN = re.compile(r'codex_core::tools::router: error=write_stdin failed: 
 APPLY_PATCH = re.compile(
     r'codex_core::tools::router: error=apply_patch verification failed: Failed to find expected lines in /[^\r\n]*:'
 )
+APPLY_PATCH_INVALID_HUNK = re.compile(
+    r"codex_core::tools::router: error=apply_patch verification failed: invalid hunk at line [1-9][0-9]*, "
+    r"(?:Update hunk does not contain any lines|Unexpected line found in update hunk: '[^\r\n]*'\. "
+    r"Every line should start with ' ' \(context line\), '\+' \(added line\), or '-' \(removed line\))"
+)
 PANIC = re.compile(r"thread '.*' panicked at ")
 DIAGNOSTIC = re.compile(r'(?:TRACE|DEBUG|INFO|WARN|WARNING|ERROR|FATAL)\b|(?:error|warning|Error|Warning)(?:\[|:)')
 LOADED = re.compile(
@@ -83,6 +88,8 @@ def stderr_warnings(logfile, *, implementation=False):
                     elif implementation and APPLY_PATCH.fullmatch(message):
                         kind = 'apply_patch_verification'
                         block_has_text = False
+                    elif implementation and APPLY_PATCH_INVALID_HUNK.fullmatch(message):
+                        kind = 'apply_patch_invalid_hunk'
                     if kind is None:
                         raise RunError('unknown Codex stderr line')
                 counts[kind] = counts.get(kind, 0) + 1

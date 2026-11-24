@@ -239,7 +239,7 @@ def direct_result(logfile, code, protocol, stderr_log=None):
             raise RunError('unsupported direct retry protocol')
         warnings = stderr_warnings(stderr_log)
         thread = turn = terminal = reconnect = False
-        candidates, pending, seen = [], set(), set()
+        candidates, pending, seen = [], {}, set()
         failure = None
         for line in text.splitlines():
             event = json.loads(line)
@@ -277,7 +277,8 @@ def direct_result(logfile, code, protocol, stderr_log=None):
                     expected_status = 'in_progress' if kind == 'item.started' else 'completed'
                     failed_command = (typ == 'command_execution' and kind == 'item.completed'
                                       and item.get('status') == 'failed')
-                    if item.get('status') != expected_status and not failed_command:
+                    statusless_search = typ == 'web_search' and 'status' not in item
+                    if not statusless_search and item.get('status') != expected_status and not failed_command:
                         raise RunError('invalid direct tool status')
                     if typ == 'command_execution':
                         if not isinstance(item.get('command'), str) or not isinstance(item.get('aggregated_output'), str):
@@ -297,17 +298,29 @@ def direct_result(logfile, code, protocol, stderr_log=None):
                                 or not isinstance(item.get('arguments'), dict)
                                 or (kind == 'item.completed' and not isinstance(item.get('result'), dict))):
                             raise RunError('invalid direct MCP evidence')
+                    elif statusless_search:
+                        action = item.get('action')
+                        if not isinstance(action, dict):
+                            raise RunError('invalid direct search evidence')
+                        if kind == 'item.started':
+                            if action.get('type') != 'other' or item.get('query') != '' or 'results' in item:
+                                raise RunError('invalid direct search evidence')
+                        elif (action.get('type') not in ('search', 'open_page', 'find_in_page')
+                              or not isinstance(item.get('query'), str)
+                              or not isinstance(item.get('results'), list)):
+                            raise RunError('invalid direct search evidence')
                     elif not isinstance(item.get('query'), str):
                         raise RunError('invalid direct search evidence')
                     candidates.clear()
+                    shape = (typ, statusless_search)
                     if kind == 'item.started':
                         if uid in seen or uid in pending:
                             raise RunError('duplicate direct tool')
-                        pending.add(uid)
+                        pending[uid] = shape
                     else:
-                        if uid not in pending:
+                        if pending.get(uid) != shape:
                             raise RunError('unmatched direct tool result')
-                        pending.remove(uid)
+                        del pending[uid]
                         seen.add(uid)
                 elif typ in ('reasoning', 'agent_message'):
                     if kind != 'item.completed' or uid in seen or uid in pending or not isinstance(item.get('text'), str):

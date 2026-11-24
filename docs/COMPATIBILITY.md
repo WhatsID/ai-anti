@@ -593,6 +593,12 @@ Token Plan 实施入口（准入 Codex 0.160.0/0.163.0）共用 `implementation_
 
 `compat.json` 据 P1–P4 加入 Claude 2.1.326、Codex 0.169.1；版本集合不代表全部路径，路径边界以本表为准（Token Plan Codex 实施 0.169.1 仍未取证）。
 
+### 2026-11-24 Codex 0.169.1 评审搜索与实施补丁诊断
+
+- 直接只读 Codex JSONL 评审接受无 `status` 的 `web_search` 配对。开始事件须为 `action.type=other`、空字符串 `query` 且无 `results`。完成事件须为 `search`、`open_page` 或 `find_in_page`，并带字符串 `query` 和数组 `results`。同一 ID 的开始与完成须同工具类型、同格式。显式 `null`、错误或权限拒绝仍拒绝。Qwen Responses 执行器仍禁用搜索。
+- 实施 stderr 新增 `apply_patch_invalid_hunk`。要求有效 UTC 时间戳、` ERROR ` 和固定 router 来源，行号为无前导零的十进制正整数。支持 `Update hunk does not contain any lines`，以及 `Unexpected line found in update hunk` 后跟单引号包裹的补丁行和完整固定提示。每条独立计数，未知诊断及只读模式仍拒绝。
+- 11 月 24 日原始事件流离线回放覆盖两处修复。评审正文与人工提取逐字一致（仅规范化末尾换行），保留 3 条 `failed_command` 警告。实施校验完成，`apply_patch_invalid_hunk` 的 `count=2`。脱敏夹具覆盖三种搜索完成动作及两条补丁诊断。
+
 ## 2026-11-23 Codex 0.169.1 实施会话续接
 
 - 探针使用 `gpt-6.2-sol` 和 `low`。首轮与两次续接的 `thread.started` 都报告同一会话 ID。从另一目录续接并忽略用户配置时，进程使用该目录，写入被只读沙箱拒绝。在 `exec` 父命令显式指定 `--sandbox workspace-write -C <工作树>`，把模型与思考深度放在 `resume` 后，续接写入了预期工作树。

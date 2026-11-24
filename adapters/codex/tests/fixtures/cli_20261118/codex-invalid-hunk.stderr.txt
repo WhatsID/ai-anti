@@ -1,0 +1,3 @@
+Reading additional input from stdin...
+2026-11-23T16:30:25.475236Z ERROR codex_core::tools::router: error=apply_patch verification failed: invalid hunk at line 6, Update hunk does not contain any lines
+2026-11-23T16:31:19.666761Z ERROR codex_core::tools::router: error=apply_patch verification failed: invalid hunk at line 3, Unexpected line found in update hunk: 'redacted line'. Every line should start with ' ' (context line), '+' (added line), or '-' (removed line)

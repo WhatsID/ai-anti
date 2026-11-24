@@ -1,0 +1,10 @@
+{"type":"thread.started","thread_id":"fixture-thread"}
+{"type":"turn.started"}
+{"type":"item.started","item":{"id":"fixture-item-1","type":"web_search","query":"","action":{"type":"other"}}}
+{"type":"item.completed","item":{"id":"fixture-item-1","type":"web_search","query":"redacted query","action":{"type":"search","queries":["redacted query"]},"results":[]}}
+{"type":"item.started","item":{"id":"fixture-item-2","type":"web_search","query":"","action":{"type":"other"}}}
+{"type":"item.completed","item":{"id":"fixture-item-2","type":"web_search","query":"redacted query","action":{"type":"open_page","url":"https://example.invalid/"},"results":[]}}
+{"type":"item.started","item":{"id":"fixture-item-3","type":"web_search","query":"","action":{"type":"other"}}}
+{"type":"item.completed","item":{"id":"fixture-item-3","type":"web_search","query":"redacted query","action":{"type":"find_in_page","url":"https://example.invalid/","pattern":"redacted pattern"},"results":[]}}
+{"type":"item.completed","item":{"id":"fixture-item-4","type":"agent_message","text":"Redacted final review"}}
+{"type":"turn.completed","usage":{"input_tokens":2426124,"cached_input_tokens":2302208,"cache_write_input_tokens":0,"output_tokens":11742,"reasoning_output_tokens":4580}}

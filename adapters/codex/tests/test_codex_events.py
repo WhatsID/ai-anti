@@ -11,6 +11,7 @@ import unittest
 TESTS = Path(__file__).resolve().parent
 FIXTURES = TESTS / 'fixtures/cli_20261118'
 APPLY_PATCH_STDERR = FIXTURES / 'codex-implement-apply-patch.stderr.txt'
+INVALID_HUNK_STDERR = FIXTURES / 'codex-invalid-hunk.stderr.txt'
 WRITE_STDIN_STDERR = FIXTURES / 'codex-implement-write-stdin.stderr.txt'
 RECONNECT_IO_EVENT = {
     'type': 'error',
@@ -94,6 +95,70 @@ class CliReplay(unittest.TestCase):
                 self.assertEqual(sum(w['kind'] == 'project_doc_budget' for w in warnings), budget_count)
                 self.assertEqual(sum(w['count'] for w in warnings if w.get('stream') == 'stderr'), stderr_count)
 
+    def test_direct_replays_web_search_without_status(self):
+        data = events('codex-web-search')
+        self.assertEqual(self.direct(data)['result'], 'Redacted final review')
+
+        legacy = copy.deepcopy(data)
+        for event in legacy[2:8]:
+            event['item']['status'] = 'in_progress' if event['type'] == 'item.started' else 'completed'
+            event['item'].pop('action')
+            event['item'].pop('results', None)
+        self.assertEqual(self.direct(legacy)['result'], 'Redacted final review')
+
+    def test_direct_web_search_rejects_malformed_evidence(self):
+        data = events('codex-web-search')
+        for index, fields in (
+            (2, {'status': None}),
+            (3, {'status': 'failed'}),
+            (2, {'query': 'started with a query'}),
+            (2, {'results': []}),
+            (2, {'action': {'type': 'search'}}),
+            (3, {'query': None}),
+            (3, {'results': {}}),
+            (3, {'action': {'type': 'other'}}),
+            (3, {'action': []}),
+            (3, {'error': {'message': 'fixture error'}}),
+            (2, {'is_error': True}),
+            (3, {'permission_denials': ['fixture denial']}),
+            (2, {'type': 'command_execution', 'command': 'fixture-command', 'aggregated_output': ''}),
+            (2, {'type': 'mcp_tool_call', 'server': 'fixture-server', 'tool': 'fixture-tool', 'arguments': {}}),
+        ):
+            with self.subTest(index=index, fields=fields):
+                sample = copy.deepcopy(data)
+                sample[index]['item'].update(fields)
+                with self.assertRaises(RunError):
+                    self.direct(sample)
+
+    def test_direct_web_search_requires_matching_tool_and_format(self):
+        data = events('codex-web-search')
+        for index, fields in (
+            (2, {'status': 'in_progress'}),
+            (3, {'status': 'completed'}),
+            (2, {'type': 'command_execution', 'status': 'in_progress',
+                 'command': 'fixture-command', 'aggregated_output': ''}),
+            (3, {'type': 'mcp_tool_call', 'status': 'completed',
+                 'server': 'fixture-server', 'tool': 'fixture-tool', 'arguments': {}, 'result': {}}),
+        ):
+            with self.subTest(index=index, fields=fields):
+                sample = copy.deepcopy(data)
+                sample[index]['item'].update(fields)
+                with self.assertRaisesRegex(RunError, 'unmatched direct tool result'):
+                    self.direct(sample)
+
+    def test_direct_web_search_keeps_terminal_and_pairing_guards(self):
+        data = events('codex-web-search')
+        for case, sample, code, error in (
+            ('duplicate_start', data[:3] + data[2:], 0, 'duplicate direct tool'),
+            ('unmatched_completion', data[:2] + data[3:], 0, 'unmatched direct tool result'),
+            ('missing_completion', data[:3] + data[4:], 0, 'incomplete or ambiguous direct report'),
+            ('missing_report', data[:-2] + data[-1:], 0, 'incomplete or ambiguous direct report'),
+            ('missing_terminal', data[:-1], 0, 'missing direct terminal'),
+            ('nonzero_exit', data, 1, 'nonzero direct CLI exit'),
+        ):
+            with self.subTest(case=case), self.assertRaisesRegex(RunError, error):
+                self.direct(sample, code)
+
     def test_failed_command_permission_denial(self):
         data = events('codex-review-a')
         failed = next(e['item'] for e in data if e.get('item', {}).get('status') == 'failed')
@@ -168,6 +233,35 @@ class CliReplay(unittest.TestCase):
         self.assertIn({'kind': 'apply_patch_verification', 'stream': 'stderr', 'count': 1,
                        'context_lines': 1}, result['warnings'])
 
+    def test_implementation_replays_invalid_hunk_stderr(self):
+        log = self.write_events(events('codex-implement'))
+        notice, empty, unexpected = INVALID_HUNK_STDERR.read_text().splitlines()
+        _, header, context = APPLY_PATCH_STDERR.read_text().splitlines()
+        stderr = self.root / 'stderr.txt'
+        lines = [notice, header, context, empty, unexpected.replace('redacted line', "user's line")]
+        stderr.write_text('\n'.join(lines) + '\n', encoding='utf-8')
+        warning = {'kind': 'apply_patch_invalid_hunk', 'stream': 'stderr', 'count': 2}
+        for sample in (INVALID_HUNK_STDERR, stderr):
+            with self.subTest(sample=sample.name):
+                result = validate_implementation(log, 0, stderr_log=sample)
+                self.assertEqual(result['result'], 'Redacted message item_130')
+                self.assertIn(warning, result['warnings'])
+                if sample == stderr:
+                    self.assertIn({'kind': 'apply_patch_verification', 'stream': 'stderr', 'count': 1,
+                                   'context_lines': 1}, result['warnings'])
+
+    def test_implementation_rejects_invalid_hunk_stderr_variants(self):
+        _, empty, unexpected = INVALID_HUNK_STDERR.read_text().splitlines()
+        _, header, _ = APPLY_PATCH_STDERR.read_text().splitlines()
+        self.assert_rejects_implementation_stderr({
+            'zero_line_number': [empty.replace('line 6,', 'line 0,')],
+            'unknown_reason': [empty.replace('Update hunk does not contain any lines', 'unknown reason')],
+            'truncated_suffix': [unexpected.removesuffix(' (removed line)')],
+            'wrong_separator': [unexpected.replace("'. Every line", "' Every line")],
+            'unknown_trailing_line': [empty, 'unknown trailing line'],
+            'preceding_block_lacks_context': [header, empty],
+        })
+
     def test_implementation_replays_write_stdin_stderr(self):
         log = self.write_events(events('codex-implement'))
         result = validate_implementation(log, 0, stderr_log=WRITE_STDIN_STDERR)
@@ -192,7 +286,7 @@ class CliReplay(unittest.TestCase):
 
     def test_readonly_rejects_implementation_stderr(self):
         review = events('codex-review-b')
-        for stderr in (APPLY_PATCH_STDERR, WRITE_STDIN_STDERR):
+        for stderr in (APPLY_PATCH_STDERR, WRITE_STDIN_STDERR, INVALID_HUNK_STDERR):
             with self.subTest(fixture=stderr.name):
                 with self.assertRaisesRegex(RunError, 'unknown Codex stderr line'):
                     self.direct(review, stderr=stderr)
@@ -278,7 +372,7 @@ class CliReplay(unittest.TestCase):
 
     def test_implementation_stderr_does_not_bypass_terminal_guards(self):
         data = events('codex-implement')
-        for stderr in (APPLY_PATCH_STDERR, WRITE_STDIN_STDERR):
+        for stderr in (APPLY_PATCH_STDERR, WRITE_STDIN_STDERR, INVALID_HUNK_STDERR):
             for case, code, sample in (('nonzero_exit', 1, data), ('missing_completion', 0, data[:-1])):
                 with self.subTest(fixture=stderr.name, case=case):
                     with self.assertRaisesRegex(RunError, 'requires exit 0, one completed turn'):
