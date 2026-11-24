@@ -2,7 +2,13 @@
 
 ## Unreleased
 
-- 修复 Codex 0.169.1 两处协议误判。直接只读评审接受成对且符合已取证格式的无 `status` 搜索事件，实施将两种已知 `invalid hunk` 单行诊断记录为 `apply_patch_invalid_hunk` 警告。
+## 0.3.11 — 2026-11-24
+
+- AIAnti 0.3.11（构建号 18）适配 AGY 全渠道评审与实施设置（原生 Codex、Token Plan 及千问/Kimi/DeepSeek 官方直连），重新开放 AGY「测试评审模型」（支持原生 CLI 默认与官方服务），切离并切回原生 Codex 时保留与恢复思考深度；同步统一 Codex 厂商直连服务菜单。
+- 抽取三宿主可复用的通用路由解析模块 `apps/macos/backend/relay_routes.py`，AGY 正式入口 `codex_review.py` 与 `implementation.py --relay agy` 分别支持 8 项官方评审组合与 11 项官方实施组合，既有 `codex_relay` / `claude_relay` 磁盘结构保持向后兼容。
+- Codex 主导新增千问按量、Kimi、DeepSeek 六条官方直连 Chat Completions 实施路径（显式 `--file` 文件授权、`api_reported` 精确模型核验），Token Plan 实施正式准入 Codex CLI `0.169.1` 并扩展实施模型目录、修复订阅实施诊断误判。
+- 修复 Codex `0.169.1` 两处协议误判：直接只读评审接受成对且符合已取证格式的无 `status` 搜索事件，实施将两种已知 `invalid hunk` 单行诊断记录为 `apply_patch_invalid_hunk` 警告。
+- 在 `docs/MODEL_ROUTE_VALIDATION.zh-CN.md` 登记 Codex 与 AGY 原生会话的正式入口验证记录（AGY 8 项官方评审与 11 项官方实施共 19 项全部通过）。
 
 ## 0.3.10 — 2026-11-24
 

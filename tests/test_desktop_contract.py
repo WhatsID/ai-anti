@@ -761,8 +761,8 @@ for event in [
         self.assertNotIn('model.menuHost(', app)
         self.assertIn('"$source_dir/backend/agy_relay.py"', build)
         self.assertIn('"$source_dir/backend/relay_routes.py"', build)
-        self.assertIn('<key>CFBundleVersion</key><string>17</string>', build)
-        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.10</string>', build)
+        self.assertIn('<key>CFBundleVersion</key><string>18</string>', build)
+        self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.11</string>', build)
 
     def test_agy_official_review_discloses_metadata_and_records_followups(self):
         for skill in ('agy-relay', 'codex-review'):
