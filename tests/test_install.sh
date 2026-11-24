@@ -18,7 +18,7 @@ CASES=0
 # make_checkout <目录>：复制安装器所需的最小 checkout。
 make_checkout() {
   mkdir -p "$1"
-  for part in install.sh compat.json core adapters/claude-code adapters/codex plugins; do
+  for part in install.sh compat.json core adapters/claude-code adapters/codex plugins apps/macos/backend/model_services.py apps/macos/backend/relay_routes.py; do
     mkdir -p "$(dirname "$1/$part")"
     cp -R "$SRC/$part" "$1/$part"
   done
