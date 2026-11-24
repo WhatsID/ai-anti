@@ -13,12 +13,12 @@ Claude Code、Codex、AGY 各验证下表中的 7 条评审路径和 11 条实�
 | Token Plan | `deepseek-v4-pro` | 需验 | 需验 | Responses 通过 | 两次复测均通过 5/5 项断言，正式入口均拒绝会话号 0 |
 | Token Plan | `deepseek-v4.1-flash` | — | 需验 | — | 正式合成实施已通过（0.169.1，修复后复测） |
 | Token Plan | `glm-5.3` | 需验 | 需验 | Responses 通过 | 正式合成实施已通过（0.169.1） |
-| 千问按量直连 | `qwen4-max` | 需验 | 需验 | Responses 通过 | 缺厂商直连实施入口 |
-| 千问按量直连 | `qwen3.8-max` | — | 需验 | — | 缺厂商直连实施入口 |
-| Kimi 官方直连 | `kimi-k3.1-pro` | 需验 | 需验 | Responses 通过 | 缺厂商直连实施入口 |
-| Kimi 官方直连 | `kimi-k3` | 需验 | 需验 | Anthropic 通过；Responses 失败 | 缺厂商直连实施入口 |
-| DeepSeek 官方直连 | `deepseek-v4-pro` | 需验 | 需验 | Anthropic 通过 | 缺厂商直连实施入口 |
-| DeepSeek 官方直连 | `deepseek-flash` | — | 需验 | — | 缺厂商直连实施入口 |
+| 千问按量直连 | `qwen4-max` | 需验 | 需验 | Responses 通过 | API 合成写入和回执通过；缺正式实施入口 |
+| 千问按量直连 | `qwen3.8-max` | — | 需验 | — | API 合成写入通过，关闭工具后回执通过；缺正式实施入口 |
+| Kimi 官方直连 | `kimi-k3.1-pro` | 需验 | 需验 | Responses 通过 | API 合成写入和回执通过；缺正式实施入口 |
+| Kimi 官方直连 | `kimi-k3` | 需验 | 需验 | Anthropic 通过；Responses 失败 | API 合成写入和回执通过；缺正式实施入口 |
+| DeepSeek 官方直连 | `deepseek-v4-pro` | 需验 | 需验 | Anthropic 通过 | API 合成写入和回执通过；缺正式实施入口 |
+| DeepSeek 官方直连 | `deepseek-flash` | — | 需验 | — | API 合成写入和回执通过；缺正式实施入口 |
 
 ## 已有 API 证据
 
@@ -101,6 +101,22 @@ Codex 原生会话在基于 `0835503` 的修复候选上，以 CLI `0.169.1` 从
 从合成基线 `86e2c4f` 创建独立工作树，经正式实施入口请求 `deepseek-v4-pro` 一次。CLI `0.169.1` 使用备用订阅，耗时 51.1 秒，模型证据为 `requested_only`。主模型核对了代码 diff、日志指纹及四次成功的命令执行。工作树仅改动 `numbers_sample.py`，5 项独立断言及工具隔离检查均通过。CLI 正常结束并记录 `turn.completed`，stderr 再次报告 `write_stdin failed: Unknown process id 0`，正式入口退出 1，状态为 `failed`。只在日志副本移除该行作对照，其余事件通过协议校验。
 
 新增文字在本次实测中未能避免错误，第二轮候选保留于隔离工作树。Codex 主导的 Token Plan 实施正式通过 **4/5**，全部实施路径正式通过 **4/11**。本机第二轮证据位于 `/private/tmp/ai-anti-impl-diagnostics.FszZ7hPA/round2/`，其中 `live/acceptance.json` 保存独立验收，`live/result-deepseek-v4-pro/` 保存原始日志和实际指令，`diagnosis.json` 记录对照结果，`round2.patch` 保留本轮候选增量。
+
+## Codex 厂商直连实施验证 · 2026-11-24
+
+适配器提交 `c8a6a7b`。Codex 主模型从同一合成基线 `86e2c4f` 为千问、Kimi、DeepSeek 的六个服务与型号组合分别创建独立工作树，使用厂商自己的直连 Key 与 Chat Completions 端点。探针给模型一个固定目标文件的写入工具，写入后返回随机回执。主模型逐份核对改动范围、代码内容、文件哈希与五项独立断言。
+
+| 厂商端点 | 请求型号 | 代码交付与工具回执 |
+|---|---|---|
+| `maas.qianwenaiapi.com/compatible-mode/v1/chat/completions` | `qwen4-max`、`qwen3.8-max` | 两个型号均写入并通过 5/5。`qwen4-max` 首次返回正确回执；`qwen3.8-max` 的确认阶段见下。 |
+| `api.moonshot.cn/v1/chat/completions` | `kimi-k3.1-pro`、`kimi-k3` | 两个型号首次均写入、返回正确回执并通过 5/5。 |
+| `api.deepseek.com/chat/completions` | `deepseek-v4-pro`、`deepseek-flash` | 两个型号首次均写入、返回正确回执并通过 5/5。 |
+
+首轮六个型号均只改动 `numbers_sample.py`，写入与确认两次请求均返回 HTTP 200，API 返回的型号字段均与请求逐字相同。五个型号首次即返回工具发出的随机回执。`qwen3.8-max` 首次在确认阶段又请求了一次工具调用，探针拒绝第二次写入。在新工作树的单独对照中，只在确认请求设置 `tool_choice: "none"`；该次返回正确回执、正常结束，主模型独立复跑 5/5。两次结果均留存。
+
+**正式实施入口仍为 0/6。** 对六组分别执行正式 `implementation.py --provider custom_api --model …`，均在 CLI 解析提供方时退出 2，工作树保持干净。当前正式入口只接受 `codex`、`token_plan`、`qoder`。本次厂商 API 样例覆盖受限的单文件写入和确认，正式入口的实施调度、执行隔离和状态记录仍待接入。Codex 全部实施路径的正式通过数为 **4/11**。
+
+原始证据位于本机临时目录 `/private/tmp/ai-anti-direct-impl.JNa3LgGs`。`official.json` 保存六组正式入口结果，`acceptance.json` 保存首轮 API 与独立验收，`qwen-confirm/acceptance.json` 保存千问确认阶段对照；各自的工作树与按型号的 API 状态均保留。
 
 ## Codex 会话起跑记录 · 2026-11-24
 
