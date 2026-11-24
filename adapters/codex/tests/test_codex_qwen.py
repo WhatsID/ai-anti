@@ -50,7 +50,7 @@ class CodexQwenTests(qwen.QwenReviewTests):
             with self.subTest(version=version):
                 r, out = self.run_review(env_extra={'FAKE_CODEX_VERSION': 'codex-cli ' + version})
                 self.assert_success(r, out)
-        for version in ('0.159.0', '0.161.0', '0.163.1', '0.164.0'):
+        for version in ('0.159.0', '0.161.0', '0.163.1', '0.164.0', '0.169.0', '0.169.2'):
             with self.subTest(version=version):
                 r, out = self.run_review(env_extra={'FAKE_CODEX_VERSION': 'codex-cli ' + version})
                 self.assertNotEqual(r.returncode, 0)

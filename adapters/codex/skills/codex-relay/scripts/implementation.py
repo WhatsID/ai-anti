@@ -28,7 +28,7 @@ from implementation_protocol import validate
 CAP = 8 * 1024 * 1024
 PATH = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin'
 DISABLED = ('apps', 'hooks', 'goals', 'view_image', 'browser_use', 'computer_use',
-            'shell_snapshot', 'multi_agent', 'js_repl', 'skill_search', 'tool_suggest')
+            'shell_snapshot', 'multi_agent', 'js_repl', 'skill_search', 'tool_suggest', 'code_mode_host')
 INSTRUCTIONS = '''You are the sole delegated implementation worker. Follow the supplied
 settled request, plan, adjudication, scope, frozen baseline and allowed commands.
 Work only in the supplied isolated workspace and authorized materials. Do not read
@@ -50,7 +50,7 @@ def configuration(route, instructions):
         'model_providers.ai_anti_implementation.request_max_retries': 0,
         'model_providers.ai_anti_implementation.stream_max_retries': 0,
         'model_providers.ai_anti_implementation.supports_websockets': False,
-        'approval_policy': 'never', 'project_doc_max_bytes': 0,
+        'approval_policy': 'never', 'allow_login_shell': False, 'project_doc_max_bytes': 0,
         'model_instructions_file': str(instructions), 'web_search': 'disabled',
         'features.skip_host_skill_discovery': True,
         'shell_environment_policy.inherit': 'none',
@@ -105,6 +105,9 @@ def run(args):
                     isolation=dict(sandbox='workspace-write', network_access=False,
                                    shell_environment='none; fixed PATH', hard_credential_file_isolation=False),
                     warnings=[], duration_seconds=0)
+    if options is not None:
+        evidence['isolation'].update(shell_environment='none; configured PATH plus Codex tool aliases',
+                                     login_shell=False)
     if route['provider'] == 'qoder':
         evidence.update(implementation_qoder.prepare(out, INSTRUCTIONS))
     write(out / 'manifest.json', evidence)

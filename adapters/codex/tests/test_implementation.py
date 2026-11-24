@@ -58,6 +58,9 @@ class ImplementationTests(unittest.TestCase):
         with self.assertRaises(ConfigError): resolve(self.config, self.workspace, 'token_plan', 'other-model')
         with self.assertRaises(ConfigError): implementation.run(self.args(provider='codex'))
         self.assertFalse((self.root/'output').exists())
+        prepared = implementation.run(self.args(provider='codex', prepare_only=True))
+        self.assertEqual(prepared['isolation']['shell_environment'], 'none; fixed PATH')
+        self.assertNotIn('login_shell', prepared['isolation'])
     def test_active_review_is_not_implementation_source(self):
         route = resolve(self.config, self.workspace)
         self.assertEqual(route['requested_model'], 'glm-5.3')
@@ -88,13 +91,54 @@ class ImplementationTests(unittest.TestCase):
         self.assertTrue(audit['token_present']); self.assertNotIn('OFFLINE_FAKE_TOKEN', json.dumps(audit))
         self.assertFalse(set(audit['env_keys']) & {'OPENAI_API_KEY', 'ANTHROPIC_API_KEY'})
         self.assertEqual(Path(audit['home']), self.root/'output/codex-home')
-        self.assertIn('workspace-write', audit['args'])
+        self.assertEqual(audit['args'][audit['args'].index('--sandbox') + 1], 'workspace-write')
+        self.assertEqual(Path(audit['args'][audit['args'].index('-C') + 1]), self.workspace)
+        self.assertIn('--ignore-user-config', audit['args'])
         self.assertEqual(audit['options']['shell_environment_policy.inherit'], 'none')
         self.assertFalse(audit['options']['sandbox_workspace_write.network_access'])
         self.assertNotIn('features.shell_tool', audit['options'])
         for feature in implementation.DISABLED: self.assertFalse(audit['options']['features.'+feature])
         for path in (self.root/'output').rglob('*'):
             if path.is_file(): self.assertNotIn('OFFLINE_FAKE_TOKEN', path.read_text())
+    def test_exact_token_plan_cli_versions(self):
+        fixture = FAKE.read_text()
+        for version, model in (('0.160.0', MODEL), ('0.163.0', MODEL),
+                               ('0.169.1', MODEL), ('0.169.1', 'qwen4-max'),
+                               ('0.169.0', MODEL), ('0.169.2', MODEL)):
+            with self.subTest(version=version, model=model):
+                name = version + '-' + model
+                cli = self.root / ('codex-' + name)
+                cli.write_text(fixture.replace('codex-cli 0.163.0', 'codex-cli ' + version))
+                cli.chmod(0o700)
+                audit = self.workspace / 'fake-audit.json'
+                count = self.workspace / 'fake-count.txt'
+                audit.unlink(missing_ok=True)
+                count.unlink(missing_ok=True)
+                result = implementation.run(self.args(name=name, model=model, cli=str(cli)))
+                if version in ('0.169.0', '0.169.2'):
+                    self.assertEqual(result['status'], 'failed')
+                    self.assertFalse(audit.exists())
+                    self.assertFalse(count.exists())
+                    self.assertIsNone(result['log_sha256'])
+                    self.assertEqual((self.root / name / 'codex-version.txt').read_text().strip(),
+                                     'codex-cli ' + version)
+                    continue
+                self.assertEqual(result['status'], 'completed')
+                self.assertEqual(result['cli_version'], 'codex-cli ' + version)
+                self.assertEqual(result['requested_model'], model)
+                self.assertEqual(result['model_evidence'], 'requested_only')
+                self.assertIs(result['isolation']['login_shell'], False)
+                self.assertIn('Codex tool aliases', result['isolation']['shell_environment'])
+                options = json.loads(audit.read_text())['options']
+                self.assertNotIn('features.shell_tool', options)
+                self.assertEqual(options['shell_environment_policy.inherit'], 'none')
+                self.assertEqual(options['shell_environment_policy.set.PATH'],
+                                 '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin')
+                self.assertFalse(options['sandbox_workspace_write.network_access'])
+                self.assertEqual(options['approval_policy'], 'never')
+                self.assertIs(options.get('allow_login_shell'), False)
+                self.assertIs(options.get('features.code_mode_host'), False)
+
     def test_invalid_protocol_and_nonzero_do_not_retry(self):
         for mode in ('failed', 'no-final', 'no-terminal', 'duplicate-terminal', 'multi-turn', 'nonzero'):
             with self.subTest(mode=mode):
@@ -137,12 +181,19 @@ class ImplementationTests(unittest.TestCase):
         log.write_text('unexpected noise\n' + tail)
         with self.assertRaises(RunError): validate(log, 0)
 
-    def test_unfinished_item_or_unknown_event_is_not_success(self):
+    def test_unfinished_item_unknown_event_or_permission_denial_is_not_success(self):
         start = [{'type': 'turn.started'}, {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'not final'}}]
         log = self.root/'unfinished.jsonl'
-        for middle in ({'type': 'item.started', 'item': {'id': 'pending-command', 'type': 'command_execution'}}, {'type': 'unknown.event'}):
-            log.write_text('\n'.join(json.dumps(e) for e in start + [middle, {'type': 'turn.completed'}]))
-            with self.assertRaises(RunError): validate(log, 0)
+        for middle, error in (
+                ({'type': 'item.started', 'item': {'id': 'pending-command', 'type': 'command_execution'}},
+                 'unfinished implementation item'),
+                ({'type': 'unknown.event'}, 'unknown implementation event'),
+                ({'type': 'item.completed', 'item': {'id': 'denied', 'type': 'permission_denied'}},
+                 'implementation permission denial')):
+            with self.subTest(event=middle):
+                log.write_text('\n'.join(json.dumps(e) for e in start + [middle, {'type': 'turn.completed'}]))
+                with self.assertRaisesRegex(RunError, error):
+                    validate(log, 0)
 
     def test_sigterm_retains_failed_status_and_partial_evidence(self):
         (self.workspace/'fake-mode.txt').write_text('wait')

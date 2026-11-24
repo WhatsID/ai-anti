@@ -12,9 +12,8 @@ from model_metadata import effort, write_catalog
 from review_materials import load_registry
 from review_codex_protocol import validate
 
-IMPLEMENTATION_VERSIONS = ('codex-cli 0.160.0', 'codex-cli 0.163.0')
-
-REVIEW_VERSIONS = IMPLEMENTATION_VERSIONS + ('codex-cli 0.169.1',)
+IMPLEMENTATION_VERSIONS = ('codex-cli 0.160.0', 'codex-cli 0.163.0', 'codex-cli 0.169.1')
+REVIEW_VERSIONS = IMPLEMENTATION_VERSIONS
 
 PATH_ALIAS_WARNING = 'WARNING: proceeding, even though we could not create PATH aliases: Operation not permitted (os error 1)'
 

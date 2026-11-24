@@ -216,8 +216,10 @@ with a different fresh output directory. Native Codex is never executed by this 
 use host `spawn_agent` and its receipt above. No arbitrary API/model is supported.
 
 The GLM entry uses Codex CLI Responses, isolated `CODEX_HOME`, ignored user config/rules,
-no daemon or persistence, workspace-write sandbox, shell env inheritance `none` with fixed
-PATH, sandbox network access false, and disabled hooks/apps/recursive agents and discovery.
+no daemon or persistence, and a workspace-write sandbox with network access disabled.
+It uses a non-login shell with environment inheritance `none` and a fixed base PATH.
+Codex can prepend its packaged tool directory. Hooks, apps, recursive agents, and skill
+discovery are disabled.
 The model transport retains necessary proxy/certificate environment and injects only the
 selected Token Plan token; it never puts the token in argv/config/logs. Host permission
 restrictions remain in force. This is not hard isolation from same-user credential files:

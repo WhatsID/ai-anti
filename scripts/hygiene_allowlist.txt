@@ -12,6 +12,8 @@ README.zh-CN.md:qwen3.7-max
 README.md:qwen3.8-max
 README.md:qwen3.7-max
 docs/COMPATIBILITY.md:qwen3.8-max
+docs/MODEL_ROUTE_VALIDATION.zh-CN.md:qwen3.8-max
+docs/MODEL_ROUTE_VALIDATION.zh-CN.md:Token Plan
 docs/COMPATIBILITY.md:qwen3.7-max
 # 提交信息里 AI 协作者署名行使用的公开地址（Co-Authored-By）
 *:noreply@anthropic.com

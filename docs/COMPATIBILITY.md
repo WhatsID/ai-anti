@@ -5,7 +5,7 @@
 机器可读版本集合为根 `compat.json`（schema 1），路径级证据以本文为准。
 `install.sh --status` 打印实际版本与清单归属；“在实测清单内”不证明全部路径或安装健康。
 正式评审把 CLI 版本记入 manifest；清单外警告本身不阻断，但执行器另有能力与协议门禁，
-未列版本并不保证可运行。Qwen Responses / Codex 另有精确 0.160.0 / 0.163.0 / 0.169.1 版本预检（0.169.1 仅只读评审与 Claude 侧配置实施，Token Plan 实施仍为 0.160.0 / 0.163.0）。未知版本仍拒绝。
+未列版本并不保证可运行。Codex 主导的 Qwen Responses 只读评审与 Token Plan 独立实施均精确准入 Codex CLI 0.160.0 / 0.163.0 / 0.169.1，未知版本在发起模型请求前拒绝。
 
 | 组件 / 路径 | 版本或前提 | 已验程度与边界 |
 |-------------|------------|----------------|
@@ -16,6 +16,7 @@
 | Qwen 经 Claude CLI | Claude 2.1.280 | 正式 plan / scoped diff，含编号 MCP 正式增量；只支持记录中的模型与材料范围 |
 | Qwen Responses 经 Codex | Codex 0.160.0 | 正式 plan 与历史 scoped diff；`actual_model=null`、`model_evidence=requested_only` |
 | Qwen Responses 经 Codex | Codex 0.163.0 | 2026-10-20 合成 plan 两阶段；未验证新版业务 diff 或用户级入口全流程，模型证据仍为 requested_only |
+| Codex 主导 → Token Plan 独立实施 | Codex 0.169.1 | `glm-5.3`、`qwen4-max` 各完成隔离工作树写入，主模型各独立复跑 5 项断言；`model_evidence=requested_only` |
 | Codex → Qoder | Qoder CLI 1.1.74 / 1.1.77，实际 Kimi-K3.1-Pro | 1.1.77 正式 bug-review 双阶段；新版 plan/diff 仅离线覆盖，旧版历史证据归属见下文 |
 | Claude 主导 → AGY 双方案规划 | AGY CLI 1.5.13 / 1.5.14 | 1.5.13：本机 `--mode plan --sandbox --output-format stream-json` 探针、生产 `agy_plan.py` 的真实 `draft`/`synthesize` 探针均已完成，并有离线全路径单测。1.5.14：经隔离规划工作树的真实 `draft`/`synthesize` 各一次（见下文「2026-11-21 隔离工作树规划」）。`model_evidence=requested_only` |
 | AGY 主导 → Codex → AGY | AGY CLI 1.5.13（1.5.14 未验证），Codex CLI 0.169.1 | 插件静态校验、隔离 `HOME` 发现、合成只读 `codex_review.py plan` 与 `codex_implement.py --relay agy` 真实探针均通过；AGY 新交互会话端到端遵循闭环待用户授权安装后验证。`model_evidence=requested_only` |
@@ -447,6 +448,22 @@ Token Plan 引入时的验证仅离线 fake/配置/UI 状态测试及 App 构建
 Token Plan manifest 保留 actual_model=null、requested_only；completed 不是候选验收通过。
 Claude Code 保持现有实施代理，solo 不派实施者；原生模型目录不代表全部完成验证。
 
+### 2026-11-24 · Codex 0.169.1 Token Plan 独立实施
+
+主模型从候选源码的正式 `implementation.py` 入口分别请求 `glm-5.3` 和 `qwen4-max`，在两个独立的合成
+`first_even` 工作树中完成实施，耗时分别为 32.485 秒和 22.132 秒。两个请求均在主订阅返回月额度用尽后
+切至备用订阅一次。主模型分别确认只改动 `numbers_sample.py`，独立复跑 5 项断言均通过。
+两份 manifest 记录 `completed`、`actual_model=null` 和 `model_evidence=requested_only`。
+
+实施使用 `workspace-write`、常规工具及非登录 shell。首轮实测中 macOS 登录 shell 重写了 PATH，隔离检查中止写入。
+关闭登录 shell 后，两次正式实施均观察到 `/bin/zsh -c`、凭据环境变量缺失，且 PATH 仅由 Codex 软件包声明的
+`codex-path` 目录（本机含 `rg`）和配置的固定 PATH 组成，软件包目录排在首位。沙箱命令访问受控环回监听器
+均返回 `EPERM`，宿主侧对照可连接。凭据文件仍受现有同用户边界约束。
+
+本轮证据覆盖上述两个模型和本机合成实施样本。两项实测的配置、事件日志和 stderr 见
+`/private/tmp/ai-anti-token169.SfYAr1UA/live3-glm-5.3` 与
+`/private/tmp/ai-anti-token169.SfYAr1UA/live3-qwen4-max`（本机临时目录）。
+
 ### Qoder GLM implementation compatibility
 
 Qoder subscription implementation independently pins qodercli **1.1.77**, public
@@ -482,7 +499,7 @@ identity. No user settings, login state, installation or reviewer compatibility 
 保持 GLM，坏值在读取、保存、恢复和 prepare-only 中拒绝。评审 profile、原生模型与
 Qoder 路由独立。Qwen4 请求 high effort，per-run catalog 为 text-only，关闭并行工具、图片
 和推理摘要，保持既有材料限制；其 metadata fallback warning 不获准。GLM 精确 warning
-例外仅属于 GLM 请求。CLI 版本钉仍为 0.160.0 / 0.163.0，不因新模型放宽。
+例外仅属于 GLM 请求。Qwen4 引入时实施 CLI 版本为 0.160.0 / 0.163.0。当前准入和 0.169.1 证据见「独立实施来源配置」。
 
 本段描述实现契约，不宣称真实 Qwen4 链路、所有账号/地域或两版 CLI 已通过验收。
 本地合成 wire 工具往返与隔离 GUI 已通过独立验收；更换有额度的订阅后，真实 Responses

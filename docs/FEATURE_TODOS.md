@@ -360,7 +360,7 @@
 
 ### Claude 2.1.326 / Codex 0.169.1 后续（2026-11-18）
 
-- [ ] Token Plan 实施的 0.169.1 待取证。实施钉仍为 0.160.0/0.163.0。
+- [x] Token Plan 实施的 0.169.1 取证已完成（2026-11-24）。Codex 主导请求 `glm-5.3`、`qwen4-max` 各完成一次合成工作树验收，主模型独立复跑各 5 项断言。实施精确准入 0.160.0 / 0.163.0 / 0.169.1。 [兼容性记录](COMPATIBILITY.md#2026-11-24--codex-01691-token-plan-独立实施)
 - [ ] 序列化配置时统一确认两个执行器的凭证相对路径基准。Responses 按 `--repo`，默认 Anthropic 按调用 cwd。
 - [ ] `plugins/qwen/plugin.json` 的依赖说明待表达执行器条件。
 - [x] macOS App 已接入 `plugins.qwen.claude_executor` 的选择、本地检查及合成评审路由。Qwen 为首选或回退时可选择协议，保存保留回退顺序。
