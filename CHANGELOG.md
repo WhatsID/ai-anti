@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.10 — 2026-11-24
+
 - AIAnti 0.3.10（构建号 17）在设置窗口显示当前配置所需 CLI 的版本与状态。缺失时可确认后在系统终端运行官方安装命令，Qoder CLI 提供官方安装说明链接。
 - AIAnti 的 CLI 发现为 Claude Code 和 Codex CLI 补上 `~/.local/bin` 兜底，Finder 启动时也能识别官方独立安装器安装的 CLI。
 
