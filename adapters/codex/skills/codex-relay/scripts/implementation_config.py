@@ -70,7 +70,7 @@ def resolve(config, workspace, explicit_provider=None, explicit_model=None):
     if selected == 'codex':
         if chosen is not None:
             model(chosen)
-        if chosen in (MODEL, 'GLM-5.3', 'qwen4-max'):
+        if chosen == 'GLM-5.3' or chosen in implementation_models.MODELS:
             raise ConfigError('external implementation model requires its matching provider')
         return dict(provider=selected, requested_model=chosen, executor='native', secondary_model=secondary)
     if selected == 'qoder':

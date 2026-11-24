@@ -878,8 +878,22 @@ class StoreTests(unittest.TestCase):
         for raw in (b'model = """multi\nline"""\n', b'model = 1\n', b'model = "bad\n'):
             with self.assertRaises(StoreError): edit_toml(raw,'new')
 
+    def test_new_token_plan_implementation_models_roundtrip(self):
+        for requested in ('qwen3.8-max', 'deepseek-v4-pro', 'deepseek-v4.1-flash'):
+            with self.subTest(requested=requested):
+                saved = self.save(token_plan_implementation_model=requested)
+                self.assertEqual(saved['values']['token_plan_implementation_model'], requested)
+                snapshot = self.snapshot()
+                self.assertEqual(snapshot['values']['token_plan_implementation_model'], requested)
+                switched = self.save(token_plan_implementation_model='glm-5.3')
+                restored = self.store.restore(switched['fingerprints'])
+                self.assertEqual(restored['values']['token_plan_implementation_model'], requested)
+                self.assertEqual(self.snapshot()['values']['token_plan_implementation_model'], requested)
+
     def test_token_plan_implementation_model_persistence(self):
         self.assertEqual(self.snapshot()['values'].get('token_plan_implementation_model'), 'glm-5.3')
+        self.write('ai', {'codex_relay': {'token_plan_implementation_model': None}})
+        self.assertEqual(self.snapshot()['values']['token_plan_implementation_model'], 'glm-5.3')
         # Old UI opens an old configuration, changes only review URL and saves.
         snap = self.snapshot(); values = snap['values']; values.pop('token_plan_implementation_model')
         values['base_url'] = 'https://fixture.invalid/anthropic'
@@ -893,7 +907,7 @@ class StoreTests(unittest.TestCase):
         switched = self.save(implementation_provider='qoder', token_plan_implementation_model='glm-5.3')
         restored = self.store.restore(switched['fingerprints'])
         self.assertEqual(restored['values']['token_plan_implementation_model'], 'qwen4-max')
-        for bad in ('', 'Qwen4-Max', 'qwen4-max-preview', [], {}, True):
+        for bad in ('', 'Qwen4-Max', 'qwen4-max-preview', 'DeepSeek-v4-pro', [], {}, True):
             before = self.store.raw('ai')
             with self.assertRaises(StoreError): self.save(token_plan_implementation_model=bad)
             self.assertEqual(self.store.raw('ai'), before)

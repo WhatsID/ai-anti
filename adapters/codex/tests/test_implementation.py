@@ -51,7 +51,9 @@ class ImplementationTests(unittest.TestCase):
         for value in (None, 'codex'): self.assertEqual(provider(value), 'codex')
         for value in ('', [], {}, True, 1, 'custom_api'):
             with self.assertRaises(ConfigError): provider(value)
-        self.assertEqual(resolve({}, self.workspace)['provider'], 'codex')
+        default = resolve({}, self.workspace)
+        self.assertEqual(default['provider'], 'codex')
+        self.assertIsNone(default['requested_model'])
         native = resolve(self.config, self.workspace, 'codex')
         self.assertEqual(native['requested_model'], 'old-native')
         with self.assertRaises(ConfigError): resolve(self.config, self.workspace, 'codex', MODEL)
@@ -259,8 +261,55 @@ class ImplementationTests(unittest.TestCase):
             self.assertEqual(failed['status'], 'failed')
             self.assertFalse(failed['completed'])
 
+    def test_new_token_plan_models_prepare_from_config_and_override(self):
+        script = ROOT / 'adapters/codex/skills/codex-relay/scripts/implementation.py'
+        self.secret.unlink()
+        relay = self.config['codex_relay']
+        for requested in ('qwen3.8-max', 'deepseek-v4-pro', 'deepseek-v4.1-flash'):
+            for override in (False, True):
+                with self.subTest(requested=requested, override=override):
+                    relay['implementation_provider'] = 'codex' if override else 'token_plan'
+                    relay['token_plan_implementation_model'] = MODEL if override else requested
+                    self.path.write_text(json.dumps(self.config))
+                    out = self.root / f'{requested}-{override}'
+                    command = [
+                        sys.executable, str(script), '--config', str(self.path), '--workspace',
+                        str(self.workspace), '--prompt', str(self.prompt), '--out', str(out), '--prepare-only',
+                    ]
+                    if override:
+                        command.extend(['--provider', 'token_plan', '--model', requested])
+                    process = subprocess.run(command, capture_output=True, text=True)
+                    self.assertEqual(process.returncode, 0, process.stderr)
+                    status = json.loads((out / 'status.json').read_text())
+                    self.assertEqual(status['provider'], 'token_plan')
+                    self.assertEqual(status['wire_api'], 'responses')
+                    self.assertEqual(status['requested_model'], requested)
+                    self.assertIs(status['completed'], False)
+                    prepared = json.loads((out / 'codex-config.json').read_text())
+                    self.assertEqual(prepared['model'], requested)
+
+    def test_known_external_models_are_rejected_for_native_codex(self):
+        relay = self.config['codex_relay']
+        relay['implementation_provider'] = 'codex'
+        for external in (MODEL, 'GLM-5.3', 'qwen4-max', 'qwen3.8-max', 'deepseek-v4-pro', 'deepseek-v4.1-flash'):
+            with self.subTest(external=external):
+                relay['secondary_model'] = external
+                with self.assertRaisesRegex(ConfigError, 'requires its matching provider'):
+                    resolve(self.config, self.workspace)
+                relay['secondary_model'] = 'old-native'
+                with self.assertRaisesRegex(ConfigError, 'requires its matching provider'):
+                    resolve(self.config, self.workspace, 'codex', external)
+
+    def test_new_token_plan_models_do_not_change_qoder_fixed_model(self):
+        for external in ('qwen3.8-max', 'deepseek-v4-pro', 'deepseek-v4.1-flash'):
+            with self.subTest(external=external):
+                self.config['codex_relay']['token_plan_implementation_model'] = external
+                self.assertEqual(resolve(self.config, self.workspace, 'qoder')['requested_model'], MODEL)
+                with self.assertRaisesRegex(ConfigError, 'only logical glm-5.3'):
+                    resolve(self.config, self.workspace, 'qoder', external)
+
     def test_strict_token_model_even_for_inactive_provider(self):
-        for index, bad in enumerate(('', 'Qwen4-Max', 'qwen4-max-preview', [], {}, True, 4)):
+        for index, bad in enumerate(('', 'Qwen4-Max', 'qwen4-max-preview', 'DeepSeek-v4-pro', [], {}, True, 4)):
             with self.subTest(bad=bad):
                 self.config['codex_relay']['token_plan_implementation_model'] = bad
                 self.path.write_text(json.dumps(self.config))

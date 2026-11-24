@@ -157,9 +157,10 @@ Resolve `codex_relay.implementation_provider` from the user config: missing/null
 `codex`; only `codex`, `token_plan` and `qoder` are accepted, including when reading or restoring
 configuration. Keep `codex_relay.secondary_model` as the native Codex model; selecting
 Token Plan or Qoder never overwrites it. An explicit per-task provider/model instruction takes
-priority as a coherent pair: Token Plan permits `glm-5.3` and `qwen4-max`; Qoder permits
-only logical `glm-5.3`. Neither external model is valid with native Codex. Public uppercase `GLM-5.3` is rejected. Resolve any
-ambiguous explicit request before dispatch. `solo` disables independent implementation;
+priority as a coherent pair. Token Plan permits `glm-5.3`, `qwen4-max`, `qwen3.8-max`,
+`deepseek-v4-pro` and `deepseek-v4.1-flash`. Qoder permits only logical `glm-5.3`.
+Native Codex rejects those external IDs and uppercase `GLM-5.3`. Resolve any ambiguous
+explicit request before dispatch. `solo` disables independent implementation;
 Claude Code's implementer workflow is unchanged. Configuration selection is not permission
 to send business materials externally: require the session's applicable authorization.
 
@@ -316,7 +317,9 @@ Skill. `codex_relay.secondary_model` selects only the native Codex independent i
 
 ### Independent Token Plan model
 
-`codex_relay.token_plan_implementation_model` accepts only `glm-5.3` or `qwen4-max`.
+`codex_relay.token_plan_implementation_model` accepts only `glm-5.3`, `qwen4-max`,
+`qwen3.8-max`, `deepseek-v4-pro` and `deepseek-v4.1-flash`. The last three IDs have
+passed offline preparation. Live implementation validation for these IDs is pending.
 Missing/null means `glm-5.3`; empty, preview, case variants and unknown values fail
 before credentials or CLI launch, even with another provider selected. Explicit model
 instructions override this value only with a matching provider. Token Plan always copies
