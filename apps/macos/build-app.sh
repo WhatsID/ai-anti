@@ -12,7 +12,7 @@ bin=$(swift build --cache-path "$output/cache/swiftpm" --config-path "$output/ca
 app="$output/AIAnti.app"
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources/backend"
 cp "$bin/AIAnti" "$app/Contents/MacOS/AIAnti"
-cp "$source_dir/backend/control.py" "$source_dir/backend/config_store.py" "$source_dir/backend/checks.py" "$source_dir/backend/model_services.py" "$source_dir/backend/review_services.py" "$source_dir/backend/implementation_models.py" "$source_dir/backend/token_plan_accounts.py" "$source_dir/backend/dual_plan.py" "$source_dir/backend/agy_relay.py" "$app/Contents/Resources/backend/"
+cp "$source_dir/backend/control.py" "$source_dir/backend/config_store.py" "$source_dir/backend/checks.py" "$source_dir/backend/model_services.py" "$source_dir/backend/review_services.py" "$source_dir/backend/implementation_models.py" "$source_dir/backend/token_plan_accounts.py" "$source_dir/backend/dual_plan.py" "$source_dir/backend/agy_relay.py" "$source_dir/backend/relay_routes.py" "$app/Contents/Resources/backend/"
 cp "$source_dir/Resources/MenuBarTemplate.png" "$app/Contents/Resources/"
 iconset="$output/build/AppIcon.iconset"
 mkdir -p "$iconset"

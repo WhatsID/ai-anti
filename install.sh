@@ -708,7 +708,8 @@ if sys.argv[2] == "1":
 if sys.argv[3] == "1":
     names += ["adapters/agy/plugin/" + n for n in ("plugin.json", "rules/AGENTS.md",
               "skills/agy-relay/SKILL.md", "skills/codex-review/SKILL.md")]
-    names += ["adapters/agy/scripts/codex_review.py", "adapters/agy/scripts/claude_plan.py"]
+    names += ["adapters/agy/scripts/codex_review.py", "adapters/agy/scripts/claude_plan.py",
+              "apps/macos/backend/relay_routes.py"]
 errors = 0
 for name in names:
     path = root / name

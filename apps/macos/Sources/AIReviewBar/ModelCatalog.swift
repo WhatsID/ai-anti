@@ -12,6 +12,7 @@ enum ModelCatalog {
     private static let claudeAliases = ["Fable", "Opus", "Sonnet", "Haiku"]
     static let codex = ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]
     static let tokenPlanImplementation = [implementationGLM, "qwen4-max", "qwen3.8-max", "deepseek-v4.1-flash"]
+    static let agyTokenPlanImplementation = [implementationGLM, "qwen4-max", "qwen3.8-max", "deepseek-v4-pro", "deepseek-v4.1-flash"]
     static let officialReview = [
         "token_plan": ["qwen4-max", "qwen3.8-max", "deepseek-v4-pro", implementationGLM],
         "qwen": ["qwen4-max"],

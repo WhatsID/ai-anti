@@ -17,7 +17,8 @@ import unittest
 ROOT = Path(__file__).resolve().parents[1]
 ENTRY = ROOT / 'adapters/agy/scripts/codex_review.py'
 sys.path.insert(0, str(ROOT / 'adapters/codex/skills/claude-review/scripts'))
-from ai_anti_config import ConfigError, agy_dual_plan, agy_implementation, agy_relay_section, agy_review
+from ai_anti_config import ConfigError, agy_dual_plan, agy_implementation, agy_relay_section, agy_review, agy_review_effort
+from token_plan_transport import service_contract
 
 FAKE_CODEX = r'''
 import json, os, pathlib, sys, time
@@ -54,6 +55,24 @@ def command_event(uid, command, code):
 
 
 class ConfigTests(unittest.TestCase):
+    def test_official_review_and_saved_codex_defaults(self):
+        route = dict(provider='official_api', service='kimi', model='kimi-k3')
+        defaults = {'review': {'effort': 'high', 'high_risk_effort': 'max'}}
+        config = {'agy_relay': {'review': route, 'codex_defaults': defaults}}
+        self.assertEqual(agy_review(config), route)
+        self.assertIsNone(agy_review_effort(agy_review(config), 'high_risk'))
+        self.assertIsNone(agy_dual_plan(config))
+        for invalid in (dict(route, effort='high'), dict(route, model='qwen4-max'),
+                        dict(route, service=[]), dict(route, base_url='https://invalid.test')):
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ConfigError, r'agy_relay\.review'):
+                agy_review({'agy_relay': {'review': invalid}})
+        for invalid in ({'extra': {}}, {'implementation': {'high_risk_effort': 'high'}},
+                        {'review': {'effort': 'high', 'high_risk_effort': 'low'}}):
+            config['agy_relay']['codex_defaults'] = invalid
+            with self.subTest(invalid=invalid), self.assertRaisesRegex(ConfigError, r'agy_relay\.codex_defaults'):
+                agy_review(config)
+            self.assertIsNone(agy_dual_plan(config))
+
     def test_routes_are_independent(self):
         config = {
             'review': {'codex_model': 'other-review', 'codex_effort': 'low'},
@@ -169,6 +188,106 @@ class PlanReviewTests(unittest.TestCase):
             env['AGY_TEST_EVENTS'] = json.dumps(events)
         return subprocess.run(self.argv(*flags, **options), env=env, stdin=subprocess.DEVNULL,
                               capture_output=True, text=True, timeout=14)
+
+    def official_config(self, service='kimi', model='kimi-k3'):
+        secret = self.home / '.config/ai-anti/secrets.json'
+        secret.parent.mkdir(parents=True, exist_ok=True)
+        secret.write_text(json.dumps({'kimi': {'value': 'fake-kimi'}, 'tokenplan': {'value': 'fake-token'}}))
+        self.config.write_text(json.dumps({
+            'agy_relay': {'review': dict(provider='official_api', service=service, model=model)},
+            'codex_relay': {'official_review': {'service': 'qwen', 'model': 'qwen4-max'}},
+            'plugins': {'qwen': {'model': 'qwen4-max', 'credential_paths': [str(secret)],
+                                'base_url': 'https://token-plan.maas.qianwenaiapi.com/apps/anthropic',
+                                'responses_base_url': 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1'}},
+            'review': {'timeout': 12, 'idle_timeout': 4},
+        }))
+
+    def test_official_review_matrix_prepares_registry_and_full_git_metadata(self):
+        (self.repo / 'untracked_fixture.txt').write_text('untracked fixture')
+        context = self.repo / 'context.txt'
+        context.write_text('review context')
+        models = service_contract().REVIEW_MODELS
+        self.assertEqual({service: len(ids) for service, ids in models.items()},
+                         {'token_plan': 4, 'qwen': 1, 'kimi': 2, 'deepseek': 1})
+        for service, ids in models.items():
+            for model in ids:
+                with self.subTest(service=service, model=model):
+                    self.official_config(service, model)
+                    out = self.base / f'{service}-{model}'
+                    run = self.run_review('--prepare-only', '--files', 'source.txt', '--context', context.name, out=out)
+                    self.assertEqual(run.returncode, 0, run.stderr)
+                    for name in ('manifest', 'status'):
+                        record = json.loads((out / (name + '.json')).read_text())
+                        self.assertEqual((record['relay'], record['service'], record['requested_model']),
+                                         ('agy', service, model))
+                        self.assertEqual(record['model_evidence'], 'requested_only')
+                        self.assertIsNone(record['actual_model'])
+                        self.assertEqual(record['material_transport'], 'material_ids')
+                    self.assertTrue((out / 'logs/inventory.registry.json').is_file())
+                    snapshot = out / 'materials/inventory'
+                    manifest = json.loads((out / 'manifest.json').read_text())
+                    sources = manifest['sources']['inventory']
+
+                    def material(name):
+                        return ''.join((snapshot / block['path']).read_text() for block in sources[name]['blocks'])
+
+                    self.assertEqual(material('tracked-paths.txt'), 'source.txt\n')
+                    self.assertIn('?? untracked_fixture.txt', material('git-status.txt'))
+                    self.assertEqual(material('repo/' + context.name), 'review context')
+        self.assertFalse(self.calls.exists())
+
+    def test_official_review_exit_codes_for_missing_material_and_execution(self):
+        self.official_config()
+        self.assert_unstarted(self.run_review('--prepare-only'))
+        run = self.run_review('--files', 'not-found.txt')
+        self.assertEqual(run.returncode, 2, run)
+        status = json.loads((self.out / 'status.json').read_text())
+        self.assertEqual((status['status'], status['failure_kind']), ('failed', 'preparation_failed'))
+        shutil.rmtree(self.out)
+
+        fixture = ROOT / 'adapters/codex/tests/fake_codex.py'
+        shutil.copyfile(fixture, self.base / 'codex')
+        run = self.run_review('--files', 'source.txt')
+        self.assertEqual(run.returncode, 0, run)
+        manifest = json.loads((self.out / 'manifest.json').read_text())
+        self.assertEqual(set(manifest['stages']), {'inventory', 'review'})
+        self.assertTrue((self.out / 'report.md').is_file())
+        shutil.rmtree(self.out)
+        self.env['FAKE_CODEX_MODE'] = 'extra_tool'
+        run = self.run_review('--files', 'source.txt')
+        self.assertEqual(run.returncode, 1, run)
+        status = json.loads((self.out / 'status.json').read_text())
+        self.assertEqual(status['status'], 'failed')
+        self.assertNotEqual(status['failure_kind'], 'preparation_failed')
+
+    def test_official_review_signal_preserves_interrupted_exit(self):
+        self.official_config()
+        fixture = (ROOT / 'adapters/codex/tests/fake_codex.py').read_text()
+        stall = ('import time\nPath(os.environ["AGY_TEST_CALLS"]).touch()\n'
+                 'time.sleep(30)\n')
+        (self.base / 'codex').write_text(fixture.replace('options = {}\n', stall + 'options = {}\n', 1))
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            with self.subTest(sig=sig):
+                self.calls.unlink(missing_ok=True)
+                out = self.base / ('out-' + str(sig))
+                with subprocess.Popen(self.argv('--files', 'source.txt', out=out), env=self.env,
+                                      stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                      stderr=subprocess.PIPE, text=True) as proc:
+                    try:
+                        deadline = time.monotonic() + 8
+                        while not self.calls.exists() and proc.poll() is None and time.monotonic() < deadline:
+                            time.sleep(.02)
+                        self.assertTrue(self.calls.exists())
+                        proc.send_signal(sig)
+                        _, stderr = proc.communicate(timeout=8)
+                        self.assertEqual(proc.returncode, 128 + sig, stderr)
+                    finally:
+                        if proc.poll() is None:
+                            proc.kill()
+                self.assertEqual(json.loads((out / 'status.json').read_text())['status'], 'failed')
+
+    def test_native_review_rejects_context_before_start(self):
+        self.assert_unstarted(self.run_review('--context', 'source.txt'))
 
     def evidence(self):
         manifest = self.out / 'manifest.json'

@@ -130,6 +130,8 @@ def parser(families=None):
     result.add_argument("--scale", required=True)
     result.add_argument("--out", required=True)
     result.add_argument("--channel", choices=("claude", "qwen", "qoder", "official_api"))
+    result.add_argument("--config", type=Path)
+    result.add_argument("--relay", choices=("codex", "agy"), default="codex")
     result.add_argument("--qwen-executor", choices=("claude", "codex"))
     result.add_argument("--responses-base-url")
     result.add_argument("--model", default=None, help="Claude aliases: " +
@@ -216,15 +218,27 @@ def prepare(args, repo, output, coretext, families, channel):
     return output, logs, inventory, review, manifest, files, context
 
 
-def main():
+def main(argv=None):
+    argv = sys.argv[1:] if argv is None else argv
+    argument_parser = parser()
+    showing_help = any(option in argv for option in ("-h", "--help"))
+    if showing_help:
+        # Resolve the config before argparse exits on --help so the alias list
+        # reflects the same configuration as a review.
+        config_parser = argparse.ArgumentParser(add_help=False)
+        config_parser.add_argument("--config", type=Path)
+        args, _ = config_parser.parse_known_args(argv)
+    else:
+        args = argument_parser.parse_args(argv)
     try:
-        config = load_config()
+        config = load_config(args.config)
         families = model_families(config, MODEL_FAMILIES)
     except ConfigError as exc:
         print("review preparation failed: " + str(exc), file=sys.stderr)
         return 2
-    argument_parser = parser(families)
-    args = argument_parser.parse_args()
+    if showing_help:
+        argument_parser = parser(families)
+        args = argument_parser.parse_args(argv)
     output = None
     manifest = None
     warnings = []
@@ -235,7 +249,8 @@ def main():
         coretext = CORE.read_text(encoding="utf-8")
         rules = core_sections(coretext, args.mode)
         repo = git_root(args.repo)
-        channel = resolve(config, args.channel, args.model, repo, families, args.qwen_executor, args.responses_base_url)
+        channel = resolve(config, args.channel, args.model, repo, families, args.qwen_executor,
+                          args.responses_base_url, relay=args.relay)
         codex_executor = channel.get("executor") == "codex"
         args.timeout, args.idle_timeout = review_limits(config, args.timeout, args.idle_timeout)
         args.max_output_bytes = args.max_output_bytes if args.max_output_bytes is not None else (8 if channel["channel"] == "qwen" else 2) * 1024 * 1024

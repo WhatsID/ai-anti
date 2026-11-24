@@ -85,10 +85,19 @@ AGY 主导的方案评审使用 `adapters/agy/scripts/codex_review.py plan`。�
 和必要材料失败读取，命中门禁即作废。使用 `--prepare-only` 可单独检查材料与提示词。
 遵守 AGY 宿主联网和沙箱授权；CLI 参数不授予宿主权限。
 
-AGY 实施复用 `adapters/claude-code/scripts/codex_implement.py --relay agy`。从文件传入
+当评审配置选择 `official_api` 时，该入口委托 `review.py --relay agy`，通过 MCP 只读材料
+注册表执行两阶段评审，必须给出非空 `--files`。材料包含全仓 `tracked-paths.txt` 和
+`git-status.txt`（含未跟踪文件名），调用前按接收方核对授权。日志记录固定服务和请求模型，
+模型证据为 `requested_only`。
+
+AGY 的原生 Codex 实施复用 `adapters/claude-code/scripts/codex_implement.py --relay agy`。从文件传入
 提示词，在隔离关联工作树内有界执行。按本纪律持续监控后台进程并保留完整输出。
 终审返工经新的用户裁决后，在同一工作树以 `--resume-from` 引用最近一次成功的输出目录，另开新的 `--out`。
 失败或中断即停，保留候选树与证据交用户裁决。独立终审由 AGY 完成。
+
+AGY 官方实施复用 `adapters/codex/skills/codex-relay/scripts/implementation.py --relay agy`。
+Token Plan 通过 Codex CLI 执行，创建输出前校验带有效 HEAD 的 linked Git worktree。
+厂商直连使用 Chat Completions，通过逐项 `--file` 限定获授权外发和写入的文件。
 
 ## AGY 主导调用 Claude 规划入口适用说明
 

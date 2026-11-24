@@ -197,6 +197,17 @@ class ClaudeCodexImplement(unittest.TestCase):
         self.assertFalse(self.calls.exists())
         self.assertFalse(self.version_calls.exists())
 
+    def test_agy_official_implementation_rejected_by_native_entry(self):
+        self.config.write_text(json.dumps({'agy_relay': {'implementation': {
+            'provider': 'official_api', 'service': 'token_plan', 'model': 'qwen4-max',
+        }}}))
+        result = self.invoke(relay='agy')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('implementation.py --relay agy', result.stderr)
+        self.assertFalse(self.out.exists())
+        self.assertFalse(self.calls.exists())
+        self.assertFalse(self.version_calls.exists())
+
     def test_invalid_effort_stops_before_codex_starts(self):
         self.configure_effort('XHIGH')
         result = self.invoke()

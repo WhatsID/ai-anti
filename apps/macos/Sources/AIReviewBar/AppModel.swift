@@ -54,15 +54,25 @@ struct Draft: Equatable {
     var directImplementation: RouteSelection?
     var vendorCredentials = Dictionary(uniqueKeysWithValues: ReviewService.vendors.map { ($0, VendorCredential()) })
     var activeOfficialReview: RouteSelection? {
-        host == "codex" && channel == ReviewService.officialChannel ? officialReview : nil
+        get {
+            guard channel == ReviewService.officialChannel else { return nil }
+            if host == "codex" { return officialReview }
+            if host == "agy" { return agyOfficialReview }
+            return nil
+        }
+        set {
+            if host == "codex" { officialReview = newValue }
+            if host == "agy" { agyOfficialReview = newValue }
+        }
     }
     var service: String { activeOfficialReview?.service ?? (channel == "qwen" ? activeAPI : channel) }
     var qwenModel: String { get { profile.model } set { profile.model = newValue } }
     var reviewModel: String {
         get { activeOfficialReview?.model ?? qwenModel }
         set {
-            if activeOfficialReview != nil {
-                officialReview?.model = newValue
+            if var selection = activeOfficialReview {
+                selection.model = newValue
+                activeOfficialReview = selection
             } else if host == "codex" && channel == "qwen" && activeAPI == "token_plan",
                       ModelCatalog.officialReview["token_plan"]?.contains(newValue) == true {
                 officialReview = RouteSelection(service: "token_plan", model: newValue)
@@ -77,11 +87,61 @@ struct Draft: Equatable {
     var tokenPlanImplementationModel = ModelCatalog.implementationGLM
     var claudeImplementationProvider = "claude-agent"
     var claudeImplementationModel = ""
+    var agyReviewProvider = "codex"
+    var agyOfficialReview: RouteSelection?
+    var agyImplementationProvider = "codex"
+    var agyOfficialImplementation: RouteSelection?
     var agyReviewModel = ""
     var agyImplementationModel = ""
     var agyReviewEffort = ""
     var agyImplementationEffort = ""
     var agyRelayError = ""
+    var agyImplementationService: String {
+        get { agyImplementationProvider == ReviewService.officialChannel ? agyOfficialImplementation?.service ?? "codex" : "codex" }
+        set {
+            if newValue == "codex" {
+                agyImplementationProvider = "codex"
+                return
+            }
+            let models = newValue == "token_plan" ? ModelCatalog.agyTokenPlanImplementation : ModelCatalog.directImplementation[newValue] ?? []
+            guard let first = models.first else { return }
+            if agyOfficialImplementation?.service != newValue {
+                agyOfficialImplementation = RouteSelection(service: newValue, model: first)
+            }
+            agyImplementationProvider = ReviewService.officialChannel
+        }
+    }
+    var agyImplementationSelectedModel: String {
+        get { agyImplementationProvider == "codex" ? agyImplementationModel : agyOfficialImplementation?.model ?? "" }
+        set {
+            if agyImplementationProvider == "codex" { agyImplementationModel = newValue }
+            else { agyOfficialImplementation?.model = newValue }
+        }
+    }
+    var agyReviewRoutePayload: [String: String] {
+        if agyReviewProvider == ReviewService.officialChannel, let official = agyOfficialReview {
+            return official.dictionary.merging(["provider": agyReviewProvider]) { _, value in value }
+        }
+        return agyReviewModel.isEmpty ? ["provider": "codex"] : ["provider": "codex", "model": agyReviewModel]
+    }
+    var agyImplementationRoutePayload: [String: String] {
+        if agyImplementationProvider == ReviewService.officialChannel, let official = agyOfficialImplementation {
+            return official.dictionary.merging(["provider": agyImplementationProvider]) { _, value in value }
+        }
+        return ["provider": "codex", "model": agyImplementationModel]
+    }
+    var agyReviewSelectedModel: String {
+        let selected = agyReviewProvider == "codex" ? agyReviewModel : agyOfficialReview?.model ?? ""
+        return selected.isEmpty ? "CLI 默认" : selected
+    }
+    func agyReviewDescription(separator: String) -> String {
+        let service = agyReviewProvider == "codex" ? "codex" : agyOfficialReview?.service ?? "codex"
+        return ReviewService.title(service) + separator + agyReviewSelectedModel
+    }
+    func agyImplementationDescription(separator: String) -> String {
+        let selected = agyImplementationSelectedModel
+        return ReviewService.title(agyImplementationService) + separator + (selected.isEmpty ? "未配置" : selected)
+    }
     var agyDualPlanEnabled = false
     var agyDualPlanPartner = "claude"
     var agyDualPlanModel = ""
@@ -109,7 +169,9 @@ struct Draft: Equatable {
     var codexModels = ModelCatalog.codex
     var implementationEnabled: Bool { mode != "solo" }
     var implementationModelEnabled: Bool {
-        implementationEnabled && (host == "codex" || (host == "agy" && agyRelayError.isEmpty) || claudeImplementationProvider == "codex")
+        guard implementationEnabled else { return false }
+        if host == "agy" { return agyRelayError.isEmpty }
+        return host == "codex" || claudeImplementationProvider == "codex"
     }
     var implementationService: String {
         get { implementationProvider == "custom_api" ? (directImplementation?.service ?? "custom_api") : implementationProvider }
@@ -307,7 +369,9 @@ struct Draft: Equatable {
             if draft.implementationProvider != "custom_api" {
                 add(draft.implementationProvider == "qoder" ? .qodercli : .codex, "实施")
             }
-        } else if host == .agy || draft.claudeImplementationProvider == "codex" {
+        } else if host == .agy {
+            if ["codex", "token_plan"].contains(draft.agyImplementationService) { add(.codex, "实施") }
+        } else if draft.claudeImplementationProvider == "codex" {
             add(.codex, "实施")
         }
 
@@ -334,7 +398,7 @@ struct Draft: Equatable {
     var reviewFamily: String { draft.service }
     var savedReviewFamily: String { saved.service }
     var title: String {
-        if saved.host == "agy" { return "AGY → Codex · \(saved.agyReviewModel.isEmpty ? "CLI 默认" : saved.agyReviewModel)" }
+        if saved.host == "agy" { return "AGY → " + saved.agyReviewDescription(separator: " · ") }
         let service = ReviewService.title(savedReviewFamily)
         let detail: String
         switch saved.channel {
@@ -351,6 +415,11 @@ struct Draft: Equatable {
     }
     var secondaryOptions: [ModelOption] {
         if draft.host == "agy" {
+            if draft.agyImplementationProvider == ReviewService.officialChannel {
+                let service = draft.agyImplementationService
+                let ids = service == "token_plan" ? ModelCatalog.agyTokenPlanImplementation : ModelCatalog.directImplementation[service] ?? []
+                return ids.map { ModelOption(id: $0, label: $0) }
+            }
             return ModelCatalog.options("codex", preserving: [saved.agyImplementationModel, draft.agyImplementationModel],
                                         emptyLabel: saved.agyImplementationModel.isEmpty ? "未配置（实施阶段停止）" : nil, codexModels: draft.codexModels)
         }
@@ -374,7 +443,7 @@ struct Draft: Equatable {
         return ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定", codexModels: draft.codexModels)
     }
     var reviewerOptions: [ModelOption] {
-        if draft.host == "agy" {
+        if draft.host == "agy" && draft.agyReviewProvider == "codex" {
             return ModelCatalog.options("codex", preserving: [saved.agyReviewModel, draft.agyReviewModel],
                                         emptyLabel: "CLI 默认", codexModels: draft.codexModels)
         }
@@ -396,10 +465,12 @@ struct Draft: Equatable {
     }
     func switchReviewFamily(_ service: String) {
         guard !busy, loaded, service != reviewFamily else { return }
-        if draft.host == "codex", let models = ModelCatalog.officialReview[service], let first = models.first {
-            if draft.officialReview?.service != service {
+        if draft.host == "agy" && !draft.agyRelayError.isEmpty { return }
+        if ["codex", "agy"].contains(draft.host), let models = ModelCatalog.officialReview[service], let first = models.first {
+            let previous = draft.host == "agy" ? draft.agyOfficialReview : draft.officialReview
+            if previous?.service != service {
                 let legacy = draft.profiles[service]?.model ?? ""
-                draft.officialReview = RouteSelection(service: service, model: models.contains(legacy) ? legacy : first)
+                draft.activeOfficialReview = RouteSelection(service: service, model: models.contains(legacy) ? legacy : first)
             }
             draft.channel = ReviewService.officialChannel
         } else if ReviewService.api.contains(service) && draft.host != "agy" {
@@ -410,6 +481,7 @@ struct Draft: Equatable {
         } else {
             return
         }
+        if draft.host == "agy" { draft.agyReviewProvider = draft.channel }
         status = "未检测（服务已变化）"; checkSignature = nil
     }
     let modes = [("solo", "独立完成"), ("auto", "自动判断"), ("rules", "按规模评审"), ("force", "始终评审")]
@@ -703,9 +775,17 @@ struct Draft: Equatable {
         d.agyImplementationModel = text("agy_implementation_model")
         d.agyRelayError = text("agy_relay_error")
         if let relay = v["agy_relay"] as? [String: Any] {
-            d.agyReviewEffort = (relay["review"] as? [String: Any])?["effort"] as? String ?? ""
-            d.agyImplementationEffort = (relay["implementation"] as? [String: Any])?["effort"] as? String ?? ""
+            let review = relay["review"] as? [String: Any] ?? [:]
+            let implementation = relay["implementation"] as? [String: Any] ?? [:]
+            let defaults = relay["codex_defaults"] as? [String: [String: String]] ?? [:]
+            d.agyReviewProvider = review["provider"] as? String ?? "codex"
+            d.agyOfficialReview = RouteSelection(review)
+            d.agyImplementationProvider = implementation["provider"] as? String ?? "codex"
+            d.agyOfficialImplementation = RouteSelection(implementation)
+            d.agyReviewEffort = review["effort"] as? String ?? defaults["review"]?["effort"] ?? ""
+            d.agyImplementationEffort = implementation["effort"] as? String ?? defaults["implementation"]?["effort"] ?? ""
         }
+        if d.host == "agy" { d.channel = d.agyReviewProvider }
         d.dualPlanEnabled = v["dual_plan_enabled"] as? Bool ?? false
         d.dualPlanError = text("dual_plan_error")
         if let plan = v["dual_plan"] as? [String: Any] {
@@ -737,7 +817,7 @@ struct Draft: Equatable {
             d.profiles["token_plan"] = token
         }
         draft = d; loaded = true
-        let channels = ["claude": text("claude_channel"), "codex": text("codex_channel"), "agy": "codex"]
+        let channels = ["claude": text("claude_channel"), "codex": text("codex_channel"), "agy": d.agyReviewProvider]
         defaults = ["claude": text("claude_model"), "codex": text("codex_model"), "agy": ""]
         savedHosts = [:]
         for host in ["claude", "codex", "agy"] {
@@ -772,7 +852,8 @@ struct Draft: Equatable {
             setMessage("Claude 的 Codex 实施模型 ID 必须为非空且不含空白的字符串", isError: true)
             return
         }
-        if draft.agyImplementationModel != saved.agyImplementationModel && !Draft.validModelID(draft.agyImplementationModel) {
+        let agyImplementationChanged = draft.agyImplementationRoutePayload != saved.agyImplementationRoutePayload
+        if agyImplementationChanged && draft.agyImplementationProvider == "codex" && !Draft.validModelID(draft.agyImplementationModel) {
             setMessage("AGY 的 Codex 实施模型 ID 必须为非空且不含空白的字符串", isError: true)
             return
         }
@@ -783,11 +864,11 @@ struct Draft: Equatable {
         if draft.agyDualPlanEnabled != saved.agyDualPlanEnabled {
             values["agy_dual_plan_enabled"] = draft.agyDualPlanEnabled
         }
-        if draft.agyReviewModel != saved.agyReviewModel {
-            values["agy_review_model"] = draft.agyReviewModel
+        if draft.agyReviewRoutePayload != saved.agyReviewRoutePayload {
+            values["agy_review_route"] = draft.agyReviewRoutePayload
         }
-        if draft.agyImplementationModel != saved.agyImplementationModel {
-            values["agy_implementation_model"] = draft.agyImplementationModel
+        if agyImplementationChanged {
+            values["agy_implementation_route"] = draft.agyImplementationRoutePayload
         }
         if saved.claudeImplementationProvider == "claude-agent" && draft.claudeImplementationProvider == "claude-agent" {
             values.removeValue(forKey: "claude_implementation_provider")

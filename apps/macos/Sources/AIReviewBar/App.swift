@@ -79,7 +79,7 @@ extension AppModel {
     }
     var menuReview: String {
         if saved.mode == "solo" { return "停用（solo）" }
-        if saved.host == "agy" { return "Codex · " + (saved.agyReviewModel.isEmpty ? "CLI 默认" : saved.agyReviewModel) }
+        if saved.host == "agy" { return saved.agyReviewDescription(separator: " · ") }
         let detail: String
         switch saved.channel {
         case "codex": detail = saved.reviewerModel.isEmpty ? "CLI 默认" : saved.reviewerModel
@@ -91,7 +91,7 @@ extension AppModel {
     var menuImplementation: String {
         if saved.mode == "solo" { return "主模型自行实施（solo）" }
         switch saved.host {
-        case "agy": return "Codex · " + (saved.agyImplementationModel.isEmpty ? "未配置" : saved.agyImplementationModel)
+        case "agy": return saved.agyImplementationDescription(separator: " · ")
         case "codex":
             switch saved.implementationProvider {
             case "token_plan": return "千问 Token Plan · " + saved.tokenPlanImplementationModel

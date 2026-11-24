@@ -199,7 +199,7 @@ class DesktopContract(unittest.TestCase):
         self.assertRegex(review_body, r'if model\.showsReviewAddress \{\s*field\("评审服务地址（Responses）"\)')
         self.assertIn('TextField("评审服务地址（Responses）", text: $model.draft.responsesBaseURL, axis: .vertical)', review_body)
         for body in (review_body, implementation_body):
-            self.assertLess(body.index('Text(ReviewService.title("qoder")).tag("qoder")'), body.index('Text("API 直连").tag("api_direct")'))
+            self.assertLess(body.index('Text(ReviewService.title("qoder")).tag("qoder")'), body.rindex('Text("API 直连").tag("api_direct")'))
         self.assertIn('Text(verbatim: baseURL + "/responses")', review_body)
         executor_field = review_body.split('field("评审执行器")', 1)[1].split('field("评审模型ID")', 1)[0]
         self.assertIn('selection: .constant(model.draft.channel)', executor_field)
@@ -527,10 +527,11 @@ for event in [
         self.assertIn('static let implementationGLM = "glm-5.3"', model)
         view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
         self.assertIn('.disabled(!model.draft.implementationEnabled)', view)
-        self.assertEqual(view.count('Text("API 直连").tag("api_direct")'), 2)
+        self.assertEqual(view.count('Text("API 直连").tag("api_direct")'), 3)
         self.assertIn('vendorPicker(reviewService, custom: true)', view)
         self.assertIn('vendorPicker($model.draft.implementationService, custom: false)', view)
-        self.assertIn('model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : serviceGroup($model.draft.implementationService', view)
+        self.assertIn('return $model.draft.claudeImplementationProvider', view)
+        self.assertIn('return serviceGroup($model.draft.implementationService, preferred: model.draft.directImplementation?.service)', view)
         self.assertIn('$model.draft.implementationKeyInput', view)
         self.assertIn('backend/implementation_models.py', (ROOT/'apps/macos/build-app.sh').read_text())
         import implementation_models
@@ -688,8 +689,16 @@ for event in [
                       for effort, elevated in ((None, 'low'), ('high', None), ('high', 'high'),
                                                ('high', 'xhigh'), ('xhigh', 'high'),
                                                ('high', 'XHIGH'), ('high', []), ('high', 2)))
+        official = dict(provider='official_api', service='token_plan', model='qwen4-max')
+        routes.extend((official, dict(official, service='qwen'), dict(official, service='custom_api'),
+                       dict(official, model='deepseek-v4.1-flash'), dict(official, effort='high'),
+                       dict(official, credential_key='unsafe'), dict(official, service=[])))
         for route in ('review', 'implementation'):
             samples.extend({'agy_relay': {route: value}} for value in routes)
+        samples.extend({'agy_relay': {'review': official, 'codex_defaults': defaults}} for defaults in (
+            {'review': {'effort': 'high', 'high_risk_effort': 'max'}, 'implementation': {'effort': 'low'}},
+            {'review': {'effort': 'xhigh', 'high_risk_effort': 'low'}},
+            {'implementation': {'high_risk_effort': 'xhigh'}}, {'review': []}, {'unknown': {}}))
         mixed = (
             {'agy_relay': {'review': {'model': 'valid'}, 'implementation': {'future': True}}},
             {'agy_relay': {'review': {'future': True}, 'implementation': {'provider': 'codex', 'model': 'valid'}}},
@@ -732,21 +741,37 @@ for event in [
         self.assertNotIn('isSolo', plan)
         self.assertNotIn('Toggle(', plan)
         self.assertRegex(view, r'modelPicker\("主模型 ID"[^\n]+\n\s*\.disabled\(model\.draft\.host == "agy"\)')
-        self.assertIn('if model.draft.host == "agy" { return model.draft.agyReviewModel.isEmpty ? "CLI 默认" : model.draft.agyReviewModel }', view)
+        self.assertIn('if model.draft.host == "agy" { return model.draft.agyReviewSelectedModel }', view)
         review = view.split('ServiceSettingsGroup("评审服务"', 1)[1].split('ServiceSettingsGroup("实施服务"', 1)[0]
         implementation = view.split('ServiceSettingsGroup("实施服务"', 1)[1]
         self.assertIn('if model.draft.host == "claude" || model.draft.host == "agy"', review)
-        self.assertIn('if model.draft.host != "agy"', review)
+        self.assertIn('vendorPicker(reviewService, custom: false)', review)
+        self.assertIn('model.draft.host == "agy" ? model.draft.agyOfficialReview : model.draft.officialReview', view)
         self.assertIn('custom: $customAgyReview', review)
         self.assertIn('.disabled(isSolo || !model.draft.agyRelayError.isEmpty)', review)
-        self.assertIn('model.draft.host == "agy" ? .constant("codex")', implementation)
+        self.assertIn('vendorPicker($model.draft.agyImplementationService, custom: false)', implementation)
+        self.assertIn('$model.draft.agyImplementationSelectedModel', implementation)
+        self.assertIn('model.draft.agyImplementationSelectedModel == "deepseek-v4-pro"', implementation)
+        self.assertIn('正式实施复测中未通过协议校验', implementation)
         self.assertIn('custom: $customAgyImplementation', implementation)
         self.assertIn('agyImplementationEffort', implementation)
-        self.assertRegex(view, r'Button\("测试评审模型".*\.disabled\([^\n]+\|\| model\.draft\.host == "agy"\)')
+        self.assertRegex(view, r'Button\("测试评审模型"[^\n]*\n\s*\.disabled\([^\n]+\(model\.draft\.host == "agy" && !model\.draft\.agyRelayError\.isEmpty\)\)')
+        self.assertIn('saved.agyReviewDescription(separator: " · ")', app)
+        self.assertIn('saved.agyImplementationDescription(separator: " · ")', app)
         self.assertNotIn('model.menuHost(', app)
         self.assertIn('"$source_dir/backend/agy_relay.py"', build)
+        self.assertIn('"$source_dir/backend/relay_routes.py"', build)
         self.assertIn('<key>CFBundleVersion</key><string>17</string>', build)
         self.assertIn('<key>CFBundleShortVersionString</key><string>0.3.10</string>', build)
+
+    def test_agy_official_review_discloses_metadata_and_records_followups(self):
+        for skill in ('agy-relay', 'codex-review'):
+            text = (ROOT / f'adapters/agy/plugin/skills/{skill}/SKILL.md').read_text()
+            for term in ('official_api', 'tracked-paths.txt', 'git-status.txt', '未跟踪文件名', '接收方', '外发授权'):
+                self.assertIn(term, text, (skill, term))
+        todos = (ROOT / 'docs/FEATURE_TODOS.md').read_text().split('### AGY 全渠道评审与实施后续', 1)[1]
+        for term in ('scoped metadata', '无自动重试', '--max-retries', 'MODEL_ROUTE_VALIDATION.zh-CN.md', '19 项'):
+            self.assertIn(term, todos)
 
     def test_agy_dual_plan_matches_cli_validation(self):
         import ai_anti_config as cli

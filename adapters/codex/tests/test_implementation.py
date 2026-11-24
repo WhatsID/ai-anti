@@ -2,6 +2,7 @@
 import argparse
 import copy
 import json
+import os
 from pathlib import Path
 import sys
 import signal
@@ -71,6 +72,67 @@ class ImplementationTests(unittest.TestCase):
         self.assertEqual(route['base_url'], model_services.DEFAULTS['responses_base_url'])
         self.assertEqual(self.config['plugins']['qwen']['model'], 'custom-model')
         self.assertEqual(route['secondary_model'], 'old-native')
+
+    def agy_token_plan_fixture(self):
+        self.config['agy_relay'] = {'implementation': {
+            'provider': 'official_api', 'service': 'token_plan', 'model': 'qwen4-max',
+        }}
+        self.path.write_text(json.dumps(self.config))
+        self.git(self.workspace, 'init', '-q')
+        self.git(self.workspace, '-c', 'user.name=Fixture', '-c', 'user.email=fixture.invalid',
+                 '-c', 'commit.gpgsign=false', 'commit', '--allow-empty', '-qm', 'fixture')
+        linked = self.root / 'linked'
+        self.git(self.workspace, 'worktree', 'add', '-q', '--detach', str(linked))
+        return linked
+
+    def git(self, workspace, *args):
+        return subprocess.run(['/usr/bin/git', '-C', str(workspace), *args], check=True,
+                              capture_output=True, text=True).stdout.strip()
+
+    def agy_prepare(self, workspace, name, *flags, env=None):
+        return subprocess.run([sys.executable, implementation.__file__, '--relay', 'agy',
+                               '--workspace', str(workspace), '--config', str(self.path),
+                               '--prompt', str(self.prompt), '--out', str(self.root / name),
+                               '--prepare-only', *flags], capture_output=True, text=True, env=env, timeout=10)
+
+    def test_agy_token_plan_prepares_all_five_models(self):
+        linked = self.agy_token_plan_fixture()
+        for model in ('glm-5.3', 'qwen4-max', 'qwen3.8-max', 'deepseek-v4-pro', 'deepseek-v4.1-flash'):
+            with self.subTest(model=model):
+                override = ('--model', model) if model != 'qwen4-max' else ()
+                run = self.agy_prepare(linked, model, *override)
+                self.assertEqual(run.returncode, 0, run.stderr)
+                status = json.loads((self.root / model / 'status.json').read_text())
+                self.assertEqual((status['provider'], status['service'], status['relay'], status['requested_model']),
+                                 ('token_plan', 'token_plan', 'agy', model))
+                self.assertIsNone(status['actual_model'])
+        run = self.agy_prepare(linked, 'wrong', '--model', 'kimi-k3')
+        self.assertEqual(run.returncode, 2, run.stderr)
+        self.assertFalse((self.root / 'wrong').exists())
+
+    def test_agy_token_plan_requires_linked_worktree_root_and_valid_head(self):
+        linked = self.agy_token_plan_fixture()
+        admin = Path(self.git(linked, 'rev-parse', '--absolute-git-dir'))
+        env = dict(os.environ, GIT_DIR=str(admin), GIT_COMMON_DIR=str(self.workspace / '.git'),
+                   GIT_WORK_TREE=str(self.workspace))
+        nested = linked / 'subdir'
+        nested.mkdir()
+        outside_git = self.root / 'outside-git'
+        outside_git.mkdir()
+        for workspace in (self.workspace, nested, outside_git):
+            with self.subTest(workspace=workspace):
+                result = self.agy_prepare(workspace, 'rejected', env=env)
+                self.assertEqual(result.returncode, 2, result.stderr)
+                self.assertIn('linked Git worktree', result.stderr)
+                self.assertFalse((self.root / 'rejected').exists())
+        result = self.agy_prepare(linked, 'valid', env=env)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        (admin / 'HEAD').write_text('ref: refs/heads/missing-fixture\n')
+        self.assertEqual(self.git(linked, 'rev-parse', '--show-toplevel'), str(linked))
+        result = self.agy_prepare(linked, 'unborn')
+        self.assertEqual(result.returncode, 2, result.stderr)
+        self.assertIn('committed HEAD', result.stderr)
+        self.assertFalse((self.root / 'unborn').exists())
     def test_legacy_migration_key_is_not_stolen_from_custom_api(self):
         legacy = dict(codex_relay={'implementation_provider': 'token_plan'}, plugins={'qwen': dict(model='old', **model_services.DEFAULTS, credential_paths=[str(self.secret)])})
         self.assertEqual(resolve(legacy, self.workspace)['credential_key'], 'tokenplan.value')

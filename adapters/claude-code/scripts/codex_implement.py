@@ -142,6 +142,9 @@ def run(args):
     selected = agy_implementation(config) if args.relay == 'agy' else claude_implementation(config)
     if selected is None:
         raise ConfigError(args.relay + '_relay.implementation must explicitly select codex')
+    if args.relay == 'agy' and selected['provider'] != 'codex':
+        raise ConfigError('agy_relay.implementation provider ' + selected['provider']
+                          + ' must use adapters/codex/skills/codex-relay/scripts/implementation.py --relay agy')
     model = selected['model']
     effort = selected['effort']
     timeout, idle = review_limits(config, args.timeout, args.idle_timeout)

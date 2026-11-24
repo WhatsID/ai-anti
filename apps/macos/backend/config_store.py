@@ -13,6 +13,7 @@ import agy_relay
 import model_services as services
 import dual_plan
 import implementation_models
+import relay_routes
 import token_plan_accounts as accounts
 
 def token_plan_model(value):
@@ -89,6 +90,21 @@ def codex_destinations(relay, profiles, official):
         url = profiles['profiles']['token_plan']['responses_base_url']
         if url or relay.get('review_channel') == services.OFFICIAL_CHANNEL:
             services.token_plan_destination(url, 'responses', StoreError)
+
+
+def agy_destinations(ai, profiles):
+    try:
+        relay = agy_relay.parse(ai, StoreError)
+    except StoreError:
+        return  # Keep invalid AGY sections available for repair or byte-for-byte restore.
+    if any(relay_routes.uses_token_plan(relay[role]) for role in relay_routes.ROLES):
+        services.token_plan_destination(profiles['profiles']['token_plan']['responses_base_url'],
+                                        'responses', StoreError)
+
+
+def agy_plan_input(ai):
+    relay = agy_relay.section(ai, StoreError) or {}
+    return {'agy_relay': {'dual_plan': copy.deepcopy(relay['dual_plan'])}} if 'dual_plan' in relay else {}
 
 
 def lookup(ai, dotted):
@@ -271,7 +287,7 @@ class Store:
         values['dual_plan_error'] = plan_error
         agy_plan, agy_plan_error = None, ''
         try:
-            agy_plan = dual_plan.parse_agy(ai, StoreError)
+            agy_plan = dual_plan.parse_agy(agy_plan_input(ai), StoreError)
         except StoreError as exc:
             agy_plan_error = str(exc)
         values['agy_dual_plan'] = agy_plan or dict(dual_plan.AGY_DEFAULTS)
@@ -282,16 +298,21 @@ class Store:
             agy_cfg = agy_relay.parse(ai, StoreError)
         except StoreError as exc:
             agy_error = str(exc)
-            agy_cfg = {'review': dict(agy_relay.REVIEW_DEFAULT), 'implementation': None}
+            agy_cfg = {'review': dict(agy_relay.REVIEW_DEFAULT), 'implementation': None, 'codex_defaults': {}}
         values['agy_relay'] = agy_cfg
-        values['agy_review_model'] = agy_cfg['review']['model'] or ''
-        values['agy_implementation_model'] = (agy_cfg['implementation'] or {}).get('model') or ''
+        for role in relay_routes.ROLES:
+            route = agy_cfg[role]
+            if host == 'agy':
+                values['agy_' + role + '_route'] = route
+            values['agy_' + role + '_model'] = (route.get('model') or '') if route and not relay_routes.is_official(route) else ''
+        if host == 'agy':
+            values['channel'] = agy_cfg['review']['provider']
         values['agy_relay_error'] = agy_error
         for key in ('primary_model', 'claude_model', 'codex_model', 'reviewer_model', 'qwen_model', 'secondary_model', 'base_url'):
             if not isinstance(values[key], str):
                 raise StoreError('配置字段类型无效：' + key)
         supported = ('claude', 'codex', 'qwen', 'qoder', 'same-family')
-        if host == 'codex':
+        if host in ('codex', 'agy'):
             supported += (services.OFFICIAL_CHANNEL,)
         if values['channel'] not in supported:
             raise StoreError('评审通道配置无效')
@@ -395,8 +416,8 @@ class Store:
             if 'channel' in fields and fields['channel'] not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder', services.OFFICIAL_CHANNEL)):
                 raise StoreError('支持 Claude→Codex、Claude→API、Codex→API/Qoder')
         if host == 'agy':
-            if values.get('channel') != 'codex':
-                raise StoreError('AGY 主模型仅支持 Codex 评审')
+            if values.get('channel') not in relay_routes.AGY_REVIEW_PROVIDERS:
+                raise StoreError('AGY 主模型仅支持 Codex 或官方服务评审')
             if values.get('primary_model', '') != '':
                 raise StoreError('AGY 主模型 ID 由 AGY 设置管理，本应用不修改')
         else:
@@ -417,6 +438,9 @@ class Store:
                 raise StoreError('AGY 接力配置无效，不能切换为 AGY 主模型') from exc
         if any(k in values for k in agy_relay.CHANGE_KEYS):
             agy_relay.apply(ai, {k: values[k] for k in agy_relay.CHANGE_KEYS if k in values}, StoreError)
+        if host == 'agy' and 'agy_review_route' in values:
+            if values['channel'] != agy_relay.parse_review(ai, StoreError)['provider']:
+                raise StoreError('AGY 评审通道与 agy_review_route.provider 冲突')
         account_config = accounts.normalize(values.get('token_plan_accounts', ai.get('token_plan_accounts')), self.credential_path, StoreError)
         accounts.normalize(ai.get('token_plan_accounts'), self.credential_path, StoreError)
         review, relay, qwen = section(ai, 'review'), section(ai, 'codex_relay'), section(section(ai, 'plugins'), 'qwen')
@@ -462,7 +486,12 @@ class Store:
         if 'dual_plan_enabled' in values:
             dual_plan.apply_enabled(ai, values['dual_plan_enabled'], StoreError)
         if 'agy_dual_plan_enabled' in values:
-            dual_plan.apply_agy_enabled(ai, values['agy_dual_plan_enabled'], StoreError)
+            plan_input = agy_plan_input(ai)
+            dual_plan.apply_agy_enabled(plan_input, values['agy_dual_plan_enabled'], StoreError)
+            if 'agy_relay' in plan_input:
+                if ai.get('agy_relay') is None:
+                    ai['agy_relay'] = {}
+                ai['agy_relay']['dual_plan'] = plan_input['agy_relay']['dual_plan']
         urls = {key: endpoint(values.get(key, qwen.get(key, ''))) for key in ('base_url', 'responses_base_url')}
         channels = review.get('channels', ['codex', 'same-family'])
         if not isinstance(channels, list) or not all(isinstance(c,str) for c in channels):
@@ -513,6 +542,7 @@ class Store:
                 safe_path(path)
         projected = profiles or services.load(ai, qwen, endpoint, model, self.credential_path, StoreError)
         codex_destinations(relay, projected, official)
+        agy_destinations(ai, projected)
         output = {}
         legacy_secret = bool(secret) and not any(k in ai for k in ('model_services','review_services'))
         if legacy_secret:
@@ -690,6 +720,7 @@ class Store:
             restored_profiles = services.load(restored_ai, restored_qwen, endpoint, model, self.credential_path, StoreError)
             if restored_relay.get('review_channel') == services.OFFICIAL_CHANNEL:
                 codex_destinations(restored_relay, restored_profiles, restored_official)
+            agy_destinations(restored_ai, restored_profiles)
             accounts.ready(accounts.normalize(restored_ai.get('token_plan_accounts'), self.credential_path, StoreError), restored_profiles['profiles']['token_plan'], StoreError)
             for key in ('base_url', 'responses_base_url'):
                 endpoint(restored_qwen.get(key, ''))

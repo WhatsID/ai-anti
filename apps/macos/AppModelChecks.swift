@@ -1059,6 +1059,9 @@ import Combine
         assert(model.secondaryOptions.first == ModelOption(id: "", label: "未配置（实施阶段停止）"))
         model.switchReviewFamily("token_plan")
         model.switchReviewFamily("qoder")
+        model.switchReviewFamily("custom_api")
+        assert(model.reviewFamily == "token_plan")
+        model.switchReviewFamily("codex")
         assert(model.reviewFamily == "codex")
         model.draft.mode = "solo"
         assert(!model.draft.implementationModelEnabled)
@@ -1070,7 +1073,7 @@ import Combine
         model.menuHost("agy")
         let menu = postedValues()
         assert(menu["host"] as? String == "agy" && menu["channel"] as? String == "codex")
-        assert(menu["agy_review_model"] == nil && menu["agy_implementation_model"] == nil)
+        assert(menu["agy_review_route"] == nil && menu["agy_implementation_route"] == nil)
         assert((menu["host_updates"] as? [String: [String: String]])?.isEmpty == true)
         var agy = claude
         agy["host"] = "agy"; agy["primary_model"] = ""
@@ -1080,7 +1083,8 @@ import Combine
         model.draft.agyReviewModel = "custom/review"
         model.save()
         let review = postedValues()
-        assert(review["agy_review_model"] as? String == "custom/review" && review["agy_implementation_model"] == nil)
+        assert(review["agy_review_route"] as? [String: String] == ["provider": "codex", "model": "custom/review"])
+        assert(review["agy_implementation_route"] == nil)
         assert(review["agy_relay"] == nil && review["reviewer_model"] as? String == "claude-review-id")
         agy["agy_review_model"] = "custom/review"
         agy["agy_relay"] = ["review": ["effort": "high"], "implementation": NSNull()] as [String: Any]
@@ -1094,7 +1098,8 @@ import Combine
         model.draft.agyImplementationModel = "custom/implementation"
         model.save()
         let implementation = postedValues()
-        assert(implementation["agy_implementation_model"] as? String == "custom/implementation" && implementation["agy_review_model"] == nil)
+        assert(implementation["agy_implementation_route"] as? [String: String] == ["provider": "codex", "model": "custom/implementation"])
+        assert(implementation["agy_review_route"] == nil)
         assert(implementation["host_updates"] as? [String: [String: String]] == ["claude": ["primary_model": "changed-claude"]])
         agy["agy_implementation_model"] = "custom/implementation"
         agy["agy_relay"] = ["review": ["effort": "high"], "implementation": ["effort": "xhigh"]]
@@ -1108,6 +1113,49 @@ import Combine
             assert(front.requests.count == requests && model.message.contains("AGY 的 Codex 实施模型 ID"))
         }
         model.discard()
+
+        let codexReview = ["service": "token_plan", "model": "qwen4-max"]
+        let agyReview = ["provider": "official_api", "service": "kimi", "model": "kimi-k3.1-pro"]
+        let agyImpl = ["provider": "official_api", "service": "token_plan", "model": "deepseek-v4-pro"]
+        var official = claude
+        official["official_review"] = codexReview
+        official["codex_channel"] = "official_api"
+        official["agy_relay"] = ["review": agyReview, "implementation": agyImpl]
+        load(official)
+        model.switchHost("agy")
+        assert(model.draft.channel == "official_api" && model.reviewFamily == "kimi")
+        assert(model.reviewerOptions.map(\.id) == ["kimi-k3.1-pro", "kimi-k3"])
+        model.draft.reviewModel = "kimi-k3"
+        model.switchHost("codex")
+        assert(model.reviewFamily == "token_plan" && model.draft.reviewModel == "qwen4-max")
+        assert(model.draft.officialReview?.dictionary == codexReview)
+        model.switchHost("agy")
+        assert(model.draft.reviewModel == "kimi-k3")
+        assert(model.secondaryOptions.map(\.id) == ["glm-5.3", "qwen4-max", "qwen3.8-max", "deepseek-v4-pro", "deepseek-v4.1-flash"])
+        assert(model.requiredCLIs.first { $0.id == .codex }?.roles == ["评审", "实施"])
+        assert(model.draft.agyImplementationDescription(separator: " · ") == "千问 Token Plan · deepseek-v4-pro")
+        for (service, names) in [("qwen", ["qwen4-max", "qwen3.8-max"]),
+                                 ("kimi", ["kimi-k3.1-pro", "kimi-k3"]),
+                                 ("deepseek", ["deepseek-v4-pro", "deepseek-flash"])] {
+            model.draft.agyImplementationService = service
+            assert(model.secondaryOptions.map(\.id) == names)
+            assert(model.requiredCLIs.first { $0.id == .codex }?.roles == ["评审"])
+        }
+        model.draft.agyImplementationSelectedModel = "deepseek-flash"
+        model.save()
+        let posted = postedValues()
+        let changedReview = ["provider": "official_api", "service": "kimi", "model": "kimi-k3"]
+        let changedImpl = ["provider": "official_api", "service": "deepseek", "model": "deepseek-flash"]
+        assert(posted["agy_review_route"] as? [String: String] == changedReview)
+        assert(posted["agy_implementation_route"] as? [String: String] == changedImpl)
+        assert(posted["official_review"] as? [String: String] == codexReview)
+        official["host"] = "agy"
+        official["channel"] = "official_api"
+        official["primary_model"] = ""
+        official["agy_relay"] = ["review": changedReview, "implementation": changedImpl]
+        front.complete(.success(["values": official]))
+        assert(!model.dirty && model.title == "AGY → Kimi 官方直连 · kimi-k3")
+        assert(model.saved.agyImplementationDescription(separator: " · ") == "DeepSeek 官方直连 · deepseek-flash")
 
         var invalid = claude
         invalid["agy_relay_error"] = "agy_relay.implementation 无效"

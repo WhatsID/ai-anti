@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import shutil
 import signal
+import subprocess
 import sys
 import time
 
@@ -73,6 +74,29 @@ def digest(path):
     return hashlib.sha256(path.read_bytes()).hexdigest() if path.is_file() else None
 
 
+def require_linked_worktree(workspace):
+    env = {key: value for key, value in os.environ.items()
+           if key not in ('GIT_DIR', 'GIT_COMMON_DIR', 'GIT_WORK_TREE')}
+    message = '--workspace must be the root of a linked Git worktree with a committed HEAD'
+
+    def rev_parse(*args):
+        result = subprocess.run(['git', 'rev-parse', *args], cwd=workspace, env=env,
+                                stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=20)
+        if result.returncode:
+            raise ConfigError(message)
+        return result.stdout.rstrip('\n')
+
+    try:
+        root = Path(rev_parse('--show-toplevel')).resolve()
+        git_dir = Path(rev_parse('--path-format=absolute', '--git-dir')).resolve()
+        common_dir = Path(rev_parse('--path-format=absolute', '--git-common-dir')).resolve()
+        rev_parse('--verify', 'HEAD^{commit}')
+    except subprocess.TimeoutExpired as exc:
+        raise ConfigError(message) from exc
+    if workspace != root or git_dir == common_dir:
+        raise ConfigError(message)
+
+
 def run(args):
     workspace = args.workspace.resolve(strict=True)
     prompt = args.prompt.resolve(strict=True)
@@ -84,7 +108,10 @@ def run(args):
     if out == workspace or workspace in out.parents:
         raise ConfigError('output must be outside the implementation workspace')
     config = load(args.config)
-    route = resolve(config, workspace, args.provider, args.model)
+    relay = getattr(args, 'relay', 'codex')
+    route = resolve(config, workspace, args.provider, args.model, relay=relay)
+    if relay == 'agy' and route['provider'] == 'token_plan':
+        require_linked_worktree(workspace)
     limits = review_limits(config, args.timeout, args.idle_timeout)
     files = getattr(args, 'file', None)
     if route['provider'] == 'custom_api':
@@ -189,6 +216,7 @@ def main():
     parser.add_argument('--prompt', required=True, type=Path)
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--config', type=Path)
+    parser.add_argument('--relay', choices=('codex', 'agy'), default='codex')
     parser.add_argument('--provider', choices=('codex', 'token_plan', 'qoder', 'custom_api'))
     parser.add_argument('--model')
     parser.add_argument('--file', action='append', help='authorized workspace-relative text path for custom_api')

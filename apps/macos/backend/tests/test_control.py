@@ -11,6 +11,8 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from config_store import Store, StoreError, atomic, edit_toml, encode
 from control import dispatch
+import agy_relay
+import model_services
 
 class StoreTests(unittest.TestCase):
     def setUp(self):
@@ -26,8 +28,62 @@ class StoreTests(unittest.TestCase):
     def write(self, key, value):
         atomic(self.store.paths[key], value if isinstance(value,bytes) else json.dumps(value).encode())
     def save(self, **changes):
-        snap = self.snapshot(); v = snap['values']; v.update(changes)
+        snap = self.snapshot()
+        v = {k: val for k, val in snap['values'].items() if k not in agy_relay.CHANGE_KEYS}
+        v.update(changes)
         return self.store.save(v, snap['fingerprints'])
+
+    def test_agy_routes_switch_services_and_restore_efforts_after_reload(self):
+        review = dict(provider='codex', model='old-review', effort='high', high_risk_effort='max')
+        impl = dict(provider='codex', model='old-impl', effort='xhigh')
+        self.write('ai', {'desktop': {'primary_host': 'agy'},
+                          'agy_relay': {'review': review, 'implementation': impl}})
+        self.save(agy_review_route=dict(provider='codex', model='new-review'))
+        token = dict(provider='official_api', service='token_plan', model='qwen4-max')
+        qwen = dict(token, service='qwen')
+        for route in (token, qwen, token):
+            values = self.save(channel='official_api', agy_review_route=route,
+                               agy_implementation_route=route)['values']
+            self.assertEqual(values['agy_review_route'], route)
+            self.assertEqual(values['agy_implementation_route'], route)
+            self.assertEqual(values['agy_review_model'], '')
+            self.assertEqual(values['agy_implementation_model'], '')
+            self.assertFalse(values['agy_dual_plan_error'])
+        self.store = Store(self.root)
+        saved = self.save(channel='codex', agy_review_route=dict(provider='codex'),
+                          agy_implementation_route=dict(provider='codex', model='new-impl'))
+        self.assertEqual(saved['values']['agy_review_route'], dict(review, model=None))
+        self.assertEqual(saved['values']['agy_implementation_route'], dict(impl, model='new-impl'))
+        self.assertNotIn('codex_defaults', json.loads(self.store.raw('ai'))['agy_relay'])
+
+    def test_agy_route_payload_conflicts_are_rejected_atomically(self):
+        self.save(host='agy', primary_model='', channel='codex')
+        before = self.snapshot()['fingerprints']
+        route = dict(provider='official_api', service='qwen', model='qwen4-max')
+        for changes, error in (
+                ({'agy_review_route': route}, '通道.*冲突'),
+                ({'agy_review_route': route, 'agy_review_model': ''}, '不能同时提交'),
+                ({'agy_implementation_route': route, 'agy_implementation_model': ''}, '不能同时提交')):
+            with self.subTest(changes=changes), self.assertRaisesRegex(StoreError, error):
+                self.save(**changes)
+            self.assertEqual(self.snapshot()['fingerprints'], before)
+
+    def test_agy_token_plan_endpoint_checked_on_save_and_restore(self):
+        profiles = {name: model_services.blank(name) for name in model_services.IDS}
+        profiles['token_plan']['responses_base_url'] = 'https://wrong.invalid/v1'
+        self.write('ai', {'agy_relay': {'implementation': dict(provider='official_api', service='token_plan',
+                                                               model='deepseek-v4.1-flash')},
+                          'model_services': dict(version=1, active_api='token_plan', profiles=profiles),
+                          'plugins': {'qwen': profiles['token_plan']}})
+        original = self.snapshot()
+        with self.assertRaisesRegex(StoreError, '官方 HTTPS'):
+            self.save(mode='auto')
+        self.assertEqual(self.snapshot()['fingerprints'], original['fingerprints'])
+        profiles['token_plan']['responses_base_url'] = model_services.DEFAULTS['responses_base_url']
+        saved = self.save(model_services=dict(version=1, active_api='token_plan', profiles=profiles))
+        with self.assertRaisesRegex(StoreError, '官方 HTTPS'):
+            self.store.restore(saved['fingerprints'])
+        self.assertEqual(self.snapshot()['fingerprints'], saved['fingerprints'])
 
     def test_inspect_returns_signature_and_fingerprints(self):
         self.write('ai', {})
@@ -97,7 +153,7 @@ class StoreTests(unittest.TestCase):
                 for key in ('claude', 'codex'):
                     self.assertEqual(saved['fingerprints'][key], initial['fingerprints'][key])
         for changes, message in (
-            ({'channel': 'qwen'}, 'AGY 主模型仅支持 Codex 评审'),
+            ({'channel': 'qwen'}, 'AGY 主模型仅支持 Codex 或官方服务评审'),
             ({'primary_model': 'external-agy-id'}, 'AGY 主模型 ID 由 AGY 设置管理'),
             ({'host_updates': {'agy': {'channel': 'codex'}}}, 'host_updates 主模型无效'),
         ):
@@ -199,7 +255,7 @@ class StoreTests(unittest.TestCase):
         self.write('ai', raw)
         snap = self.snapshot()
         values = {k: v for k, v in snap['values'].items()
-                  if k not in ('agy_review_model', 'agy_implementation_model', 'agy_dual_plan_enabled')}
+                  if k not in (*agy_relay.CHANGE_KEYS, 'agy_dual_plan_enabled')}
         saved = self.store.save(dict(values, host='claude'), snap['fingerprints'])
         backup = self.store.desktop / 'last-save.json'
         record = json.loads(backup.read_bytes())

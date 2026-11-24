@@ -5,7 +5,7 @@
 
 ## 首期功能
 
-- 组合 Claude→Codex、Claude→API、Codex→API/Qoder、AGY→Codex。已有 Codex→Claude 配置仍可读取。
+- 组合 Claude→Codex、Claude→API、Codex→API/Qoder、AGY→Codex/官方 API。已有 Codex→Claude 配置仍可读取。
 - 主模型默认值、独立 Codex 评审模型、独立实施服务与模型、评审通道、协作默认模式和 Qwen 模型、地址及凭证状态。
 - 菜单栏下拉显示当前配置（主模型、评审服务、实施服务、协作模式各一行）、设置与退出，读取或保存出错时另显示一行错误；设置草稿保存/放弃、免费检查、手动真实合成检测、刷新与恢复上次保存。
 - 首次启动只读，应用常驻期间每 5 秒在后台检查配置指纹和凭证 stat，签名变化时使旧检测失效。CLI 版本探测由设置窗口触发。配置读取只检查凭证文件状态。
@@ -33,9 +33,19 @@ Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停�
 
 双方案配置无效时，该下拉选项停用并提示对应字段。普通保存保留原配置，恢复按原始字节还原。
 
-选择 AGY 保存 `desktop.primary_host = "agy"`。主模型 ID 由 AGY 设置管理，在应用中只读。AGY 的评审与独立实施固定使用 Codex，模型可从目录选择或输入自定义 ID，界面仅显示常规思考深度。应用按 CLI 同样的规则校验 `agy_relay`。发生错误时，应用显示出错字段并阻止切入 AGY 或写入其接力模型；其他宿主仍可保存与检测，恢复沿用备份原字节。
+选择 AGY 保存 `desktop.primary_host = "agy"`。主模型 ID 由 AGY 设置管理。
+`agy_relay.review` 和 `agy_relay.implementation` 分别保存以下路由。
 
-保存时保留手工设置的 `review.codex_high_risk_effort` 与 `agy_relay.review.high_risk_effort`，界面不显示高风险档。启用 AGY 高风险键前先用新源码重建 App。
+| 配置 | 评审 | 实施 |
+|---|---|---|
+| `provider: "codex"` | `model` 可省略，沿用 CLI 默认。可选 `effort` 与 `high_risk_effort`。 | 必须指定 `model`，可选 `effort`。|
+| `provider: "official_api"` | 固定 `service` 和 `model`，使用共享的 8 个官方评审模型。 | Token Plan 通过 Codex CLI Responses 使用 5 个模型，千问、Kimi、DeepSeek 通过固定 Chat Completions 端点使用 6 个模型。 |
+
+AGY 路由使用 CLI 和桌面共用的校验。配置损坏时显示出错字段，阻止切入 AGY 或写入其接力路由。
+其他宿主仍可保存和检测，也可恢复备份原字节。有效 Token Plan 路由保存和恢复时均校验官方
+HTTPS Responses 地址。切离 Codex 时将手工思考深度暂存到 `agy_relay.codex_defaults`，切回时
+恢复并移除已恢复的字段。界面只读显示原生常规深度，保留手工设置的高风险档。
+保存 Claude 的评审模型时也会保留手工设置的 `review.codex_high_risk_effort`。
 
 仅 `agy_relay.dual_plan` 损坏时，应用停用 AGY 双方案下拉并显示出错字段，仍可切入 AGY、保存其他设置或执行 Claude/Codex 宿主的检测。回滚到尚未支持 AGY 双方案的旧版源码前，须从 `~/.config/ai-anti/config.json` 手工删除 `agy_relay.dual_plan` 并保留同级的 `review` 和 `implementation`。切换到 `disable` 后该键仍存在，`last-save.json` 仅保存最近一次修改前的配置。
 
@@ -66,13 +76,20 @@ CLI 缺失时，「安装…」先展示官方命令和来源，确认后才在�
 
 本地检查格式、组合、CLI存在/有界version、已安装入口、凭证是否可解析。它不验证登录、额度、
 当前模型可调用或所有CLI版本兼容。真实检测需用户手动确认额度消耗，不读取业务仓库。
-AGY 的「检查配置」校验插件链接与六个必需入口文件，双方案子节损坏时在启动 CLI 前报错。未指定 `--source-root` 时优先使用已安装 AGY 插件对应的源码检出。`agy --version` 与 `compat.json` 的 `tested.agy` 比对。非 `solo` 要求配置实施模型，并校验 Codex CLI 符合关联工作树实施入口的版本要求。启用双方案时额外将 `claude --version` 与 `tested.claude` 比对。AGY 和 Claude 的清单外版本只提示。`solo` 仅探测 AGY CLI 并检查插件。AGY 下桌面「测试评审模型」停用，可从 AGY 发起评审。
+AGY 的「检查配置」校验插件链接与七个必需入口文件，包括共享的 `relay_routes.py`。
+未指定 `--source-root` 时优先使用 AGY 插件对应的检出。非 `solo` 时按所选路由校验实施配置、
+Codex CLI 版本、Token Plan 的官方地址与凭证、直连厂商凭证。启用双方案时额外检查 Claude CLI。
+AGY 和 Claude 的清单外版本只提示。`solo` 仅探测 AGY CLI 并检查插件。
+
+「测试评审模型」在隔离合成仓库运行。原生 Codex 支持「CLI 默认」或显式模型，并校验随机读取标记。
+官方路由走 `review.py diff --relay agy --channel official_api`，验证服务、请求模型与
+`requested_only` 证据。合成探针清除继承的 `GIT_*` 环境变量。
 
 Qwen 复用正式 `review.py diff --channel qwen`，临时仓库有 HEAD 和小改动，输出在仓库外，
 检查 completed、通道/执行器/协议/请求模型；Claude 分支精确匹配实际模型，Codex 分支保留 requested_only，并保留原完整读取和权限门禁。耗时可能最多30分钟，无快速探针或自动降级。
 Codex 使用隔离临时合成仓库、提示词文件、DEVNULL、文件日志和输出上限，要求最终turn完成、
 无error且返回文件里的随机值。实际模型只有结构化字段才显示，否则未知；请求ID或exit=0不是实际模型证明。
-评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen4-Max（qwen4-max）、Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3.1-Pro（kmodel_latest；CLI 明确准入 1.1.74 / 1.1.77，1.1.77 已完成正式 bug-review 实测；桌面路由仅离线验证）；Codex 评审目录含 gpt-6.2-sol、gpt-6.2-astra 等六个模型，支持 CLI 默认及自定义模型 ID；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Claude 可选择 Codex 评审，AGY 固定使用 Codex 评审；既有其他路由保留显示。
+评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen4-Max（qwen4-max）、Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3.1-Pro（kmodel_latest；CLI 明确准入 1.1.74 / 1.1.77，1.1.77 已完成正式 bug-review 实测；桌面路由仅离线验证）；Codex 评审目录含 gpt-6.2-sol、gpt-6.2-astra 等六个模型，支持 CLI 默认及自定义模型 ID；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Claude 可选择 Codex 评审，AGY 可选 Codex 或共享官方评审目录；既有其他路由保留显示。
 
 API 服务显示服务地址和“认证 / API 密钥”，CLI 服务使用现有 CLI 登录，仅 Qoder 显示“登录状态未检测”。AIAnti 设置窗口对两种主模型的 Qwen 评审统一使用 Codex CLI · Responses。Qwen 为首选或回退时，窗口显示「评审服务地址（Responses）」，Claude 主模型选 Codex 评审服务时隐藏该字段。任一主模型的通道含 Qwen 时，保存需要填写 Responses 地址，保存保留通道顺序。两侧生效的执行器均为 `codex` 时，执行器配置不会阻断检测。任一侧生效值为 `claude` 时，保存后才能检测。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `claude_relay.qwen_executor = "claude"` 并移除旧键，Codex 主模型手动设置 `codex_relay.qwen_executor = "claude"`。新版 AIAnti 保存会将两项都写回 `codex` 并移除旧键。Responses 路径不支持评审已提交的 commit。 所有真实合成检测统一读取用户配置 `review.timeout` / `review.idle_timeout`（默认1800/900秒，上限3600/900秒，先到者终止）。Qwen/Qoder正式入口外围为总时间+60秒，界面3700秒覆盖最大3600+60并支持取消；极慢本地准备仍可能触发外围预算。Qoder保留2MiB输出上限，保留正式 runner 全部门禁和实际 Kimi-K3.1-Pro 证据校验。
 

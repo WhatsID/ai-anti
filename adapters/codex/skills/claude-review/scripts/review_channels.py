@@ -5,7 +5,7 @@ from pathlib import Path
 import re
 from urllib.parse import urlsplit
 
-from ai_anti_config import ConfigError, lookup
+from ai_anti_config import ConfigError, agy_review, lookup
 
 CONFLICTS = ('ANTHROPIC_API_KEY', 'ANTHROPIC_MODEL', 'ANTHROPIC_SMALL_FAST_MODEL',
              'CLAUDE_CODE_USE_BEDROCK', 'CLAUDE_CODE_USE_VERTEX', 'CLAUDE_CODE_USE_FOUNDRY')
@@ -30,24 +30,43 @@ def resolve_official(config, repo, model, executor, responses_url):
     services = service_contract()
     selected = services.required_selection(lookup(config, 'codex_relay.official_review'),
                                            services.REVIEW_MODELS, 'codex_relay.official_review', ConfigError)
-    service, requested = selected['service'], selected['model']
+    check_official_overrides(model, executor, responses_url)
+    return resolve_official_selection(config, selected, repo)
+
+
+def check_official_overrides(model, executor, responses_url):
     if model is not None or executor not in (None, 'codex') or responses_url is not None:
         raise ConfigError('official_api uses the configured model, Codex executor and fixed Responses endpoint')
+
+
+def resolve_official_selection(config, selection, repo, *, relay=None):
+    from token_plan_transport import service_contract
+    service, requested = selection['service'], selection['model']
     if service == 'token_plan':
         route = resolve_token_plan(config, requested, repo)
     else:
+        services = service_contract()
         route = dict(channel='qwen', requested_model=requested, configured_model=requested,
                      cli_model=requested, pattern=re.compile(re.escape(requested)), executor='codex',
                      wire_api='responses', base_url=services.VENDOR_ENDPOINTS[service],
                      credential_paths=[Path(services.OWN_CREDENTIAL_PATH).expanduser()],
                      credential_key=service + '.value')
     route['service'] = service
+    if relay is not None:
+        route['relay'] = relay
     return route
 
 
-def resolve(config, channel, model, repo, families, executor=None, responses_url=None, *, allow_official=True):
+def resolve(config, channel, model, repo, families, executor=None, responses_url=None, *,
+            allow_official=True, relay='codex'):
     from token_plan_transport import contract
     contract(config, repo)
+    if relay == 'agy':
+        selected = agy_review(config)
+        if selected['provider'] != 'official_api' or channel not in (None, 'official_api'):
+            raise ConfigError('AGY review.py requires agy_relay.review with provider official_api')
+        check_official_overrides(model, executor, responses_url)
+        return resolve_official_selection(config, selected, repo, relay=relay)
     stored = lookup(config, 'codex_relay.review_channel') if channel is None else channel
     if stored == 'official_api':
         if allow_official:
@@ -119,8 +138,9 @@ def evidence(channel):
     value.update(executor=channel.get('executor', 'claude'), wire_api=channel.get('wire_api', 'anthropic'))
     if value['executor'] == 'codex':
         value.update(actual_model=None, model_evidence='requested_only')
-    if 'service' in channel:
-        value['service'] = channel['service']
+    for key in ('service', 'relay'):
+        if key in channel:
+            value[key] = channel[key]
     if channel.get('_transport') and 'token_plan_accounts' in channel:
         value['token_plan_accounts'] = channel['_transport'].evidence()
     return value

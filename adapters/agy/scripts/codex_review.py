@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run independent, read-only Codex plan review for an AGY host."""
+"""Run independent, read-only plan review for an AGY host."""
 import argparse
 import hashlib
 import json
@@ -71,7 +71,7 @@ def review_rules():
     return '\n\n'.join(sections[rule] for rule in RULES)
 
 
-def preflight(args, env):
+def preflight(args, env, config, review):
     repo = args.repo.resolve(strict=True)
     if not repo.is_dir() or Path(git(repo, env, '--show-toplevel')).resolve() != repo:
         raise ValueError('--repo must be a Git top-level directory')
@@ -107,8 +107,6 @@ def preflight(args, env):
         hashes[str(path)] = hashlib.sha256(content).hexdigest()
 
     rules = review_rules()
-    config = load(args.config)
-    review = agy_review(config)
     review = dict(review, effort=agy_review_effort(review, args.risk_tier))
     timeout, idle = review_limits(config, args.timeout, args.idle_timeout)
     limits = dict(timeout=timeout, idle_timeout=idle, max_output_bytes=OUTPUT_CAP,
@@ -253,9 +251,48 @@ def save(out, evidence):
             handle.write(payload)
 
 
+def official_review(args, interrupted):
+    from review import main as review_main
+
+    if not args.files:
+        raise ValueError('official_api requires non-empty --files')
+    out = args.out.expanduser()
+    if out.is_symlink() or out.exists():
+        raise ValueError('--out must be a new non-symlink path')
+    argv = ['plan', '--relay', 'agy', '--channel', 'official_api',
+            '--repo=' + str(args.repo), '--plan=' + str(args.plan), '--scale=' + args.scale,
+            '--out=' + str(out), '--files']
+    argv.extend('./' + path if path.startswith('-') else path for path in args.files)
+    for field in ('config', 'timeout', 'idle_timeout'):
+        value = getattr(args, field)
+        if value is not None:
+            argv.append('--' + field.replace('_', '-') + '=' + str(value))
+    if args.context:
+        argv.append('--context')
+        argv.extend('./' + path if path.startswith('-') else path for path in args.context)
+    if args.prepare_only:
+        argv.append('--prepare-only')
+    code = review_main(argv)
+    if interrupted[0] or code in (0, 130, 143):
+        return interrupted[0] or code
+    try:
+        status = json.loads((out / 'status.json').read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return 2
+    if isinstance(status, dict) and status.get('status') == 'failed' and status.get('failure_kind') != 'preparation_failed':
+        return 1
+    return 2
+
+
 def run(args, interrupted):
+    config = load(args.config)
+    review = agy_review(config)
+    if review['provider'] == 'official_api':
+        return official_review(args, interrupted)
+    if args.context:
+        raise ValueError('--context requires the official_api review route')
     env = {name: value for name, value in os.environ.items() if name not in GIT_OVERRIDES}
-    repo, head, out, materials, hashes, review, limits, prompt = preflight(args, env)
+    repo, head, out, materials, hashes, review, limits, prompt = preflight(args, env, config, review)
     started = time.monotonic()
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
     prompt_path = out / 'prompt.txt'
@@ -327,6 +364,7 @@ def main():
     plan.add_argument('--scale', required=True)
     plan.add_argument('--risk-tier', choices=RISK_TIERS)
     plan.add_argument('--files', nargs='*', default=[])
+    plan.add_argument('--context', nargs='*', default=[])
     plan.add_argument('--timeout', type=int)
     plan.add_argument('--idle-timeout', type=int)
     plan.add_argument('--prepare-only', action='store_true')

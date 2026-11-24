@@ -11,16 +11,16 @@ sys.path.insert(0, str(REVIEW))
 sys.path.insert(0, str(BACKEND))
 import model_services
 import implementation_models
-from ai_anti_config import ConfigError, lookup
+from ai_anti_config import ConfigError, agy_implementation, lookup
 from review_channels import resolve_token_plan
 
 MODEL = 'glm-5.3'
 PROVIDERS = model_services.IMPLEMENTATION_PROVIDERS
 
 
-def direct_route(chosen):
+def direct_route(chosen, expected_service=None):
     for service, models in model_services.DIRECT_MODELS.items():
-        if chosen in models:
+        if (expected_service is None or service == expected_service) and chosen in models:
             endpoint = model_services.VENDOR_ENDPOINTS[service] + '/chat/completions'
             return dict(provider='custom_api', requested_model=chosen, service=service,
                         endpoint=endpoint, executor='custom_api', wire_api='chat_completions')
@@ -42,8 +42,40 @@ def model(value, optional=False):
     return value
 
 
-def resolve(config, workspace, explicit_provider=None, explicit_model=None):
+def resolve_agy(config, workspace, explicit_provider, explicit_model):
+    from token_plan_transport import contract
+    contract(config, workspace)
+    if explicit_provider == 'codex':
+        raise ConfigError('AGY Codex implementation requires codex_implement.py --relay agy')
+    if explicit_provider not in (None, 'token_plan', 'custom_api'):
+        raise ConfigError('AGY implementation.py supports only token_plan or custom_api')
+    if explicit_provider == 'custom_api':
+        return dict(direct_route(explicit_model), relay='agy')
+    service = 'token_plan'
+    chosen = explicit_model
+    if explicit_provider is None:
+        selected = agy_implementation(config)
+        if selected is None:
+            raise ConfigError('agy_relay.implementation must be configured')
+        if selected['provider'] == 'codex':
+            raise ConfigError('AGY Codex implementation requires codex_implement.py --relay agy')
+        service = selected['service']
+        if chosen is None:
+            chosen = selected['model']
+    if service != 'token_plan':
+        return dict(direct_route(chosen, expected_service=service), relay='agy')
+    try:
+        chosen = implementation_models.parse(chosen)
+    except ValueError as exc:
+        raise ConfigError(str(exc)) from exc
+    route = resolve_token_plan(config, chosen, Path(workspace))
+    return dict(route, provider='token_plan', service='token_plan', relay='agy')
+
+
+def resolve(config, workspace, explicit_provider=None, explicit_model=None, *, relay='codex'):
     """Overrides are one coherent provider/model pair; never consult active_api for GLM."""
+    if relay == 'agy':
+        return resolve_agy(config, workspace, explicit_provider, explicit_model)
     if explicit_provider == 'custom_api':
         return direct_route(explicit_model)
     from token_plan_transport import contract

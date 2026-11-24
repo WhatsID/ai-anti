@@ -1,7 +1,9 @@
+import hashlib
 import json
 import os
 from pathlib import Path
 import signal
+import subprocess
 import sys
 import tempfile
 import time
@@ -10,6 +12,7 @@ from unittest.mock import call, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 import checks
 from config_store import Store, StoreError, atomic
+import model_services
 ROOT = Path(__file__).resolve().parents[4]
 AGY_PLUGIN = Path('adapters/agy/plugin')
 
@@ -167,6 +170,7 @@ echo 'codex-cli 0.169.1'
             'plugin.json', 'rules/AGENTS.md', 'skills/agy-relay/SKILL.md', 'skills/codex-review/SKILL.md')]
         required.append(checkout / 'adapters/agy/scripts/codex_review.py')
         required.append(checkout / 'adapters/agy/scripts/claude_plan.py')
+        required.append(checkout / 'apps/macos/backend/relay_routes.py')
         for path in required:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text('fixture')
@@ -178,7 +182,7 @@ echo 'codex-cli 0.169.1'
                 with self.assertRaisesRegex(checks.CheckError, '入口不完整'):
                     checks.agy_entry(store, checkout)
                 path.write_text('fixture')
-        script = required[-1]
+        script = required[-2]
         script.write_text(' \n')
         with self.assertRaisesRegex(checks.CheckError, '入口不完整'):
             checks.agy_entry(store, checkout)
@@ -333,15 +337,144 @@ echo 'codex-cli 0.169.1'
             discover.assert_not_called()
             run.assert_not_called()
 
-    def test_agy_real_rejects_before_source_or_cli(self):
+    def test_agy_real_rejects_invalid_routes_or_solo_before_source_or_cli(self):
         store = Store(self.root / 'home')
-        atomic(store.paths['ai'], b'{"desktop":{"primary_host":"agy"}}')
-        with patch('checks.source_root') as source, patch('checks.discover') as discover, patch('checks.run') as run:
-            with self.assertRaisesRegex(checks.CheckError, 'AGY 主模型暂不支持桌面端合成评审检测'):
-                checks.real(store)
-            source.assert_not_called()
-            discover.assert_not_called()
-            run.assert_not_called()
+        for extra, error in (({'relay': {'default_mode': 'solo'}}, 'solo'),
+                             ({'agy_relay': {'review': {'future': True}}}, r'agy_relay\.review'),
+                             ({'agy_relay': {'dual_plan': {'enabled': 'yes'}}}, r'agy_relay\.dual_plan')):
+            atomic(store.paths['ai'], json.dumps(dict(desktop={'primary_host': 'agy'}, **extra)).encode())
+            with patch('checks.source_root') as source, patch('checks.discover') as discover, patch('checks.run') as run:
+                with self.assertRaisesRegex(checks.CheckError, error):
+                    checks.real(store)
+                source.assert_not_called()
+                discover.assert_not_called()
+                run.assert_not_called()
+
+    def run_agy_native_fixture(self, store, chosen):
+        config = dict(desktop={'primary_host': 'agy'}, agy_relay={'review': {'model': chosen}})
+        atomic(store.paths['ai'], json.dumps(config).encode())
+        real_run = checks.run
+
+        def fixture_run(argv, cwd, log, **kwargs):
+            if argv[0] == '/usr/bin/git':
+                return real_run(argv, cwd, log, **kwargs)
+            self.assertFalse(any(k.startswith('GIT_') for k in kwargs['env']))
+            if '--help' in argv:
+                log.write_text('--json --sandbox --ephemeral --ignore-user-config --ignore-rules')
+                return 0
+            self.assertIn('read-only', argv)
+            if chosen is None:
+                self.assertNotIn('--model', argv)
+            else:
+                self.assertEqual(argv[argv.index('--model') + 1], chosen)
+            token = (cwd / 'sample.txt').read_text().split('READ_TOKEN=')[1].strip()
+            log.write_text('\n'.join(json.dumps(x) for x in (
+                dict(type='item.completed', item=dict(type='agent_message', text=token)),
+                dict(type='turn.completed'))))
+            return 0
+
+        with patch('checks.discover', side_effect={'git': '/usr/bin/git', 'codex': 'fixture-codex'}.__getitem__), \
+             patch('checks.run', side_effect=fixture_run):
+            return checks.real(store, ROOT)
+
+    def test_agy_real_native_default_and_explicit_models(self):
+        store = Store(self.root / 'home')
+        self.agy_link(store, ROOT)
+        for chosen in (None, 'fixture-codex'):
+            with self.subTest(chosen=chosen):
+                result = self.run_agy_native_fixture(store, chosen)
+                self.assertEqual(result['state'], 'passed')
+                self.assertIn(chosen or 'CLI 默认', result['message'])
+
+    def test_real_git_fixture_preserves_external_index(self):
+        store = Store(self.root / 'home')
+        self.agy_link(store, ROOT)
+        external = self.root / 'external'
+        external.mkdir()
+        git_env = {k: v for k, v in os.environ.items() if not k.startswith('GIT_')}
+        subprocess.run(['/usr/bin/git', 'init', '-q'], cwd=external, env=git_env, check=True)
+        external_index = external / 'outside.index'
+        git_env['GIT_INDEX_FILE'] = str(external_index)
+        (external / 'original.txt').write_text('external index fixture')
+        subprocess.run(['/usr/bin/git', 'add', 'original.txt'], cwd=external, env=git_env, check=True)
+        original = hashlib.sha256(external_index.read_bytes()).hexdigest()
+        try:
+            with patch.dict(os.environ, GIT_INDEX_FILE=str(external_index), GIT_OPTIONAL_LOCKS='0'):
+                self.assertEqual(self.run_agy_native_fixture(store, None)['state'], 'passed')
+        finally:
+            self.assertEqual(hashlib.sha256(external_index.read_bytes()).hexdigest(), original)
+
+    def test_agy_real_official_dispatch_and_evidence(self):
+        store = Store(self.root / 'home')
+        self.agy_link(store, ROOT)
+        config = dict(desktop={'primary_host': 'agy'}, agy_relay={'review': {
+            'provider': 'official_api', 'service': 'kimi', 'model': 'kimi-k3',
+        }}, codex_relay={'official_review': {'service': 'qwen', 'model': 'qwen4-max'}})
+        atomic(store.paths['ai'], json.dumps(config).encode())
+        atomic(store.paths['secrets'], b'{"kimi":{"value":"fake-kimi"}}')
+        evidence = dict(status='completed', completed=True, mode='diff', relay='agy',
+                        channel='qwen', executor='codex', wire_api='responses', service='kimi',
+                        requested_model='kimi-k3', actual_model=None, model_evidence='requested_only')
+
+        def fixture_run(argv, cwd, log, **kwargs):
+            if argv[0] == 'fixture-git':
+                return 0
+            self.assertEqual(argv[1:3], [str(ROOT / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff'])
+            for key, value in (('--relay', 'agy'), ('--channel', 'official_api'), ('--config', str(store.paths['ai']))):
+                self.assertEqual(argv[argv.index(key) + 1], value)
+            out = Path(argv[argv.index('--out') + 1])
+            out.mkdir()
+            for name in ('status', 'manifest'):
+                (out / (name + '.json')).write_text(json.dumps(evidence))
+            return 0
+
+        with patch('checks.discover', return_value='fixture-git'), patch('checks.run', side_effect=fixture_run):
+            result = checks.real(store, ROOT)
+            self.assertEqual((result['requested_model'], result['actual_model'], result['model_evidence']),
+                             ('kimi-k3', None, 'requested_only'))
+            for key, bad in (('relay', 'codex'), ('service', 'qwen'), ('requested_model', 'kimi-k3.1-pro'),
+                             ('actual_model', 'kimi-k3'), ('model_evidence', 'actual')):
+                old = evidence[key]
+                evidence[key] = bad
+                with self.subTest(key=key), self.assertRaisesRegex(checks.CheckError, '证据'):
+                    checks.real(store, ROOT)
+                evidence[key] = old
+
+    def test_agy_local_checks_credentials_and_versions_for_official_routes(self):
+        store = Store(self.root / 'home')
+        self.agy_link(store, ROOT)
+        profiles = {id: model_services.blank(id) for id in model_services.IDS}
+        profiles['token_plan']['credential_paths'] = [model_services.OWN_CREDENTIAL_PATH]
+        review = dict(provider='official_api', service='kimi', model='kimi-k3')
+        impl = dict(provider='official_api', service='token_plan', model='deepseek-v4.1-flash')
+        config = dict(desktop={'primary_host': 'agy'}, agy_relay=dict(review=review, implementation=impl),
+                      model_services=dict(version=1, active_api='token_plan', profiles=profiles),
+                      plugins={'qwen': profiles['token_plan']})
+        atomic(store.paths['ai'], json.dumps(config).encode())
+        version = 'codex-cli 0.163.0'
+
+        def version_only(argv, cwd, log):
+            log.write_text('1.5.13' if argv[0] == 'agy' else version)
+            return 0
+
+        with patch('checks.discover', side_effect=lambda name: name), patch('checks.run', side_effect=version_only):
+            with self.assertRaisesRegex(checks.CheckError, '评审服务凭证'):
+                checks.local(store, ROOT)
+            secrets = {'kimi': {'value': 'fixture-kimi'}}
+            atomic(store.paths['secrets'], json.dumps(secrets).encode())
+            with self.assertRaisesRegex(checks.CheckError, '实施 Token Plan 凭证'):
+                checks.local(store, ROOT)
+            secrets['model_services'] = {'token_plan': {'value': 'fixture-token'}}
+            atomic(store.paths['secrets'], json.dumps(secrets).encode())
+            reply = checks.local(store, ROOT)
+            self.assertIn('Token Plan · deepseek-v4.1-flash · Responses', reply['message'])
+            self.assertIn('kimi · kimi-k3', reply['message'])
+            version = 'codex-cli 9.0.0'
+            with self.assertRaisesRegex(checks.CheckError, 'Codex Responses 要求'):
+                checks.local(store, ROOT)
+            config['agy_relay'] = dict(review={'provider': 'codex'}, implementation=review)
+            atomic(store.paths['ai'], json.dumps(config).encode())
+            self.assertIn('kimi · kimi-k3 · Chat Completions', checks.local(store, ROOT)['message'])
 
     def test_implementation_checks_independent_token_profile(self):
         store = self.api_store()

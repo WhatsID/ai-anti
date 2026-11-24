@@ -33,7 +33,7 @@ struct CheckStatusText: View {
 enum SettingsSummary {
     static func review(_ draft: Draft) -> String {
         if draft.host == "agy" {
-            return "评审服务：Codex / " + (draft.agyReviewModel.isEmpty ? "CLI 默认" : draft.agyReviewModel) + (draft.mode == "solo" ? "（solo 已停用）" : "")
+            return "评审服务：" + draft.agyReviewDescription(separator: " / ") + (draft.mode == "solo" ? "（solo 已停用）" : "")
         }
         let model: String
         switch draft.channel {
@@ -47,7 +47,7 @@ enum SettingsSummary {
     static func implementation(_ draft: Draft) -> String {
         let detail: String
         if draft.host == "agy" {
-            detail = "Codex / " + (draft.agyImplementationModel.isEmpty ? "未配置" : draft.agyImplementationModel)
+            detail = draft.agyImplementationDescription(separator: " / ")
         } else if draft.host == "claude" && draft.claudeImplementationProvider == "codex" {
             detail = "Codex / " + (draft.claudeImplementationModel.isEmpty ? "未指定" : draft.claudeImplementationModel)
         }
@@ -134,8 +134,8 @@ struct SettingsView: View {
         (customReview && !Draft.validModelID(model.draft.reviewerModel)) ||
         (customClaudeImplementation && model.draft.claudeImplementationProvider == "codex" && !Draft.validModelID(model.draft.claudeImplementationModel)) ||
         (customCodexImplementation && model.draft.implementationProvider == "codex" && !Draft.validModelID(model.draft.secondaryModel)) ||
-        (customAgyReview && !Draft.validModelID(model.draft.agyReviewModel)) ||
-        (customAgyImplementation && !Draft.validModelID(model.draft.agyImplementationModel))
+        (customAgyReview && model.draft.agyReviewProvider == "codex" && !Draft.validModelID(model.draft.agyReviewModel)) ||
+        (customAgyImplementation && model.draft.agyImplementationProvider == "codex" && !Draft.validModelID(model.draft.agyImplementationModel))
     }
     private func closeCustomEditors() {
         customReview = false
@@ -150,7 +150,7 @@ struct SettingsView: View {
         return "当前版本：v\(version)"
     }
     private var reviewModelID: String {
-        if model.draft.host == "agy" { return model.draft.agyReviewModel.isEmpty ? "CLI 默认" : model.draft.agyReviewModel }
+        if model.draft.host == "agy" { return model.draft.agyReviewSelectedModel }
         return model.draft.channel == "qoder" ? "kmodel_latest" : model.draft.channel == "codex" ? (model.draft.reviewerModel.isEmpty ? "CLI 默认" : model.draft.reviewerModel) : model.draft.reviewModel
     }
     private var reviewService: Binding<String> {
@@ -158,9 +158,26 @@ struct SettingsView: View {
     }
 
     private var preferredReviewVendor: String? {
-        if let id = model.draft.officialReview?.service, ReviewService.vendors.contains(id) { return id }
+        let official = model.draft.host == "agy" ? model.draft.agyOfficialReview : model.draft.officialReview
+        if let id = official?.service, ReviewService.vendors.contains(id) { return id }
+        guard model.saved.host == model.draft.host else { return nil }
         let saved = model.savedReviewFamily
         return ReviewService.vendors.contains(saved) || saved == "custom_api" ? saved : nil
+    }
+
+    private var implementationService: Binding<String> {
+        switch model.draft.host {
+        case "agy":
+            return serviceGroup($model.draft.agyImplementationService, preferred: model.draft.agyOfficialImplementation?.service)
+        case "claude":
+            return $model.draft.claudeImplementationProvider
+        default:
+            return serviceGroup($model.draft.implementationService, preferred: model.draft.directImplementation?.service)
+        }
+    }
+
+    private var selectedImplementationService: String {
+        model.draft.host == "agy" ? model.draft.agyImplementationService : model.draft.implementationService
     }
 
     private func serviceGroup(_ service: Binding<String>, preferred: String?) -> Binding<String> {
@@ -172,7 +189,9 @@ struct SettingsView: View {
             if group != direct {
                 service.wrappedValue = group
             } else if !ReviewService.vendors.contains(service.wrappedValue) && service.wrappedValue != "custom_api" {
-                service.wrappedValue = preferred ?? "qwen"
+                service.wrappedValue = preferred.flatMap {
+                    ReviewService.vendors.contains($0) || $0 == "custom_api" ? $0 : nil
+                } ?? "qwen"
             }
         })
     }
@@ -310,25 +329,26 @@ struct SettingsView: View {
                             .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
                     }
                     ServiceSettingsGroup("评审服务", summary: SettingsSummary.review(model.draft), isExpanded: $reviewExpanded) {
-                        Picker("评审服务", selection: model.draft.host == "codex" ? serviceGroup(reviewService, preferred: preferredReviewVendor) : reviewService) {
+                        Picker("评审服务", selection: model.draft.host == "claude" ? reviewService : serviceGroup(reviewService, preferred: preferredReviewVendor)) {
                             if model.draft.host == "claude" || model.draft.host == "agy" { Text("Codex").tag("codex") }
-                            if model.draft.host != "agy" {
-                                Text("千问 Token Plan").tag("token_plan")
-                                if model.draft.host == "claude" { Text("自定义 API").tag("custom_api") }
-                            }
+                            Text("千问 Token Plan").tag("token_plan")
+                            if model.draft.host == "claude" { Text("自定义 API").tag("custom_api") }
                             if model.draft.host == "codex" {
                                 Text(ReviewService.title("qoder")).tag("qoder")
-                                Text("API 直连").tag("api_direct")
                             }
+                            if model.draft.host != "claude" { Text("API 直连").tag("api_direct") }
                             if model.draft.channel == "qoder" && model.draft.host == "claude" { Text("已有 Qoder 配置（Claude 主模型暂不支持）").tag("qoder") }
                             if model.draft.channel == "codex" && model.draft.host == "codex" { Text("已有 Codex 配置（此主模型暂不支持）").tag("codex") }
                             if !["codex", "qwen", "qoder", ReviewService.officialChannel].contains(model.draft.channel) { Text("已有配置：\(model.draft.channel)").tag(model.draft.channel) }
-                        }.disabled(isSolo)
+                        }.disabled(isSolo || (model.draft.host == "agy" && !model.draft.agyRelayError.isEmpty))
                     } content: {
                         if model.draft.host == "codex" && (ReviewService.vendors.contains(model.reviewFamily) || model.reviewFamily == "custom_api") {
                             vendorPicker(reviewService, custom: true).disabled(isSolo)
                         }
-                        if model.draft.host == "agy" {
+                        if model.draft.host == "agy" && ReviewService.vendors.contains(model.reviewFamily) {
+                            vendorPicker(reviewService, custom: false).disabled(isSolo)
+                        }
+                        if model.draft.host == "agy" && model.draft.agyReviewProvider == "codex" {
                             codexModelPicker("评审模型", selection: $model.draft.agyReviewModel,
                                              options: model.reviewerOptions, custom: $customAgyReview)
                                 .disabled(isSolo || !model.draft.agyRelayError.isEmpty)
@@ -411,9 +431,11 @@ struct SettingsView: View {
                         }
                     }
                     ServiceSettingsGroup("实施服务", summary: SettingsSummary.implementation(model.draft), isExpanded: $implementationExpanded) {
-                        Picker("实施服务", selection: model.draft.host == "agy" ? .constant("codex") : (model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : serviceGroup($model.draft.implementationService, preferred: model.draft.directImplementation?.service))) {
+                        Picker("实施服务", selection: implementationService) {
                             if model.draft.host == "agy" {
                                 Text("Codex（指定模型）").tag("codex")
+                                Text("千问 Token Plan").tag("token_plan")
+                                Text("API 直连").tag("api_direct")
                             } else if model.draft.host == "claude" {
                                 Text("Claude Code 实施代理").tag("claude-agent")
                                 Text("Codex（指定模型）").tag("codex")
@@ -423,17 +445,23 @@ struct SettingsView: View {
                                 Text(ReviewService.title("qoder")).tag("qoder")
                                 Text("API 直连").tag("api_direct")
                             }
-                        }.disabled(!model.draft.implementationEnabled)
+                        }.disabled(!model.draft.implementationEnabled || (model.draft.host == "agy" && !model.draft.agyRelayError.isEmpty))
                     } content: {
                         if model.draft.host == "codex" && model.draft.implementationProvider == "custom_api" {
                             vendorPicker($model.draft.implementationService, custom: false).disabled(!model.draft.implementationEnabled)
                         }
-                        if model.draft.host == "agy" {
+                        if model.draft.host == "agy" && ReviewService.vendors.contains(selectedImplementationService) {
+                            vendorPicker($model.draft.agyImplementationService, custom: false).disabled(!model.draft.implementationModelEnabled)
+                        }
+                        if model.draft.host == "agy" && model.draft.agyImplementationProvider == "codex" {
                             codexModelPicker("实施模型 ID", selection: $model.draft.agyImplementationModel,
                                              options: model.secondaryOptions, custom: $customAgyImplementation)
                                 .disabled(!model.draft.implementationModelEnabled)
                                 .disabled(!model.draft.agyRelayError.isEmpty)
                             note("思考深度（只读）：\(model.draft.agyImplementationEffort.isEmpty ? "CLI 默认" : model.draft.agyImplementationEffort)")
+                        } else if model.draft.host == "agy" {
+                            modelPicker("实施模型 ID", selection: $model.draft.agyImplementationSelectedModel, options: model.secondaryOptions)
+                                .disabled(!model.draft.implementationModelEnabled)
                         } else if model.draft.host == "claude" && model.draft.claudeImplementationProvider == "codex" {
                             codexModelPicker("实施模型 ID", selection: $model.draft.claudeImplementationModel,
                                              options: model.secondaryOptions, custom: $customClaudeImplementation)
@@ -448,7 +476,7 @@ struct SettingsView: View {
                                         options: model.draft.host == "claude" ? [ModelOption(id: "claude-agent", label: "由 Claude Code 实施代理配置")] : model.secondaryOptions)
                                 .disabled(!model.draft.implementationModelEnabled)
                         }
-                        if model.draft.host == "codex" && model.draft.implementationProvider == "token_plan" {
+                        if model.draft.host != "claude" && selectedImplementationService == "token_plan" {
                             field("实施服务地址") {
                                 Text(ReviewService.officialURLs["token_plan"] ?? "").textSelection(.enabled)
                             }
@@ -459,12 +487,14 @@ struct SettingsView: View {
                             Toggle("主账号额度用尽时自动切换", isOn: $model.draft.autoFailover).disabled(isSolo)
                             note("与 Token Plan 评审共享双槽。每次新任务主账号优先；明确额度耗尽后当次任务持续使用备用，不显示实时余额。")
                             note("仅确认请求模型。评审检测不验证实施，业务材料外发需当次授权。")
-                            if model.draft.tokenPlanImplementationModel == "deepseek-v4-pro" {
+                            if model.draft.host == "agy" && model.draft.agyImplementationSelectedModel == "deepseek-v4-pro" {
+                                note("Token Plan 的 DeepSeek-V4-Pro 在 Codex CLI 正式实施复测中未通过协议校验。实施失败时需保留工作树和日志。")
+                            } else if model.draft.host == "codex" && model.draft.tokenPlanImplementationModel == "deepseek-v4-pro" {
                                 note("订阅 DeepSeek-V4-Pro 的正式实施复测未通过。此处保留已有配置。")
                             }
                         }
-                        if model.draft.host == "codex" && model.draft.implementationProvider == "custom_api" {
-                            let service = model.draft.implementationService
+                        if model.draft.host != "claude" && ReviewService.vendors.contains(selectedImplementationService) {
+                            let service = selectedImplementationService
                             field("实施服务地址") {
                                 Text((ReviewService.officialURLs[service] ?? "") + "/chat/completions").textSelection(.enabled)
                             }
@@ -499,7 +529,8 @@ struct SettingsView: View {
                 Button("检查配置") { model.check() }.disabled(model.busy || model.dirty || !model.loaded)
                 Button("重新读取配置") { if model.dirty { confirmRefresh = true } else { model.refresh() } }.disabled(model.busy)
                     .help("重新从磁盘读取 Claude、Codex 和机制默认配置，不调用模型")
-                Button("测试评审模型") { confirmReal = true }.disabled(isSolo || model.busy || model.dirty || !model.loaded || model.draft.host == "agy")
+                Button("测试评审模型") { confirmReal = true }
+                    .disabled(isSolo || model.busy || model.dirty || !model.loaded || (model.draft.host == "agy" && !model.draft.agyRelayError.isEmpty))
                 Button("恢复上次保存") { confirmRestore = true }.disabled(model.busy || !model.canRestore || model.dirty)
                 Spacer(minLength: 8)
                 Button("取消") { model.discard(); closeCustomEditors() }.disabled(model.busy || !model.dirty)

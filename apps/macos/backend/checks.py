@@ -14,8 +14,10 @@ import time
 import uuid
 from config_store import StoreError, model, effective_executor
 import model_services as services
+import relay_routes
 
-OPTIONAL_SAVE_KEYS = ('dual_plan_enabled', 'agy_dual_plan_enabled', 'agy_review_model', 'agy_implementation_model')
+OPTIONAL_SAVE_KEYS = ('dual_plan_enabled', 'agy_dual_plan_enabled', 'agy_review_model', 'agy_implementation_model',
+                      'agy_review_route', 'agy_implementation_route')
 CLI_PROBE_NAMES = ('claude', 'codex', 'agy', 'qodercli')
 SEMVER_RE = re.compile(r'\b([0-9]+\.[0-9]+\.[0-9]+)\b')
 
@@ -167,7 +169,8 @@ def agy_entry(store, root):
     plugin = root / 'adapters/agy/plugin'
     required = (plugin / 'plugin.json', plugin / 'rules/AGENTS.md',
                 plugin / 'skills/agy-relay/SKILL.md', plugin / 'skills/codex-review/SKILL.md',
-                root / 'adapters/agy/scripts/codex_review.py', root / 'adapters/agy/scripts/claude_plan.py')
+                root / 'adapters/agy/scripts/codex_review.py', root / 'adapters/agy/scripts/claude_plan.py',
+                root / 'apps/macos/backend/relay_routes.py')
     link = store.root / '.gemini/config/plugins/ai-anti'
     try:
         valid = link.is_symlink() and link.resolve() == plugin.resolve() and all(
@@ -232,24 +235,61 @@ def check_claude_codex_version(root, log):
     if version not in versions:
         raise CheckError('Codex 实施要求 ' + '、'.join(versions))
 
+
+def check_responses_codex_version(root, log):
+    scripts = root / 'adapters/codex/skills/claude-review/scripts'
+    spec = importlib.util.spec_from_file_location('_aianti_check_review_codex', scripts / 'review_codex.py')
+    entry = importlib.util.module_from_spec(spec)
+    sys.path.insert(0, str(scripts))
+    try:
+        spec.loader.exec_module(entry)
+    except (OSError, ImportError, SyntaxError) as exc:
+        raise CheckError('Codex Responses 版本检查所需源码无效') from exc
+    finally:
+        sys.path.pop(0)
+    try:
+        version, _ = entry.parse_version_output(log.read_text('utf-8'))
+    except (entry.RunError, OSError, UnicodeError) as exc:
+        raise CheckError('Codex Responses CLI 版本输出无效') from exc
+    if version not in entry.REVIEW_VERSIONS:
+        raise CheckError('Codex Responses 要求 ' + '、'.join(entry.REVIEW_VERSIONS))
+
+
 def result(kind, state, message, snapshot, actual='未知'):
     return dict(kind=kind, state=state, message=message, signature=snapshot['signature'], actual_model=actual,
                 checked_at=time.strftime('%Y-%m-%d %H:%M:%S'), timestamp=time.time())
 
 def local_agy(store, snapshot, source):
     v = snapshot['values']
+    solo = v['mode'] == 'solo'
+    if not solo:
+        validate_agy(v)
     root = source_root(store, source, host='agy')
-    review_budgets(store, root)
     agy_entry(store, root)
-    agy_impl = v['mode'] != 'solo'
-    if agy_impl and not v['agy_implementation_model']:
-        raise CheckError('AGY 实施未配置 agy_relay.implementation；实施阶段会停止')
+    review = v['agy_review_route']
+    implementation = v['agy_implementation_route']
+    native_impl = token_impl = False
     names = {'agy'}
-    dual = agy_impl and v['agy_dual_plan_enabled']
+    if not solo:
+        review_budgets(store, root)
+        if implementation is None:
+            raise CheckError('AGY 实施未配置 agy_relay.implementation；实施阶段会停止')
+        native_impl = implementation['provider'] == 'codex'
+        token_impl = relay_routes.uses_token_plan(implementation)
+        validate_agy_review(store, v, check_accounts=False)
+        if token_impl:
+            profile = v['model_services']['profiles']['token_plan']
+            services.token_plan_destination(profile['responses_base_url'], 'responses', CheckError)
+            if not store.credential_status(profile['credential_paths'], profile['credential_key'])[0]:
+                raise CheckError('实施 Token Plan 凭证未配置或不可解析')
+        elif relay_routes.vendor_service(implementation) and not store.credential_status(*vendor_slot(implementation))[0]:
+            raise CheckError('实施厂商凭证未配置或不可解析')
+        if v['token_plan_accounts']['auto_failover'] and (token_impl or is_token_plan_review(v)):
+            validate_accounts(store, v)
+        names.add('codex')
+    dual = not solo and v['agy_dual_plan_enabled']
     if dual:
         names.add('claude')
-    if agy_impl:
-        names.add('codex')
     with tempfile.TemporaryDirectory(prefix='ai-anti-local-') as temp:
         for name in names:
             cli = discover(name)
@@ -260,22 +300,58 @@ def local_agy(store, snapshot, source):
                 version, compatibility = planning_version(root, log, 'agy')
             elif name == 'claude':
                 claude_version, claude_compat = planning_version(root, log, 'claude')
-            else:
+            elif native_impl:
                 check_claude_codex_version(root, log)
+            elif relay_routes.is_official(review) or token_impl:
+                check_responses_codex_version(root, log)
     if store.read()['signature'] != snapshot['signature']:
         raise CheckError('检测中配置或凭证发生变化，结果作废')
-    route = ('Codex · ' + v['agy_implementation_model'] + ' · 关联工作树实施（AGY 接力）'
-             if agy_impl else '停用独立实施')
-    reviewer = v['agy_review_model'] or 'CLI 默认'
+    route = '停用独立实施'
+    if native_impl:
+        route = 'Codex · ' + implementation['model'] + ' · 关联工作树实施（AGY 接力）'
+    elif not solo:
+        route = agy_route_label(implementation) + (' · Responses' if token_impl else ' · Chat Completions')
+    reviewer = agy_route_label(review)
     dual_detail = ''
     if dual:
         partner_model = v['agy_dual_plan']['model'] or 'CLI 默认'
         dual_detail = f'；双方案：Claude · {partner_model}（Claude {claude_version} {claude_compat}）'
-    return result('local', 'passed', f'本地检查通过；实施：{route}；评审：Codex · {reviewer}；'
+    return result('local', 'passed', f'本地检查通过；实施：{route}；评审：{reviewer}；'
                   f'AGY {version}（{compatibility}）{dual_detail}；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
 
+
+def agy_route_label(route):
+    service = 'Codex'
+    if relay_routes.uses_token_plan(route):
+        service = 'Token Plan'
+    elif relay_routes.is_official(route):
+        service = route['service']
+    return service + ' · ' + (route['model'] or 'CLI 默认')
+
+
+def validate_agy(values):
+    for key in ('agy_dual_plan_error', 'agy_relay_error'):
+        if values[key]:
+            raise CheckError(values[key])
+
+
+def validate_agy_review(store, values, *, check_accounts=True):
+    if not official_review(values):
+        return
+    validate_review_destination(values)
+    if not store.credential_status(*review_slot(values))[0]:
+        raise CheckError('评审服务凭证不存在或不可解析')
+    if check_accounts and is_token_plan_review(values) and values['token_plan_accounts']['auto_failover']:
+        validate_accounts(store, values)
+
+
 def official_review(values):
-    return values['official_review'] if values.get('channel') == services.OFFICIAL_CHANNEL else None
+    if values.get('channel') != services.OFFICIAL_CHANNEL:
+        return None
+    if values.get('host') == 'agy':
+        route = values['agy_review_route']
+        return {key: route[key] for key in ('service', 'model')} if relay_routes.is_official(route) else None
+    return values['official_review']
 
 
 def is_token_plan_review(values):
@@ -322,16 +398,12 @@ def local(store, source=None):
     snapshot = store.read()
     v = snapshot['values']
     if v['host'] == 'agy':
-        for key in ('agy_dual_plan_error', 'agy_relay_error'):
-            if v[key]:
-                raise CheckError(v[key])
+        return local_agy(store, snapshot, source)
     if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
     validate_review_destination(v)
     # Validation builds bytes but never writes them.
     check_values = {k: val for k, val in v.items() if k not in OPTIONAL_SAVE_KEYS}
     store.outputs(check_values, '')
-    if v['host'] == 'agy':
-        return local_agy(store, snapshot, source)
     claude_codex_implementation = v['host'] == 'claude' and v['mode'] != 'solo' and v['claude_implementation_provider'] == 'codex'
     try:
         root = source_root(store, source)
@@ -432,6 +504,8 @@ def qwen_evidence(status, manifest, values):
     official = official_review(values)
     if official:
         expected['service'] = official['service']
+    if values.get('host') == 'agy':
+        expected['relay'] = 'agy'
     if status.get('completed') is not True or manifest.get('mode') != 'diff':
         raise ValueError()
     for item in (status, manifest):
@@ -455,12 +529,17 @@ def real(store, source=None, timeout=None):
     v = snapshot['values']
     if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
     if v['mode'] == 'solo': raise CheckError('solo 模式停用交叉评审')
-    if v['host'] == 'agy':
-        raise CheckError('AGY 主模型暂不支持桌面端合成评审检测；请使用「检查配置」或从 AGY 发起评审')
-    validate_review_destination(v)
-    check_values = {k: val for k, val in v.items() if k not in OPTIONAL_SAVE_KEYS}
-    store.outputs(check_values, '')
-    root = source_root(store, source)
+    agy = v['host'] == 'agy'
+    if agy:
+        validate_agy(v)
+        root = source_root(store, source, host='agy')
+        agy_entry(store, root)
+        validate_agy_review(store, v)
+    else:
+        validate_review_destination(v)
+        check_values = {k: val for k, val in v.items() if k not in OPTIONAL_SAVE_KEYS}
+        store.outputs(check_values, '')
+        root = source_root(store, source)
     timeout, idle_timeout = review_budgets(store, root, timeout)
     api_review = v['channel'] in ('qwen', services.OFFICIAL_CHANNEL)
     with tempfile.TemporaryDirectory(prefix='ai-anti-probe-') as temp:
@@ -468,7 +547,7 @@ def real(store, source=None, timeout=None):
         os.chmod(temp, 0o700)
         repo, out = temp / 'fixture', temp / 'output'
         repo.mkdir()
-        env = dict(os.environ)
+        env = {key: value for key, value in os.environ.items() if not key.startswith('GIT_')}
         env['PATH'] = '/opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin:' + env.get('PATH', '')
         if store.isolated:
             env['HOME'] = str(store.root)
@@ -482,13 +561,15 @@ def real(store, source=None, timeout=None):
                 raise CheckError('无法创建隔离合成仓库')
         (repo / 'sample.txt').write_text('synthetic change\nREAD_TOKEN=' + marker + '\n')
         if api_review:
-            if not store.credential_status(*review_slot(v))[0]:
+            if not agy and not store.credential_status(*review_slot(v))[0]:
                 raise CheckError('评审服务凭证不存在或不可解析')
             # Formal runner retains full reads, tool/permission and actual model gates.
             argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
                     '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
                     '--out', str(out), '--channel', v['channel'], '--qwen-executor', review_executor(v),
                     '--timeout', str(timeout), '--idle-timeout', str(idle_timeout), '--max-output-bytes', str(8*1024*1024)]
+            if agy:
+                argv += ['--relay', 'agy', '--config', str(store.paths['ai'])]
             if v['channel'] == 'qwen' and review_executor(v) == 'codex':
                 argv += ['--responses-base-url', v['responses_base_url']]
             if run(argv, repo, temp / 'runner.log', timeout=timeout+60, limit=8*1024*1024, env=env) != 0:
@@ -521,13 +602,15 @@ def real(store, source=None, timeout=None):
             required = ('--json', '--sandbox', '--ephemeral', '--ignore-user-config', '--ignore-rules')
             if any(flag not in help_text for flag in required):
                 raise CheckError('Codex CLI 缺少隔离检测所需参数；请升级后重试')
-            chosen = v['reviewer_model']
-            if not chosen:
+            chosen = v['agy_review_route']['model'] if agy else v['reviewer_model']
+            if not agy and not chosen:
                 raise CheckError('真实 Codex 检测需要明确填写评审模型 ID')
-            model(chosen)
             prompt = temp / 'prompt.txt'
             prompt.write_text('Read sample.txt in this synthetic repository using your read-only tools. Return the exact READ_TOKEN value found in the file. Do not modify anything. This is only a model availability check, not a business review.\n')
-            argv = [cli, 'exec', '--sandbox', 'read-only', '--json', '--ephemeral', '--ignore-user-config', '--ignore-rules', '--model', chosen, prompt.read_text()]
+            argv = [cli, 'exec', '--sandbox', 'read-only', '--json', '--ephemeral', '--ignore-user-config', '--ignore-rules']
+            if chosen is not None:
+                argv += ['--model', model(chosen)]
+            argv.append(prompt.read_text())
             log = temp / 'codex.jsonl'
             if run(argv, repo, log, timeout=timeout, env=env, idle_timeout=idle_timeout) != 0:
                 raise CheckError('Codex 合成调用失败；原始错误已隐藏，未自动重试')
@@ -535,6 +618,8 @@ def real(store, source=None, timeout=None):
         if store.read()['signature'] != snapshot['signature']:
             raise CheckError('检测中配置或凭证发生变化，结果作废')
         reply = result('real', 'passed', '合成评审检测通过；不代表业务评审全量验证', snapshot, actual)
+        if agy and not api_review:
+            reply['message'] += '；评审：' + agy_route_label(v['agy_review_route'])
         if api_review:
             reply.update(token_plan_accounts=status.get('token_plan_accounts', dict(enabled=False)), requested_model=review_model(v), model_evidence='requested_only' if review_executor(v) == 'codex' else 'actual')
         return reply

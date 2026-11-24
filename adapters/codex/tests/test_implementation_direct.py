@@ -100,6 +100,22 @@ class DirectImplementation(unittest.TestCase):
             self.assertEqual(result['log_sha256'], hashlib.sha256((out / result['log']).read_bytes()).hexdigest())
         return result
 
+    def test_agy_configured_direct_routes_and_evidence(self):
+        for model, (service, host, path) in ROUTES.items():
+            with self.subTest(service=service, model=model):
+                self.config.write_text(json.dumps({'agy_relay': {'implementation': {
+                    'provider': 'official_api', 'service': service, 'model': model,
+                }}}))
+                self.first.write_bytes(b'before\r\nlast')
+                self.second.unlink(missing_ok=True)
+                result = self.run_entry(relay='agy', provider=None, model=None)
+                self.assertEqual(result['status'], 'completed', result)
+                self.assertEqual((result['relay'], result['service'], result['requested_model']),
+                                 ('agy', service, model))
+                self.assertEqual((self.requests[0][0], self.requests[0][3]), (host, path))
+        with self.assertRaises(ConfigError):
+            self.run_entry(relay='agy', provider=None, model='kimi-k3')
+
     def connect(self, host, timeout):
         test = self
 

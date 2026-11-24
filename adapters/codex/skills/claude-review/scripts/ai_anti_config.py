@@ -7,6 +7,7 @@ config must never silently switch review channels or models.
 import json
 from pathlib import Path
 import re
+import sys
 
 
 class ConfigError(ValueError):
@@ -25,6 +26,9 @@ AGY_DUAL_PLAN_SYNTHESIZERS = ('agy', 'claude')
 DUAL_PLAN_PARTNERS = ('agy',)
 DUAL_PLAN_SYNTHESIZERS = ('claude', 'agy')
 DUAL_PLAN_ON_FAILURE = ('stop', 'fallback')
+
+
+BACKEND = Path(__file__).resolve().parents[5] / 'apps/macos/backend'
 
 
 def config_path():
@@ -152,51 +156,47 @@ def _agy_object(value, key, allowed):
     return value
 
 
+def _relay_routes():
+    if not (BACKEND / 'relay_routes.py').is_file():
+        raise ConfigError('agy_relay requires apps/macos/backend/relay_routes.py in the ai-anti checkout')
+    if str(BACKEND) not in sys.path:
+        sys.path.insert(0, str(BACKEND))
+    try:
+        import relay_routes
+    except ImportError as exc:
+        raise ConfigError('agy_relay requires the complete ai-anti source checkout') from exc
+    return relay_routes
+
+
 def agy_relay_section(data):
-    return _agy_object(lookup(data, 'agy_relay'), 'agy_relay', {'review', 'implementation', 'dual_plan'})
+    routes = _relay_routes()
+    return routes.parse_host_relay(data, 'agy_relay', routes.AGY_SECTION_KEYS, ConfigError)
 
 
-def _agy_codex(data, route):
-    key = 'agy_relay.' + route
-    reviewing = route == 'review'
-    allowed = {'provider', 'model', 'effort'}
-    if reviewing:
-        allowed.add('high_risk_effort')
-    value = _agy_object((agy_relay_section(data) or {}).get(route), key, allowed)
-    if value is None:
-        return {'provider': 'codex', 'model': None, 'effort': None, 'high_risk_effort': None} if reviewing else None
-    provider = value.get('provider')
-    if provider != 'codex' and not (reviewing and provider is None):
-        raise ConfigError('ai-anti config: ' + key + '.provider must be codex')
-    model = value.get('model')
-    if not (reviewing and model is None):
-        if not isinstance(model, str) or not model or any(c.isspace() for c in model):
-            raise ConfigError('ai-anti config: ' + key + '.model must be a non-empty string without whitespace')
-    base_key = key + '.effort'
-    effort = _codex_effort(data, base_key)
-    result = {'provider': 'codex', 'model': model, 'effort': effort}
-    if reviewing:
-        elevated_key = key + '.high_risk_effort'
-        elevated = _codex_effort(data, elevated_key)
-        _tiered_effort(effort, elevated, base_key, elevated_key, risk_tier='standard')
-        result['high_risk_effort'] = elevated
-    return result
+def _agy_route(data, role):
+    routes = _relay_routes()
+    section = agy_relay_section(data) or {}
+    routes.parse_codex_defaults(section.get('codex_defaults'), 'agy_relay', ConfigError)
+    providers = routes.AGY_REVIEW_PROVIDERS if role == 'review' else routes.AGY_IMPLEMENTATION_PROVIDERS
+    return routes.parse_route(section.get(role), 'agy_relay', role, providers, ConfigError)
 
 
 def agy_review(data):
     """Select the independent AGY review route, with Codex defaults."""
-    return _agy_codex(data, 'review')
+    return _agy_route(data, 'review')
 
 
 def agy_review_effort(review, risk_tier=None):
-    """Select the effort for a parsed AGY review route."""
+    """Select the effort for a parsed AGY Codex review route."""
+    if review['provider'] != 'codex':
+        return None
     return _tiered_effort(review['effort'], review['high_risk_effort'], 'agy_relay.review.effort',
                           'agy_relay.review.high_risk_effort', risk_tier)
 
 
 def agy_implementation(data):
     """Select the explicitly configured AGY implementation route, if any."""
-    return _agy_codex(data, 'implementation')
+    return _agy_route(data, 'implementation')
 
 
 def claude_qwen_executor(data):

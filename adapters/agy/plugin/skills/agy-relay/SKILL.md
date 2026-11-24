@@ -1,6 +1,6 @@
 ---
 name: agy-relay
-description: 由 AGY 起草方案（可选 Claude 双方案规划）、委派 Codex 评审与实施，再由 AGY 独立终审。
+description: 由 AGY 起草方案（可选 Claude 双方案规划）、按配置委派独立评审与实施，再由 AGY 独立终审。
 ---
 
 # AGY 主导接力
@@ -98,7 +98,7 @@ git -C "$repo" status --short
   漂移涉及本任务路径时按最新主树修正行号与代码事实，实质范围变化停下请用户确认。
   复核后保存到第 1 步确定的方案路径，随后进入第 2 步。
 
-## 第 2 步：Codex 只读评审
+## 第 2 步：按配置发起独立只读评审
 
 读取 codex-review 技能。按 R3 在发起评审前核对必要材料、路径、规模、配置与输出目录。
 按 R3 根据方案改动清单判定风险档，将 `risk_tier` 设为 `standard` 或 `high_risk`。
@@ -110,10 +110,18 @@ python3 "$mechanism/adapters/agy/scripts/codex_review.py" plan \
   --risk-tier "$risk_tier" < /dev/null
 ```
 
-需要时用 --files 加入仓库内相对文件；总材料至多 2 MiB。--prepare-only 仅准备材料。
+从 `agy_relay.review` 确认本轮的 `provider`、模型及接收方。默认 `codex` 使用单阶段
+只读 Codex CLI，并按风险档选择思考深度。需要时用 --files 加入仓库内相对文件；总材料至多 2 MiB。
+`official_api` 使用配置的 `service` 与 `model`，通过 `review.py` 和 MCP 只读材料注册表执行两阶段评审，
+必须提供非空的 `--files`，可用 `--context` 补充材料。复用的材料包包含全仓的
+`tracked-paths.txt` 和 `git-status.txt`（含未跟踪文件名）。送审前按实际接收方核对这些
+Git 元数据、方案、需求与所选文件的外发授权；未获授权时停止。--prepare-only 仅准备材料。
+
 独立评审依 R4 先读 request，再列独立清单并读取方案。0 仍须核对 completed=true，
-2 表示预检失败，1 表示失败，130/143 表示中断。实际读取 warnings.json，对照
-review_raw.jsonl 逐条核对 failed_command。对 request 或方案的读取失败须有后续成功读取证据；
+2 表示预检失败，1 表示失败，130/143 表示中断。原生 Codex 路由实际读取 warnings.json，对照
+review_raw.jsonl 逐条核对 failed_command。官方路由核对 manifest.json、status.json、report.md
+与两阶段日志，确认材料完整读取及 `relay=agy`、实际服务、请求模型、`actual_model=null`、
+`model_evidence=requested_only`。对 request 或方案的读取失败须有后续成功读取证据；
 未读到 request 或方案，整轮作废。连接器事件使整轮作废。保留尝试日志与版本警告。
 暂态重试由共享入口管理。
 
@@ -127,7 +135,7 @@ review_raw.jsonl 逐条核对 failed_command。对 request 或方案的读取失
 权限和验收口径。逐项确认并写入任务记录。没有差异时明确记录。核对实施授权；
 尚未取得授权时，保持待实施。新增需求须按 R2 补入 request 并按共享规则核对轮次。
 
-## 第 4 步：固定 Codex 在隔离工作树实施
+## 第 4 步：按配置在隔离工作树实施
 
 核对冻结的主树身份、HEAD、ref、文件指纹与 absent，再创建仓库外的 linked worktree。
 
@@ -148,18 +156,32 @@ python3 "$mechanism/adapters/claude-code/scripts/codex_implement.py" \
   --out "$implement_out" < /dev/null
 ```
 
-从 agy_relay.implementation 读取显式 provider=codex 与固定 model。检查退出码、
-manifest/status、实际候选树状态与 relay=agy。配置缺失、失败或中断即停，保留证据和候选，
+上面的入口用于 `agy_relay.implementation.provider=codex`，必须配置明确的 `model`。
+`provider=official_api` 改用下面的共用入口，由配置确定服务与模型。
+
+```bash
+python3 "$mechanism/adapters/codex/skills/codex-relay/scripts/implementation.py" \
+  --relay agy --workspace "$candidate" --prompt "$implement_prompt" \
+  --out "$implement_out" < /dev/null
+```
+
+`token_plan` 通过 Codex CLI Responses 执行，入口要求关联工作树根与有效 HEAD。千问、Kimi、
+DeepSeek 官方直连走 Chat Completions，按当次授权逐项附加 `--file <工作树相对路径>`，
+使外发和写入范围可核验。先确认接收方和授权范围。`token_plan/deepseek-v4-pro`
+在 Codex CLI 正式实施复测中未通过协议校验，沿用同一校验。
+
+检查退出码、manifest/status、实际候选树状态与 relay=agy。官方路由还须核对服务及请求模型证据。
+配置缺失、失败或中断即停，保留证据和候选，
 请用户裁决。禁止自动重试、换模型或 AGY 自动接管。
 
-第 5 步经新的用户裁决要求行为返工，且该入口上一轮已完成时，沿用 `--relay agy`，在同一工作树加 `--resume-from <上一轮成功的 --out 目录>` 和新的 `--out` 续接。若报 `session_not_found`，保留候选树和证据，停下报告「会话缺失，可改用冷启动」，由用户裁决。用户选择冷启动时，用新的 `--out` 及完整提示词（方案、request、共享方法路径、改动清单、硬边界、当前进度和终审意见）调用首轮入口，省略 `--resume-from`。
+第 5 步经新的用户裁决要求行为返工，且原生 Codex 入口上一轮已完成时，沿用 `--relay agy`，在同一工作树加 `--resume-from <上一轮成功的 --out 目录>` 和新的 `--out` 续接。若报 `session_not_found`，保留候选树和证据，停下报告「会话缺失，可改用冷启动」，由用户裁决。用户选择冷启动时，用新的 `--out` 及完整提示词（方案、request、共享方法路径、改动清单、硬边界、当前进度和终审意见）调用首轮入口，省略 `--resume-from`。官方路由经裁决后仍在同一候选树上以新输出目录和完整返工材料启动，直连再次逐项核对 `--file` 授权。
 
 ## 第 5 步：AGY 独立终审与逐文件落回
 
 AGY 对照候选基线独立读取全部增量。用 git status --short、git diff <候选基线>，
 逐个读未跟踪或被忽略的任务文件，核对实际增删与定稿范围。独立运行验证并比较第 3b 步
-确认的差异，发现新增用户可见差异先停并请用户确认。Codex 实施的增量由 AGY 终审，
-不再交给 Codex 评审。completed 只表示实施协议完成。
+确认的差异，发现新增用户可见差异先停并请用户确认。所有实施路由的增量由 AGY 独立终审。
+completed 只表示实施协议完成。
 
 终审发现行为层面问题，先取得新的用户裁决再按第 4 步返工。续接提示词写明终审意见和期望验收、AGY 终审期间全部机械修改的路径及摘要（先重读并保留这些修改）、改动范围和硬边界，省略方案全文。返工完成后，仍审查相对候选基线的全部增量。
 
@@ -175,6 +197,7 @@ AGY 对照候选基线独立读取全部增量。用 git status --short、git di
 汇报需求及第 3b 步裁决、逐条评审意见与分诊、实际通道、请求模型、评审风险档与实际传入的思考深度、修改文件与理由、
 验证命令与结果、版本或工具警告、未覆盖项、产物路径，以及落回和工作树处置状态。
 补记每轮实施的 `--out`、是否续接（附 `thread_id`），以及是否因会话缺失经用户裁决改用冷启动。
+官方评审与实施注明服务、请求模型与模型证据，直连实施注明获授权的路径。
 双方案规划注明协作方 Claude、请求模型和实际模型（`actual_model`）、请求深度、综合方及
 实际调用目录。执行过双方案调用时同时注明规划工作树的处置状态，保留时附路径。
 当次消息触发时注明来源。临时禁用或降级时注明原因，降级另注明失败阶段。

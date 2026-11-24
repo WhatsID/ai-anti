@@ -190,10 +190,12 @@ class AgyEntryTests(unittest.TestCase):
         self.assertEqual(self.snapshot(), baseline)
 
     def test_sources_are_checked_before_first_install(self):
-        for rel in ('plugin/plugin.json', 'plugin/rules/AGENTS.md',
-                    'plugin/skills/agy-relay/SKILL.md', 'plugin/skills/codex-review/SKILL.md',
-                    'scripts/codex_review.py', 'scripts/claude_plan.py'):
-            path = self.source.parent / rel
+        sources = [self.source.parent / rel for rel in (
+            'plugin/plugin.json', 'plugin/rules/AGENTS.md', 'plugin/skills/agy-relay/SKILL.md',
+            'plugin/skills/codex-review/SKILL.md', 'scripts/codex_review.py', 'scripts/claude_plan.py')]
+        sources.append(self.repo / 'apps/macos/backend/relay_routes.py')
+        for path in sources:
+            rel = str(path.relative_to(self.repo))
             hidden = path.with_suffix('.saved')
             with self.subTest(source=rel):
                 path.rename(hidden)
