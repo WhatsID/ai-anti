@@ -16,8 +16,8 @@ Claude Code、Codex、AGY 各验证下表中的 7 条评审路径和 11 条实�
 | 千问按量直连 | `qwen4-max` | 需验 | 需验 | Responses 通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
 | 千问按量直连 | `qwen3.8-max` | — | 需验 | — | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
 | Kimi 官方直连 | `kimi-k3.1-pro` | 需验 | 需验 | Responses 通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
-| Kimi 官方直连 | `kimi-k3` | 需验 | 需验 | Anthropic 通过；Responses 失败 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
-| DeepSeek 官方直连 | `deepseek-v4-pro` | 需验 | 需验 | Anthropic 通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
+| Kimi 官方直连 | `kimi-k3` | 需验 | 需验 | Anthropic 通过，Responses 首次失败、复测通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
+| DeepSeek 官方直连 | `deepseek-v4-pro` | 需验 | 需验 | Anthropic 和 Responses 均通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
 | DeepSeek 官方直连 | `deepseek-flash` | — | 需验 | — | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
 
 ## 已有 API 证据
@@ -50,6 +50,17 @@ Claude Code、Codex、AGY 各验证下表中的 7 条评审路径和 11 条实�
 **当时的实施预检**：另外 9 个组合均用正式 `implementation.py --prepare-only` 检查。订阅的三个额外型号由模型清单拒绝，六个厂商直连组合在提供方选择处被拒，均为退出码 2。当时 Codex 方案评审通过 7/7 项、实施通过 2/11 项。
 
 逐项 manifest、状态、评审报告和 `implementation-preflight.json` 位于本机临时目录 `/private/tmp/ai-anti-codex-review-matrix.zNZeJyX0`。Kimi K3 的两次记录分别位于 `kimi-kimi-k3` 和 `kimi-kimi-k3-anthropic`。
+
+### 两条官方直连路径的 Responses 复测
+
+Codex 原生会话在适配器提交 `6c5ff80` 上，用 Codex CLI `0.169.1` 从正式方案评审入口重新运行。两组使用与各自 Anthropic 验收相同的合成仓库基线、需求、方案和源文件。每组均在第一次尝试中读完清单阶段的 4 份材料和方案评审阶段的 6 份材料，两阶段退出码均为 0。主模型复核了日志指纹和两份报告。两份报告均指出空输入或全奇数应返回 `None`，方案错误地返回 `0`，所列测试也遗漏了这两个分支。
+
+| 官方直连模型 | Responses 端点 | 清单 / 方案评审耗时 | 验收结果 |
+|---|---|---|---|
+| Kimi `kimi-k3` | `https://api.moonshot.cn/v1/responses` | 47.7 秒 / 88.6 秒 | 通过。此前工具结果缺失的错误本次未复现，原因尚未定位。 |
+| DeepSeek `deepseek-v4-pro` | `https://api.deepseek.com/responses` | 31.3 秒 / 87.6 秒 | 通过。 |
+
+截至本轮，Codex 主导的 7 条方案评审路径均至少有一次正式 Responses 验收通过。Responses 入口只记录请求型号（`model_evidence=requested_only`）。本轮本机证据在 `/private/tmp/ai-anti-responses-recheck.l2qqLTKQ`，其下 `kimi/` 和 `deepseek/` 各有 `manifest.json`、`status.json`、两阶段日志及 `report.md`。
 
 ## Codex Token Plan 实施验收 · 2026-11-24
 
