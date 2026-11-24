@@ -9,9 +9,9 @@ Claude Code、Codex、AGY 各验证下表中的 7 条评审路径和 11 条实�
 | 服务 | 请求模型 ID | 评审 | 实施 | Codex 方案评审状态（2026-11-24） | Codex 实施状态（2026-11-24） |
 |---|---|---|---|---|---|
 | Token Plan | `qwen4-max` | 需验 | 需验 | Responses 通过 | 正式合成实施已通过（0.169.1） |
-| Token Plan | `qwen3.8-max` | — | 需验 | — | 配置准入与离线准备已通过，正式实施待验 |
-| Token Plan | `deepseek-v4-pro` | 需验 | 需验 | Responses 通过 | 配置准入与离线准备已通过，正式实施待验 |
-| Token Plan | `deepseek-v4.1-flash` | — | 需验 | — | 配置准入与离线准备已通过，正式实施待验 |
+| Token Plan | `qwen3.8-max` | — | 需验 | — | 正式合成实施已通过（0.169.1，修复后复测） |
+| Token Plan | `deepseek-v4-pro` | 需验 | 需验 | Responses 通过 | 两次复测均通过 5/5 项断言，正式入口均拒绝会话号 0 |
+| Token Plan | `deepseek-v4.1-flash` | — | 需验 | — | 正式合成实施已通过（0.169.1，修复后复测） |
 | Token Plan | `glm-5.3` | 需验 | 需验 | Responses 通过 | 正式合成实施已通过（0.169.1） |
 | 千问按量直连 | `qwen4-max` | 需验 | 需验 | Responses 通过 | 缺厂商直连实施入口 |
 | 千问按量直连 | `qwen3.8-max` | — | 需验 | — | 缺厂商直连实施入口 |
@@ -53,7 +53,7 @@ Claude Code、Codex、AGY 各验证下表中的 7 条评审路径和 11 条实�
 
 ## Codex Token Plan 实施验收 · 2026-11-24
 
-本轮 Codex 实施通过 2/11 项。Codex 主导的正式 Token Plan 实施入口以 Codex CLI 0.169.1 请求
+这一阶段 Codex 实施通过 2/11 项。Codex 主导的正式 Token Plan 实施入口以 Codex CLI 0.169.1 请求
 `glm-5.3` 和 `qwen4-max`，各在独立的 `first_even` 工作树完成写入。两个候选各只改动
 `numbers_sample.py`，主模型独立复跑下文定义的 5 项断言均通过。两次运行均记录
 `model_evidence=requested_only`，各从主订阅切至备用订阅一次。当前精确准入 0.160.0 / 0.163.0 / 0.169.1。
@@ -66,7 +66,41 @@ Claude Code、Codex、AGY 各验证下表中的 7 条评审路径和 11 条实�
 
 ### Codex Token Plan 配置准入
 
-三条新增 Token Plan 路由分别通过正式 `implementation.py --prepare-only` 验证，覆盖配置字段与显式指定型号两种入口。隔离运行的状态记录均为 `prepared`、`completed=false`。三条路由的正式实施待验，Codex 实施验收仍为 2/11 项。
+三条新增 Token Plan 路由分别通过正式 `implementation.py --prepare-only` 验证，覆盖配置字段与显式指定型号两种入口。隔离运行的状态记录均为 `prepared`、`completed=false`。该阶段仅完成离线准备。
+
+### 三个新增型号的真实实施结果
+
+在提交 `0835503` 上，经 Codex 主导的正式 `implementation.py` 入口和 Codex CLI `0.169.1`，每个型号各运行一次。三个独立工作树均基于 `86e2c4f`，均使用备用订阅，模型证据为 `requested_only`。底层 CLI 均以 0 退出，记录了 `turn.completed`；三个工作树各只改动 `numbers_sample.py`，主模型独立复跑各 5 项断言全部通过。三个工具进程均通过既定的环境变量、PATH 与环回网络隔离检查。
+
+| 请求型号 | 耗时 | 对原始日志重跑正式校验的结果 |
+|---|---:|---|
+| `qwen3.8-max` | 48.3 秒 | 工具调用填写了 `justification`、缺少显式 `sandbox_permissions`。CLI 在 stderr 记录参数校验错误，实施校验器报 `unknown Codex stderr line`。 |
+| `deepseek-v4-pro` | 54.7 秒 | 先遇到同一类 stderr 参数诊断。原始事件还包含该型号的元数据回退提示，现有实施规则仅对 GLM 的精确提示设有例外。 |
+| `deepseek-v4.1-flash` | 14.4 秒 | CLI 在回合开始前以 error item 报告缺少该型号的元数据并使用回退元数据，实施校验器报 `implementation error item`。 |
+
+当时三份正式状态均为 `failed`，入口退出码均为 1。该阶段 Token Plan 实施正式通过 **2/5**，Codex 全部实施路径正式通过 **2/11**。保留每个工作树与原始日志，未重放模型写入。本机临时目录为 `/private/tmp/ai-anti-token-live.RkI1SMMZ`，各型号的 `result-*` 包含 manifest、事件流和 stderr，`acceptance.json` 汇总独立验收结果。
+
+### 诊断修复后的真实复测
+
+Codex 原生会话在基于 `0835503` 的修复候选上，以 CLI `0.169.1` 从正式 Token Plan 实施入口各运行一次。新工作树均从合成基线 `86e2c4f` 创建。三个 CLI 均正常结束，均使用备用订阅，各自只改动 `numbers_sample.py`。主模型独立检查了 diff、5 项断言、工具环境中凭据变量缺失、固定 PATH 及工具进程访问宿主环回端口被拒绝。每份记录都只能确认请求型号（`requested_only`）。
+
+| 请求型号 | 正式入口 | 主模型核验 |
+|---|---|---|
+| `qwen3.8-max` | 退出 0，49.6 秒 | 5/5 断言及隔离检查通过。此次运行没有触发工具参数警告。 |
+| `deepseek-v4.1-flash` | 退出 0，14.0 秒 | 5/5 断言及隔离检查通过。回合开始前的同型号元数据提示保存在 warnings。 |
+| `deepseek-v4-pro` | 退出 1，59.8 秒 | 5/5 断言及隔离检查通过。stderr 新出现 `write_stdin failed: Unknown process id 0`，正式实施仍失败。 |
+
+这一轮 Token Plan 实施正式通过 **4/5**，Codex 全部实施路径正式通过 **4/11**。三份旧失败日志在候选上回放均通过，另外构造的 22 个反例均被拒绝。此前 Pro 的元数据和参数诊断已可处理，此次新错误由既有规则拦截。源码仅接受已观察到的型号、版本与完整诊断。参数诊断还要求同回合存在成对的成功命令。stdout 和 stderr 分开记录，无法证明被拒的工具请求后来成功。主模型单独核验实际交付。
+
+本机证据目录为 `/private/tmp/ai-anti-impl-diagnostics.FszZ7hPA`。其中 `live/acceptance.json`、`live/exit.json` 和各型号的 `result-*/` 对应本轮新运行，`replay-accepted.json` 对应旧日志回放及反例。两阶段方案评审材料与逐项裁决分别位于 `review/` 和 `adjudication.md`。
+
+### DeepSeek Pro 工具会话指令复测
+
+第二轮候选只调整 Token Plan 的工具指令及对应测试，要求 `write_stdin` 使用本回合 `exec_command` 实际返回且仍在运行的正整数会话号，已完成命令直接使用工具返回的输出。主模型确认 Codex CLI 配置指向的 `instructions.txt` 包含新指令。旧 Pro 失败日志在候选上仍被拒绝，千问和 Flash 的两份真实日志回放均通过。本轮新发起的真实模型调用只有 Pro。
+
+从合成基线 `86e2c4f` 创建独立工作树，经正式实施入口请求 `deepseek-v4-pro` 一次。CLI `0.169.1` 使用备用订阅，耗时 51.1 秒，模型证据为 `requested_only`。主模型核对了代码 diff、日志指纹及四次成功的命令执行。工作树仅改动 `numbers_sample.py`，5 项独立断言及工具隔离检查均通过。CLI 正常结束并记录 `turn.completed`，stderr 再次报告 `write_stdin failed: Unknown process id 0`，正式入口退出 1，状态为 `failed`。只在日志副本移除该行作对照，其余事件通过协议校验。
+
+新增文字在本次实测中未能避免错误，第二轮候选保留于隔离工作树。Codex 主导的 Token Plan 实施正式通过 **4/5**，全部实施路径正式通过 **4/11**。本机第二轮证据位于 `/private/tmp/ai-anti-impl-diagnostics.FszZ7hPA/round2/`，其中 `live/acceptance.json` 保存独立验收，`live/result-deepseek-v4-pro/` 保存原始日志和实际指令，`diagnosis.json` 记录对照结果，`round2.patch` 保留本轮候选增量。
 
 ## Codex 会话起跑记录 · 2026-11-24
 

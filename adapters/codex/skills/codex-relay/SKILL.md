@@ -238,7 +238,13 @@ requested route model, requested effort, executor `codex`, wire API `responses`,
 prompt/log hashes and elapsed time. Success requires exit 0, exactly one `turn.started`
 and `turn.completed`, a final agent_message and no error/turn.failed; recoverable command
 failures may be repaired within the turn. The precise known GLM fallback-metadata warning
-is retained as a warning; other error items fail. Actual model remains null with
+is retained as a warning. Codex-led Token Plan on `codex-cli 0.169.1` also retains one
+exact fallback-metadata item after thread start and before turn start for the matching
+DeepSeek request (`deepseek-v4-pro` or `deepseek-v4.1-flash`). For `qwen3.8-max` and
+`deepseek-v4-pro`, it counts exact sandbox parameter diagnostics when the completed turn
+includes a paired command start and successful completion. That pair proves execution
+in the turn. stdout and stderr cannot tie it to the rejected request. Other error items
+fail. Actual model remains null with
 `model_evidence=requested_only`, even if metadata mentions a model: do not infer actual
 server identity. This is an explicit exception to native runtime-model evidence, not
 proof of cross-model identity. `completed` means the invocation completed, never that
@@ -318,8 +324,8 @@ Skill. `codex_relay.secondary_model` selects only the native Codex independent i
 ### Independent Token Plan model
 
 `codex_relay.token_plan_implementation_model` accepts only `glm-5.3`, `qwen4-max`,
-`qwen3.8-max`, `deepseek-v4-pro` and `deepseek-v4.1-flash`. The last three IDs have
-passed offline preparation. Live implementation validation for these IDs is pending.
+`qwen3.8-max`, `deepseek-v4-pro` and `deepseek-v4.1-flash`. See the repository's
+`docs/MODEL_ROUTE_VALIDATION.zh-CN.md` for observed implementation results by date and route.
 Missing/null means `glm-5.3`; empty, preview, case variants and unknown values fail
 before credentials or CLI launch, even with another provider selected. Explicit model
 instructions override this value only with a matching provider. Token Plan always copies

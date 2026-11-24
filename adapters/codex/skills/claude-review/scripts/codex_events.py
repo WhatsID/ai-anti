@@ -11,6 +11,10 @@ STDERR_MESSAGES = (
      'rmcp::transport::worker: worker quit with fatal: Transport channel closed, when Client(HttpRequest(HttpRequest('
      '"http/request failed: error sending request for url (https://chatgpt.com/backend-api/ps/mcp)")))'),
 )
+TOOL_SANDBOX_PARAMETERS = (
+    'codex_core::tools::router: error=`justification` requires an explicit `sandbox_permissions`; use '
+    '`sandbox_permissions: "require_escalated"` for unsandboxed execution, or omit `justification`.'
+)
 TIMESTAMP = re.compile(r'([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2})(?:\.[0-9]+)?Z')
 TRACING_PREFIX = re.compile(TIMESTAMP.pattern + r' (?:TRACE|DEBUG|INFO|WARN|ERROR) ')
 WRITE_STDIN = re.compile(r'codex_core::tools::router: error=write_stdin failed: Unknown process id [1-9][0-9]*')
@@ -48,12 +52,14 @@ def stderr_path(logfile):
     return logfile.with_name(logfile.name + '.stderr.txt')
 
 
-def stderr_warnings(logfile, *, implementation=False):
+def stderr_warnings(logfile, *, implementation=False, tool_sandbox_parameters=False):
     from review_runner import RunError
     if logfile is None:
         return []
     counts = {}
     known = {message: kind for kind, message in STDERR_MESSAGES}
+    if tool_sandbox_parameters:
+        known[TOOL_SANDBOX_PARAMETERS] = 'tool_sandbox_parameters'
     context_lines = 0
     block_has_text = None
     try:

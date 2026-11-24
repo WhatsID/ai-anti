@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(ROOT / 'adapters/codex/skills/codex-relay/scripts'))
 from implementation_config import ConfigError, MODEL, provider, resolve
 import implementation
+from codex_events import stderr_warnings
 from implementation_protocol import validate
 from review_runner import RunError
 import model_services
@@ -182,6 +183,142 @@ class ImplementationTests(unittest.TestCase):
             with self.assertRaises(RunError): validate(log, 0)
         log.write_text('unexpected noise\n' + tail)
         with self.assertRaises(RunError): validate(log, 0)
+
+    def diagnostic_events(self):
+        thread = [{'type': 'thread.started', 'thread_id': 'offline'}]
+        turn = [{'type': 'turn.started'}]
+        command = {'type': 'command_execution', 'id': 'item_1'}
+        start = {'type': 'item.started', 'item': dict(command, status='in_progress')}
+        done = {'type': 'item.completed', 'item': dict(command, status='completed', exit_code=0)}
+        end = [
+            {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'candidate'}},
+            {'type': 'turn.completed'},
+        ]
+        return thread, turn, start, done, end
+
+    def diagnostic_stderr(self):
+        return (
+            '2026-11-24T01:02:03.123Z ERROR codex_core::tools::router: error='
+            '`justification` requires an explicit `sandbox_permissions`; use '
+            '`sandbox_permissions: "require_escalated"` for unsandboxed execution, or omit `justification`.\n'
+        )
+
+    def fallback_event(self, model):
+        return {'type': 'item.completed', 'item': {
+            'id': 'item_0', 'type': 'error',
+            'message': f'Model metadata for `{model}` not found. Defaulting to fallback metadata; '
+                       'this can degrade performance and cause issues.',
+        }}
+
+    def test_formal_token_plan_diagnostics_use_verified_version(self):
+        thread, turn, start, done, end = self.diagnostic_events()
+        for model, count, fallback in (
+                ('qwen3.8-max', 1, False), ('deepseek-v4-pro', 2, True),
+                ('deepseek-v4.1-flash', 0, True)):
+            with self.subTest(model=model):
+                events = thread + ([self.fallback_event(model)] if fallback else []) + turn + [start, done] + end
+
+                def execute(argv, workspace, log, *limits, env, stderr_log):
+                    log.write_text(''.join(json.dumps(event) + '\n' for event in events))
+                    stderr_log.write_text(self.diagnostic_stderr() * count)
+                    return 0
+
+                cli = self.root / 'codex-0.169.1'
+                cli.write_text(FAKE.read_text().replace('codex-cli 0.163.0', 'codex-cli 0.169.1'))
+                cli.chmod(0o700)
+                with patch.object(implementation, 'execute', side_effect=execute):
+                    result = implementation.run(self.args(name=model, model=model, cli=str(cli)))
+                self.assertEqual(result['status'], 'completed')
+                self.assertEqual(result['cli_version'], 'codex-cli 0.169.1')
+                self.assertEqual(result['model_evidence'], 'requested_only')
+                self.assertIsNone(result['actual_model'])
+                expected = []
+                if count:
+                    expected.append({'kind': 'tool_sandbox_parameters', 'stream': 'stderr', 'count': count})
+                if fallback:
+                    item = self.fallback_event(model)['item']
+                    expected.append({'kind': 'model_metadata', 'id': item['id'], 'message': item['message']})
+                self.assertEqual(result['warnings'], expected)
+                instructions = (self.root / model / 'instructions.txt').read_text()
+                self.assertIn('omit justification', instructions)
+                self.assertIn('never request escalation', instructions)
+
+    def test_tool_sandbox_diagnostic_requires_allowlisted_route_and_successful_command(self):
+        thread, turn, start, done, end = self.diagnostic_events()
+        log = self.root / 'sandbox.jsonl'
+        stderr = self.root / 'sandbox.stderr'
+        stderr.write_text(self.diagnostic_stderr())
+        log.write_text('\n'.join(map(json.dumps, thread + turn + [start, done] + end)))
+        with self.assertRaisesRegex(RunError, 'unknown Codex stderr line'):
+            stderr_warnings(stderr)  # Review's shared parser defaults to rejection.
+        for model, version in (('qwen3.8-max', None), ('qwen3.8-max', '0.169.1'),
+                               ('qwen3.8-max', 'codex-cli 0.163.0'),
+                               ('deepseek-v4.1-flash', 'codex-cli 0.169.1'),
+                               ('deepseek-v4', 'codex-cli 0.169.1')):
+            with self.subTest(model=model, version=version):
+                with self.assertRaisesRegex(RunError, 'unknown Codex stderr line'):
+                    validate(log, 0, model, stderr_log=stderr, cli_version=version)
+        args = dict(requested_model='qwen3.8-max', stderr_log=stderr, cli_version='codex-cli 0.169.1')
+        for line in (self.diagnostic_stderr().replace(' ERROR ', ' WARN '),
+                     self.diagnostic_stderr().replace('-11-24', '-11-31'),
+                     self.diagnostic_stderr().rstrip() + ' forged\n',
+                     self.diagnostic_stderr() + '2026-11-24T01:02:04Z ERROR permission denied\n'):
+            with self.subTest(stderr=line):
+                stderr.write_text(line)
+                with self.assertRaisesRegex(RunError, 'unknown Codex stderr line'):
+                    validate(log, 0, **args)
+        stderr.write_text(self.diagnostic_stderr())
+        for execution in (
+                [], [done], [dict(start, type='item.updated'), done],
+                [dict(start, item=dict(start['item'], type='reasoning')), done],
+                [start, dict(done, item=dict(done['item'], type='reasoning'))],
+                [start, dict(done, item=dict(done['item'], exit_code=False))],
+                [start, dict(done, item=dict(done['item'], exit_code=1))],
+                [start, dict(done, item=dict(done['item'], status='failed'))]):
+            with self.subTest(execution=execution):
+                log.write_text('\n'.join(map(json.dumps, thread + turn + execution + end)))
+                with self.assertRaisesRegex(RunError, 'requires a successful command'):
+                    validate(log, 0, **args)
+        for signal_event in (
+                {'type': 'item.completed', 'item': {'type': 'permission_denied'}},
+                {'type': 'turn.failed'}, {'type': 'error', 'message': 'permission denied'},
+                dict(turn[0], is_error=True),
+                dict(done, item=dict(done['item'], error='permission denied')),
+                dict(done, permission_denials=['sandbox'])):
+            with self.subTest(event=signal_event):
+                log.write_text('\n'.join(map(json.dumps, thread + turn + [start, done, signal_event] + end)))
+                with self.assertRaisesRegex(RunError, 'error or|permission denial'):
+                    validate(log, 0, **args)
+        for code, tail in ((1, end), (0, end[:-1]), (0, end[1:])):
+            with self.subTest(code=code, tail=tail):
+                log.write_text('\n'.join(map(json.dumps, thread + turn + [start, done] + tail)))
+                with self.assertRaisesRegex(RunError, 'requires exit 0'):
+                    validate(log, code, **args)
+
+    def test_deepseek_metadata_fallback_requires_exact_preturn_event(self):
+        model = 'deepseek-v4-pro'
+        version = 'codex-cli 0.169.1'
+        thread, turn, _, _, end = self.diagnostic_events()
+        log = self.root / 'fallback.jsonl'
+        warning = self.fallback_event(model)
+        item = warning['item']
+        for selected, cli, events in (
+                (model, None, thread + [warning] + turn),
+                (model, 'codex-cli 0.163.0', thread + [warning] + turn),
+                ('deepseek-v4', version, thread + [self.fallback_event('deepseek-v4')] + turn),
+                (model, version, thread + [self.fallback_event('deepseek-v4.1-flash')] + turn),
+                (model, version, thread + [warning, warning] + turn),
+                (model, version, [warning] + thread + turn),
+                (model, version, thread + turn + [warning]),
+                (model, version, thread + [dict(warning, type='item.updated')] + turn),
+                (model, version, thread + [dict(warning, is_error=False)] + turn),
+                (model, version, thread + [dict(warning, item=dict(item, id=''))] + turn),
+                (model, version, thread + [dict(warning, item=dict(item, status='completed'))] + turn),
+                (model, version, thread + [dict(warning, item=dict(item, message=item['message'] + ' '))] + turn)):
+            with self.subTest(model=selected, cli=cli, events=events):
+                log.write_text('\n'.join(map(json.dumps, events + end)))
+                with self.assertRaises(RunError):
+                    validate(log, 0, selected, cli_version=cli)
 
     def test_unfinished_item_unknown_event_or_permission_denial_is_not_success(self):
         start = [{'type': 'turn.started'}, {'type': 'item.completed', 'item': {'type': 'agent_message', 'text': 'not final'}}]

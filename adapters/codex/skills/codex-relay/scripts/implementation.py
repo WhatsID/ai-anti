@@ -37,6 +37,7 @@ operations. Do not commit, push, install or deploy. Report exact changed paths,
 tests, failures and limitations. Stop on unresolved permission/environment errors.
 Never claim actual server model identity or primary acceptance. The primary owns
 independent acceptance. Do not retry this task in another process or model.'''
+TOKEN_PLAN_INSTRUCTIONS = '\nFor default sandbox tool calls, omit justification and never request escalation.'
 
 
 def configuration(route, instructions):
@@ -89,7 +90,8 @@ def run(args):
         raise ConfigError('Codex native implementation must use host spawn_agent, not this CLI')
     out.mkdir(mode=0o700, parents=True, exist_ok=False)
     instructions = out / 'instructions.txt'
-    instructions.write_text(INSTRUCTIONS, encoding='utf-8')
+    instructions.write_text(INSTRUCTIONS + (TOKEN_PLAN_INSTRUCTIONS if route['provider'] == 'token_plan' else ''),
+                            encoding='utf-8')
     payload = prompt.read_text('utf-8')
     (out / 'prompt.txt').write_text(payload, encoding='utf-8')
     options = configuration(route, instructions) if route['provider'] == 'token_plan' else None
@@ -149,7 +151,8 @@ def run(args):
             argv += [payload]
             code = execute(argv, workspace, log, *limits, CAP, env=env, stderr_log=stderr_log)
             evidence['exit_code'] = code
-            evidence.update(validate(log, code, route['requested_model'], stderr_log=stderr_log), status='completed', completed=True)
+            evidence.update(validate(log, code, route['requested_model'], stderr_log=stderr_log,
+                                     cli_version=cap['cli_version']), status='completed', completed=True)
     except (RunError, ConfigError, OSError, UnicodeError, KeyboardInterrupt) as exc:
         # Raw provider output stays on disk; never echo credentials from errors.
         evidence.update(status='failed', error_kind=getattr(exc, 'kind', 'execution_failed'),

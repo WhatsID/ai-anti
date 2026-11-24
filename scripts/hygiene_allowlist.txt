@@ -101,5 +101,6 @@ docs/PLUGINS.md:Token Plan
 .prepush-commit-messages.txt:- Codex 版本钉按路径拆分：只读评审与 Claude 侧实施加入 0.169.1，Token Plan 实施保持
 apps/macos/backend/implementation_models.py:qwen3.8-max
 adapters/codex/skills/codex-relay/SKILL.md:qwen3.8-max
+adapters/codex/skills/codex-relay/scripts/implementation_protocol.py:qwen3.8-max
 adapters/codex/tests/test_implementation.py:qwen3.8-max
 apps/macos/backend/tests/test_control.py:qwen3.8-max
