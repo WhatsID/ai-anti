@@ -4,21 +4,21 @@
 
 Claude Code、Codex、AGY 各验证下表中的 7 条评审路径和 11 条实施路径。验收单位为「主导宿主 × 角色 × 服务 × 请求模型」，共 54 项。同名模型经 Token Plan 和厂商直连分别计数。评审和实施分别验收，无需把 7 个评审模型和 11 个实施模型两两配对。
 
-**每个宿主必须在自己的原生会话中发起验证、检查产物并登记结论。** Codex 会话负责 Codex 的 18 项，Claude Code 和 AGY 各自的 18 项留给相应会话执行。会话归属取决于发起并验收任务的主模型；例如 Codex 调用 Claude CLI 执行 Anthropic 评审，这条证据归 Codex。本轮已在 Codex 会话执行。Claude Code 与 AGY 留待各自会话验证。
+**每个宿主必须在自己的原生会话中发起验证、检查产物并登记结论。** Codex 会话负责 Codex 的 18 项，AGY 会话负责 AGY 的 19 项（含 AGY 开放的 Token Plan `qwen3.8-max` 官方评审，共 8 评审 + 11 实施），Claude Code 的 18 项留给 Claude Code 会话执行。会话归属取决于发起并验收任务的主模型；例如 Codex 调用 Claude CLI 执行 Anthropic 评审，这条证据归 Codex。截至 2026-11-24，Codex 与 AGY 各自原生会话均已完成本轮验收，Claude Code 留待其原生会话验证。
 
-| 服务 | 请求模型 ID | 评审 | 实施 | Codex 方案评审状态（2026-11-24） | Codex 实施状态（2026-11-24） |
-|---|---|---|---|---|---|
-| Token Plan | `qwen4-max` | 需验 | 需验 | Responses 通过 | 正式合成实施已通过（0.169.1） |
-| Token Plan | `qwen3.8-max` | — | 需验 | — | 正式合成实施已通过（0.169.1，修复后复测） |
-| Token Plan | `deepseek-v4-pro` | 需验 | 需验 | Responses 通过 | 两次复测均通过 5/5 项断言，正式入口均拒绝会话号 0 |
-| Token Plan | `deepseek-v4.1-flash` | — | 需验 | — | 正式合成实施已通过（0.169.1，修复后复测） |
-| Token Plan | `glm-5.3` | 需验 | 需验 | Responses 通过 | 正式合成实施已通过（0.169.1） |
-| 千问按量直连 | `qwen4-max` | 需验 | 需验 | Responses 通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
-| 千问按量直连 | `qwen3.8-max` | — | 需验 | — | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
-| Kimi 官方直连 | `kimi-k3.1-pro` | 需验 | 需验 | Responses 通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
-| Kimi 官方直连 | `kimi-k3` | 需验 | 需验 | Anthropic 通过，Responses 首次失败、复测通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
-| DeepSeek 官方直连 | `deepseek-v4-pro` | 需验 | 需验 | Anthropic 和 Responses 均通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
-| DeepSeek 官方直连 | `deepseek-flash` | — | 需验 | — | 正式直连实施通过，5/5 项断言（API 上报型号匹配） |
+| 服务 | 请求模型 ID | 评审 | 实施 | Codex 方案评审状态（2026-11-24） | Codex 实施状态（2026-11-24） | AGY 方案评审状态（2026-11-24） | AGY 实施状态（2026-11-24） |
+|---|---|---|---|---|---|---|---|
+| Token Plan | `qwen4-max` | 需验 | 需验 | Responses 通过 | 正式合成实施已通过（0.169.1） | 正式 AGY 入口 Responses 通过 | 正式 AGY 入口通过（首轮沙箱拒 `rm -rf`，复测 5/5） |
+| Token Plan | `qwen3.8-max` | AGY 需验 | 需验 | — | 正式合成实施已通过（0.169.1，修复后复测） | 正式 AGY 入口 Responses 通过 | 正式 AGY 入口通过（0.169.1，5/5） |
+| Token Plan | `deepseek-v4-pro` | 需验 | 需验 | Responses 通过 | 两次复测均通过 5/5 项断言，正式入口均拒绝会话号 0 | 正式 AGY 入口 Responses 通过 | 正式 AGY 入口合成样例一次通过（0.169.1，5/5；App 保留长任务风险提示） |
+| Token Plan | `deepseek-v4.1-flash` | — | 需验 | — | 正式合成实施已通过（0.169.1，修复后复测） | — | 正式 AGY 入口通过（0.169.1，5/5） |
+| Token Plan | `glm-5.3` | 需验 | 需验 | Responses 通过 | 正式合成实施已通过（0.169.1） | 正式 AGY 入口 Responses 通过 | 正式 AGY 入口通过（0.169.1，5/5） |
+| 千问按量直连 | `qwen4-max` | 需验 | 需验 | Responses 通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） | 正式 AGY 入口 Responses 通过 | 正式 AGY 入口直连通过，5/5（API 上报型号匹配） |
+| 千问按量直连 | `qwen3.8-max` | — | 需验 | — | 正式直连实施通过，5/5 项断言（API 上报型号匹配） | — | 正式 AGY 入口直连通过，5/5（API 上报型号匹配） |
+| Kimi 官方直连 | `kimi-k3.1-pro` | 需验 | 需验 | Responses 通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） | 首轮上游过载，错峰复测 Responses 通过 | 正式 AGY 入口直连通过，5/5（API 上报型号匹配） |
+| Kimi 官方直连 | `kimi-k3` | 需验 | 需验 | Anthropic 通过，Responses 首次失败、复测通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） | 首轮上游过载，错峰复测 Responses 通过 | 正式 AGY 入口直连通过，5/5（API 上报型号匹配） |
+| DeepSeek 官方直连 | `deepseek-v4-pro` | 需验 | 需验 | Anthropic 和 Responses 均通过 | 正式直连实施通过，5/5 项断言（API 上报型号匹配） | 正式 AGY 入口 Responses 通过 | 正式 AGY 入口直连通过，5/5（API 上报型号匹配） |
+| DeepSeek 官方直连 | `deepseek-flash` | — | 需验 | — | 正式直连实施通过，5/5 项断言（API 上报型号匹配） | — | 正式 AGY 入口直连通过，5/5（API 上报型号匹配） |
 
 ## 已有 API 证据
 
@@ -149,6 +149,45 @@ Codex 原生会话使用基于 `e1e4df8` 的候选，从生产 `implementation.p
 六次真实调用结束后，文件写入层补充了 Git 子进程的私有创建权限。以六份真实返回的代码离线复核最终写入路径，文件字节一致，已有私有文件及新文件权限均为 `0600`，五项断言分别通过。网络调用及响应校验代码与实测版本指纹一致。
 
 本机证据目录为 `/private/tmp/ai-anti-direct-accept.KtWXgrVL`。在 `live/` 内，`prepare.json`、`run.json` 与 `acceptance.json` 汇总预检、正式运行和主模型独立验收；各 `run-<厂商>-<型号>/` 留存 manifest、状态及运行日志。另见 `review/report.md` 和 `adjudication.md` 中的接入方案评审与逐项裁决。
+
+## AGY 会话正式方案评审与实施验收 · 2026-11-24
+
+**AGY 正式官方方案评审 8/8 通过，正式官方实施 11/11 通过（共 19/19）。** 本轮由 AGY 原生会话（会话 ID `000094b7-2f8b-4bc5-9ede-1c442162756e`）在适配器提交 `d9a56e1` 与 `codex-cli 0.169.1` 上独立发起与验收。合成仓库 `first_even` 基线为 `3441ff4787990806b624a5cafd9ad65e0479c136`，未改动用户真实配置文件。每组临时配置均写入与被测路由不同的反向诱饵 `codex_relay` 路由，核验 AGY 正式入口严格读取 `agy_relay.review` 与 `agy_relay.implementation`。
+
+### AGY 正式官方方案评审（8/8）
+
+通过 `adapters/agy/scripts/codex_review.py plan` 发起（分流至 `review.py plan --relay agy --channel official_api`）。八组均核验退出码 `0`、`manifest.json`/`status.json` 中 `relay == "agy"`、`service` 与 `requested_model` 匹配、`completed == true`、完成 `inventory` 与 `review` 两阶段，且 `report.md` 非引用正文均明确指出送审方案末尾 `return 0` 应为 `return None` 的高严重度缺陷。八组均走 Codex Responses，模型证据均为 `requested_only`（`actual_model = null`）。四组 Token Plan 均在主订阅 429 后自动切至备用订阅完成。
+
+| 服务 | 请求型号 | Responses 端点 | 正式入口耗时 | 备注 |
+|---|---|---|---:|---|
+| Token Plan | `qwen4-max` | `token-plan.maas.qianwenaiapi.com/compatible-mode/v1` | 98.40 秒 | 一次通过（主 429 → 备用） |
+| Token Plan | `qwen3.8-max` | `token-plan.maas.qianwenaiapi.com/compatible-mode/v1` | 135.75 秒 | 一次通过（主 429 → 备用） |
+| Token Plan | `deepseek-v4-pro` | `token-plan.maas.qianwenaiapi.com/compatible-mode/v1` | 110.50 秒 | 一次通过（主 429 → 备用） |
+| Token Plan | `glm-5.3` | `token-plan.maas.qianwenaiapi.com/compatible-mode/v1` | 64.77 秒 | 一次通过（主 429 → 备用） |
+| 千问按量直连 | `qwen4-max` | `maas.qianwenaiapi.com/compatible-mode/v1` | 95.28 秒 | 一次通过 |
+| DeepSeek 官方直连 | `deepseek-v4-pro` | `api.deepseek.com` | 112.21 秒 | 一次通过 |
+| Kimi 官方直连 | `kimi-k3.1-pro` | `api.moonshot.cn/v1` | 173.80 秒 | 首轮 `inventory` 通过后在 `review` 遇上游过载（`overloaded`），错峰新目录复测通过；首轮日志保留 |
+| Kimi 官方直连 | `kimi-k3` | `api.moonshot.cn/v1` | 350.83 秒 | 首轮在 `inventory` 遇上游过载（`overloaded`），错峰新目录复测通过；首轮日志保留 |
+
+### AGY 正式官方实施（11/11）
+
+通过 `adapters/codex/skills/codex-relay/scripts/implementation.py --relay agy` 发起；厂商直连六组显式传入 `--file numbers_sample.py`。十一组均在各自独立的 detached linked worktree 执行，主模型逐份核验退出码 `0`、`relay == "agy"`、`service` 与 `requested_model` 匹配、工作树仅改动 `numbers_sample.py`、读取 diff 并独立跑通 5/5 项断言。五组 Token Plan 均走 Codex Responses（`model_evidence = requested_only`、`actual_model = null`、主 429 → 备用）；六组厂商直连均走 Chat Completions 且取得 `model_evidence = api_reported` 精确模型匹配。
+
+| 服务 | 请求型号 | 正式入口耗时 | 模型证据 / 上报型号 | 备注 |
+|---|---|---:|---|---|
+| Token Plan | `qwen4-max` | 15.75 秒 | `requested_only` / `null` | 首轮代码通过 5/5，但模型尝试执行 `rm -rf __pycache__` 被沙箱规则拒绝（保留首轮失败日志）；新工作树复测一次通过 |
+| Token Plan | `qwen3.8-max` | 22.89 秒 | `requested_only` / `null` | 一次通过（主 429 → 备用） |
+| Token Plan | `deepseek-v4-pro` | 28.38 秒 | `requested_only` / `null` | 合成样例一次通过（主 429 → 备用）；因复杂任务历史复现过会话号 0 错误，App 仍保留风险提示 |
+| Token Plan | `deepseek-v4.1-flash` | 10.64 秒 | `requested_only` / `null` | 一次通过（主 429 → 备用） |
+| Token Plan | `glm-5.3` | 14.42 秒 | `requested_only` / `null` | 一次通过（主 429 → 备用） |
+| 千问按量直连 | `qwen4-max` | 4.33 秒 | `api_reported` / `qwen4-max` | 一次通过 |
+| 千问按量直连 | `qwen3.8-max` | 15.03 秒 | `api_reported` / `qwen3.8-max` | 一次通过 |
+| DeepSeek 官方直连 | `deepseek-v4-pro` | 5.02 秒 | `api_reported` / `deepseek-v4-pro` | 一次通过 |
+| DeepSeek 官方直连 | `deepseek-flash` | 2.71 秒 | `api_reported` / `deepseek-flash` | 一次通过 |
+| Kimi 官方直连 | `kimi-k3.1-pro` | 7.89 秒 | `api_reported` / `kimi-k3.1-pro` | 一次通过 |
+| Kimi 官方直连 | `kimi-k3` | 9.94 秒 | `api_reported` / `kimi-k3` | 一次通过 |
+
+本轮验收范围为 AGY 主导的正式 CLI 合成方案评审与隔离单文件实施；AGY 原生 Codex 回归与 macOS 图形界面点击验收仍单列待补。完整原始产物（含三组首轮失败日志与复测输出、各工作树及汇总 JSON）留存于该 AGY 会话暂存区 `<scratchpad>/agy-live-regression`。
 
 ## Codex 会话起跑记录 · 2026-11-24
 
