@@ -16,6 +16,7 @@ import time
 
 from implementation_config import ConfigError, MODEL, public, resolve
 import implementation_qoder
+import implementation_direct
 from ai_anti_config import load, review_limits
 from review_channels import child_environment
 from token_plan_transport import Transport
@@ -85,6 +86,14 @@ def run(args):
     config = load(args.config)
     route = resolve(config, workspace, args.provider, args.model)
     limits = review_limits(config, args.timeout, args.idle_timeout)
+    files = getattr(args, 'file', None)
+    if route['provider'] == 'custom_api':
+        if args.cli is not None:
+            raise ConfigError('custom_api does not support --cli')
+        return implementation_direct.run(route, workspace, prompt, out, files,
+                                         args.prepare_only, limits, CAP, write, digest)
+    if files is not None:
+        raise ConfigError('--file requires explicit --provider custom_api')
     # Native model dispatch remains a host tool operation, never a CLI fallback.
     if route['provider'] == 'codex' and not args.prepare_only:
         raise ConfigError('Codex native implementation must use host spawn_agent, not this CLI')
@@ -180,8 +189,9 @@ def main():
     parser.add_argument('--prompt', required=True, type=Path)
     parser.add_argument('--out', required=True, type=Path)
     parser.add_argument('--config', type=Path)
-    parser.add_argument('--provider', choices=('codex', 'token_plan', 'qoder'))
+    parser.add_argument('--provider', choices=('codex', 'token_plan', 'qoder', 'custom_api'))
     parser.add_argument('--model')
+    parser.add_argument('--file', action='append', help='authorized workspace-relative text path for custom_api')
     parser.add_argument('--prepare-only', action='store_true')
     parser.add_argument('--cli', help='explicit provider executable (also supports offline fake fixtures)')
     parser.add_argument('--timeout', type=int)

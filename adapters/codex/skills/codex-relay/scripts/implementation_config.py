@@ -20,6 +20,22 @@ MODEL = 'glm-5.3'
 PROVIDERS = ('codex', 'token_plan', 'qoder')
 
 
+DIRECT_ROUTES = {
+    'qwen': ('https://maas.qianwenaiapi.com/compatible-mode/v1/chat/completions',
+             ('qwen4-max', 'qwen3.8-max')),
+    'kimi': ('https://api.moonshot.cn/v1/chat/completions', ('kimi-k3.1-pro', 'kimi-k3')),
+    'deepseek': ('https://api.deepseek.com/chat/completions', ('deepseek-v4-pro', 'deepseek-flash')),
+}
+
+
+def direct_route(chosen):
+    for service, (url, models) in DIRECT_ROUTES.items():
+        if chosen in models:
+            return dict(provider='custom_api', requested_model=chosen, service=service,
+                        endpoint=url, executor='custom_api', wire_api='chat_completions')
+    raise ConfigError('custom_api requires an explicit supported direct model ID')
+
+
 def provider(value):
     value = 'codex' if value is None else value
     if not isinstance(value, str) or value not in PROVIDERS:
@@ -55,6 +71,8 @@ def credential_path(value):
 
 def resolve(config, workspace, explicit_provider=None, explicit_model=None):
     """Overrides are one coherent provider/model pair; never consult active_api for GLM."""
+    if explicit_provider == 'custom_api':
+        return direct_route(explicit_model)
     from token_plan_transport import contract
     contract(config, workspace)
     stored = provider(lookup(config, 'codex_relay.implementation_provider'))

@@ -157,7 +157,8 @@ Resolve `codex_relay.implementation_provider` from the user config: missing/null
 `codex`; only `codex`, `token_plan` and `qoder` are accepted, including when reading or restoring
 configuration. Keep `codex_relay.secondary_model` as the native Codex model; selecting
 Token Plan or Qoder never overwrites it. An explicit per-task provider/model instruction takes
-priority as a coherent pair. Token Plan permits `glm-5.3`, `qwen4-max`, `qwen3.8-max`,
+priority as a coherent pair. Use [vendor API implementation](#vendor-api-implementation)
+for the explicit `custom_api` override. Token Plan permits `glm-5.3`, `qwen4-max`, `qwen3.8-max`,
 `deepseek-v4-pro` and `deepseek-v4.1-flash`. Qoder permits only logical `glm-5.3`.
 Native Codex rejects those external IDs and uppercase `GLM-5.3`. Resolve any ambiguous
 explicit request before dispatch. `solo` disables independent implementation;
@@ -288,7 +289,51 @@ those tool paths on 1.1.77; they do not prove whole-project implementation or pr
 acceptance. The primary independently checks candidate bytes, tests, scope and identity
 before landing. The review test remains Kimi review and cannot validate GLM implementation.
 
-### Landing gates (all three implementation providers)
+### Vendor API implementation
+
+Use `custom_api` only as an explicit task override with an exact `--model` and
+one `--file` for every authorized workspace-relative text path. Persisted
+`implementation_provider` values keep the existing contract. Use a detached
+linked Git worktree and an exclusive output directory outside it. Include
+the settled task in the prompt and only the files the user authorized for
+vendor disclosure. A selected new file must have an existing parent directory.
+
+```bash
+python3 /absolute/loaded/codex-relay/scripts/implementation.py \
+  --provider custom_api --model qwen4-max --file src/example.py \
+  --workspace /absolute/isolated-worktree --prompt /absolute/run/prompt.txt \
+  --out /absolute/run/direct-prepare --prepare-only
+```
+
+Supported model and service pairs are `qwen4-max` / `qwen3.8-max` for `qwen`,
+`kimi-k3.1-pro` / `kimi-k3` for `kimi`, and `deepseek-v4-pro` /
+`deepseek-flash` for `deepseek`. Each uses its fixed HTTPS Chat Completions
+endpoint and the matching `<service>.value` slot in
+`~/.config/ai-anti/secrets.json`. Inspect the prepared route and scope before
+running with a fresh `--out` and without `--prepare-only`. Preparation checks
+the local files and Git worktree without reading the credential or contacting
+the vendor.
+
+The model receives the prompt and selected text only. It can stage one proposal
+with complete replacements for one or more selected files. The second streamed
+request disables tool calls and requires an exact receipt. The host checks the
+workspace baseline again and applies one Git patch. Rewritten files start
+owner-only, then the host restores existing permission bits. New files stay
+owner-only. The primary inspects all changed files and runs tests independently.
+Timeouts and output budgets use the bounded implementation entry
+settings. Failures retain safe diagnostics and require inspection of the
+candidate before any new run. The workspace lock coordinates this tool's
+writers. External writers and interruption during Git patch application or
+permission restoration require inspection of the retained worktree.
+
+The manifest, status, and hashed structured run log record the service and
+endpoint, matched API-reported model, stage outcomes and file fingerprints.
+For prepared runs `actual_model` is null and `model_evidence=requested_only`.
+After both turns and confirmation validate, `actual_model` is the model
+reported by the API with `model_evidence=api_reported`. The backend model
+remains `unknown` and primary acceptance is recorded separately.
+
+### Landing gates
 
 Before landing, recheck the business repository/root, HEAD SHA, and full attached
 branch reference or detached state against the dispatched baseline using the

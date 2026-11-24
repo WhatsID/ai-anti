@@ -39,9 +39,10 @@
 | Field | Value |
 | --- | --- |
 | Agent ID and creation-tool receipt | [evidence] |
-| Implementation provider / executor / CLI version | [provider: codex/token_plan/qoder; executor and version evidence] |
+| Implementation provider / executor / CLI version | [provider: codex/token_plan/qoder/custom_api; executor and version evidence] |
 | Requested model | [value or n/a] |
-| CLI-reported model / evidence type | [value; requested_only / cli_reported / native receipt] |
+| Reported model / evidence type | [value; requested_only / cli_reported / api_reported / native receipt] |
+| Vendor API evidence (when applicable) | [service, fixed endpoint, HTTP statuses and finish reasons by stage, failure stage if any, manifest/status and structured log SHA-256] |
 | Provider backend model | [unknown unless independently observable] |
 | Observable runtime model | [runtime metadata or `unknown`] |
 | Worktree / exact base / dispatched fingerprints | [evidence] |
