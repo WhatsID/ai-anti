@@ -109,3 +109,5 @@ apps/macos/backend/tests/test_control.py:qwen3.8-max
 adapters/codex/skills/codex-relay/scripts/implementation_config.py:qwen3.8-max
 adapters/codex/tests/test_implementation_direct.py:qwen3.8-max
 adapters/codex/tests/test_implementation_direct.py:fixture@example.invalid
+apps/macos/backend/model_services.py:Token Plan 凭证需要对应协议的官方 HTTPS 端点
+apps/macos/backend/tests/test_official_routes.py:qwen3.8-max

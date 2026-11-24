@@ -75,7 +75,8 @@ class DesktopContract(unittest.TestCase):
         self.assertLess(view.index('Picker("实施服务"'), view.index('modelPicker("实施模型 ID"'))
         self.assertIn('Picker("评审服务"', view)
         self.assertIn('SecureField("API密钥"', view)
-        self.assertIn('text: $model.draft.apiKeyInput', view)
+        self.assertIn('model.draft.activeOfficialReview == nil ? $model.draft.apiKeyInput : $model.draft.implementationKeyInput', view)
+        self.assertIn('SecureField("API密钥", text: keyInput)', view)
         self.assertIn('if model.draft.channel == "qwen"', view)
         self.assertIn('Picker("评审执行器"', view)
         self.assertIn('Picker("评审模型ID"', view)
@@ -196,7 +197,10 @@ class DesktopContract(unittest.TestCase):
             self.assertIn(item, review_body)
             self.assertNotIn(item, implementation_body)
         self.assertRegex(review_body, r'if model\.showsReviewAddress \{\s*field\("评审服务地址（Responses）"\)')
-        self.assertIn('TextField("评审服务地址（Responses）", text: $model.draft.responsesBaseURL)', review_body)
+        self.assertIn('TextField("评审服务地址（Responses）", text: $model.draft.responsesBaseURL, axis: .vertical)', review_body)
+        for body in (review_body, implementation_body):
+            self.assertLess(body.index('Text(ReviewService.title("qoder")).tag("qoder")'), body.index('Text("API 直连").tag("api_direct")'))
+        self.assertIn('Text(verbatim: baseURL + "/responses")', review_body)
         executor_field = review_body.split('field("评审执行器")', 1)[1].split('field("评审模型ID")', 1)[0]
         self.assertIn('selection: .constant(model.draft.channel)', executor_field)
         self.assertIn('Text(model.reviewExecutorLabel)', executor_field)
@@ -204,7 +208,7 @@ class DesktopContract(unittest.TestCase):
         for removed in ('Picker("Qwen 评审执行器"', 'claudeQwenExecutor', 'Anthropic', '$model.draft.baseURL'):
             self.assertNotIn(removed, review_body)
         self.assertIn('Qwen 评审经 Codex CLI · Responses 执行', review_body)
-        for item in ('Picker("实施服务"', 'modelPicker("实施模型 ID"', 'TextField("实施服务地址"', 'SecureField("主账号API密钥", text: $model.draft.implementationKeyInput)'):
+        for item in ('Picker("实施服务"', 'modelPicker("实施模型 ID"', 'field("实施服务地址"', 'SecureField("主账号API密钥", text: $model.draft.implementationKeyInput)'):
             self.assertIn(item, implementation_body)
             self.assertNotIn(item, review_body)
         self.assertGreater(view.index('Button("检查配置"'), view.index(implementation))
@@ -422,6 +426,9 @@ for event in [
         for service in ('token_plan','custom_api'):
             config = json.loads(store.raw('ai'))
             config['plugins']['qwen']['credential_key'] = 'model_services.'+service+'.value'
+            config['plugins']['qwen']['base_url'] = (
+                'https://token-plan.maas.qianwenaiapi.com/apps/anthropic'
+                if service == 'token_plan' else 'https://example.invalid/anthropic')
             atomic(store.paths['ai'],json.dumps(config).encode())
             chosen = list(argv); chosen[chosen.index('--out')+1] = str(self.root/('out-'+service))
             result = subprocess.run(chosen,env=self.env,capture_output=True,text=True)
@@ -429,6 +436,14 @@ for event in [
             manifest = json.loads((self.root/('out-'+service)/'manifest.json').read_text())
             self.assertEqual(manifest['channel'],'qwen')
             self.assertNotIn('ONE_FIXTURE',json.dumps(manifest)); self.assertNotIn('TWO_FIXTURE',json.dumps(manifest))
+        config['plugins']['qwen']['credential_key'] = 'model_services.token_plan.value'
+        atomic(store.paths['ai'], json.dumps(config).encode())
+        rejected = list(argv)
+        rejected[rejected.index('--out') + 1] = str(self.root / 'refused')
+        result = subprocess.run(rejected, env=self.env, capture_output=True, text=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('官方 HTTPS', result.stderr)
+        self.assertFalse((self.root / 'refused').exists())
         # The UI wrapper must match actual parameter names, not an invented runner.
         actual=parser().parse_args(argv[2:]); self.assertEqual(actual.channel,'qwen')
     def test_qwen_command_bounded_call_chain(self):
@@ -488,6 +503,8 @@ for event in [
         atomic(store.paths['secrets'],b'{"tokenplan":{"value":"old"},"model_services":{"token_plan":{"value":"one"},"custom_api":{"value":"two"}}}')
         for key,expected in [('model_services.token_plan.value','one'),('model_services.custom_api.value','two'),('tokenplan.value','old')]:
             q['credential_key']=key
+            q['base_url'] = ('https://token-plan.maas.qianwenaiapi.com/apps/anthropic'
+                             if key == 'model_services.token_plan.value' else 'https://fixture.invalid')
             route=resolve({'plugins':{'qwen':q}},'qwen',None,self.repo,{},executor='claude')
             self.assertEqual(child_environment(route)['ANTHROPIC_API_KEY'],expected)
         q['credential_key']='model_services.custom_api.value'
@@ -500,7 +517,7 @@ for event in [
         spec = importlib.util.spec_from_file_location('desktop_implementation_config', path)
         module = importlib.util.module_from_spec(spec); spec.loader.exec_module(module)
         from config_store import implementation_provider, StoreError
-        for value in (None, 'codex', 'token_plan'):
+        for value in (None, 'codex', 'token_plan', 'custom_api'):
             self.assertEqual(implementation_provider(value), module.provider(value))
         for value in ('glm-5.3', [], {}, True, 3):
             with self.assertRaises(StoreError): implementation_provider(value)
@@ -510,7 +527,10 @@ for event in [
         self.assertIn('static let implementationGLM = "glm-5.3"', model)
         view = (ROOT/'apps/macos/Sources/AIReviewBar/SettingsView.swift').read_text()
         self.assertIn('.disabled(!model.draft.implementationEnabled)', view)
-        self.assertIn('model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : $model.draft.implementationProvider', view)
+        self.assertEqual(view.count('Text("API 直连").tag("api_direct")'), 2)
+        self.assertIn('vendorPicker(reviewService, custom: true)', view)
+        self.assertIn('vendorPicker($model.draft.implementationService, custom: false)', view)
+        self.assertIn('model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : serviceGroup($model.draft.implementationService', view)
         self.assertIn('$model.draft.implementationKeyInput', view)
         self.assertIn('backend/implementation_models.py', (ROOT/'apps/macos/build-app.sh').read_text())
         import implementation_models

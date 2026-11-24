@@ -113,15 +113,17 @@ Before implementation, invoke the resolved `claude-review` `plan` entry with
 the selected existing review materials and project scale, preserving the complete
 implementation scope in the plan. Resolve the channel from explicit user instructions,
 otherwise `codex_relay.review_channel` (default `claude`); invalid configuration stops.
-Pass `--channel qwen` for Qwen and omit `--model`, using `plugins.qwen.model`.
+For `official_api`, omit `--channel` to use the saved route or explicitly pass `--channel official_api`.
+The entry uses `codex_relay.official_review` for the fixed Responses endpoint and selected model.
+An explicit `--channel qwen` selects the legacy Qwen profile and uses `plugins.qwen.model`.
 Claude defaults to Opus; Fable requires explicit `--model fable`. This is the real
 two-stage review, and neither path automatically falls back. Require `status.json: completed`, `manifest.json: mode=plan`, complete
 inventory, successful review, actual review-model evidence, and matching task
-request/plan/source fingerprints. Explicit exception: Qwen executor=codex has
+request/plan/source fingerprints. Responses through the Codex executor has
 `actual_model=null`, `model_evidence=requested_only`; accept completed material/protocol
 validation with the requested-model warning, while reporting server routing identity
-as unproven. It does not prove actual cross-model identity or qualify as the R9
-same-family empty-context exception. Select via `codex_relay.qwen_executor=codex` or
+as unproven. This evidence is insufficient for the R9 same-family empty-context exception.
+For the legacy Qwen channel select via `codex_relay.qwen_executor=codex` or
 `--qwen-executor codex`; configure the separate `plugins.qwen.responses_base_url`
 (or per-call `--responses-base-url`). Default executor remains Claude. See
 claude-review's Responses boundaries and pinned CLI capability preflight.
@@ -154,11 +156,10 @@ the exact recorded input and fingerprint are present; a clean worktree must not
 silently omit it. Resolve overlapping dirty work before dispatch.
 
 Resolve `codex_relay.implementation_provider` from the user config: missing/null means
-`codex`; only `codex`, `token_plan` and `qoder` are accepted, including when reading or restoring
-configuration. Keep `codex_relay.secondary_model` as the native Codex model; selecting
-Token Plan or Qoder never overwrites it. An explicit per-task provider/model instruction takes
+`codex`. The accepted values are `codex`, `token_plan`, `qoder` and `custom_api`. Keep `codex_relay.secondary_model` as the native Codex model; selecting
+The external implementation routes preserve it. An explicit per-task provider/model instruction takes
 priority as a coherent pair. Use [vendor API implementation](#vendor-api-implementation)
-for the explicit `custom_api` override. Token Plan permits `glm-5.3`, `qwen4-max`, `qwen3.8-max`,
+for the saved `custom_api` route and explicit override. Token Plan permits `glm-5.3`, `qwen4-max`, `qwen3.8-max`,
 `deepseek-v4-pro` and `deepseek-v4.1-flash`. Qoder permits only logical `glm-5.3`.
 Native Codex rejects those external IDs and uppercase `GLM-5.3`. Resolve any ambiguous
 explicit request before dispatch. `solo` disables independent implementation;
@@ -291,20 +292,24 @@ before landing. The review test remains Kimi review and cannot validate GLM impl
 
 ### Vendor API implementation
 
-Use `custom_api` only as an explicit task override with an exact `--model` and
-one `--file` for every authorized workspace-relative text path. Persisted
-`implementation_provider` values keep the existing contract. Use a detached
+Use `codex_relay.implementation_provider=custom_api` with
+`codex_relay.direct_implementation={"service":"qwen","model":"qwen4-max"}`, or select the
+vendor and model in the macOS implementation settings. For a per-task route
+override pass both `--provider custom_api` and the exact `--model`. A model-only
+override of a saved route must belong to the saved vendor. Every invocation
+requires one `--file` for every authorized workspace-relative text path. Use a detached
 linked Git worktree and an exclusive output directory outside it. Include
 the settled task in the prompt and only the files the user authorized for
 vendor disclosure. A selected new file must have an existing parent directory.
 
 ```bash
 python3 /absolute/loaded/codex-relay/scripts/implementation.py \
-  --provider custom_api --model qwen4-max --file src/example.py \
+  --file src/example.py \
   --workspace /absolute/isolated-worktree --prompt /absolute/run/prompt.txt \
   --out /absolute/run/direct-prepare --prepare-only
 ```
 
+The example reads the saved route. To override it add `--provider custom_api --model qwen4-max`.
 Supported model and service pairs are `qwen4-max` / `qwen3.8-max` for `qwen`,
 `kimi-k3.1-pro` / `kimi-k3` for `kimi`, and `deepseek-v4-pro` /
 `deepseek-flash` for `deepseek`. Each uses its fixed HTTPS Chat Completions
@@ -364,7 +369,7 @@ the template.
 
 The primary model is selected by the user/runtime, never dynamically switched by this
 Skill. `codex_relay.secondary_model` selects only the native Codex independent implementer;
-`implementation_provider=token_plan` uses the independent Token Plan model; `qoder` fixes implementation to logical glm-5.3. None selects the reviewer. Both review channels retain the same evidence and scope gates.
+`implementation_provider=token_plan` uses the independent Token Plan model; `qoder` fixes implementation to logical glm-5.3. A saved vendor API uses the separate `direct_implementation` selection. Review uses its own route and evidence gates.
 
 ### Independent Token Plan model
 

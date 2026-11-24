@@ -39,9 +39,9 @@ enum SettingsSummary {
         switch draft.channel {
         case "qoder": model = "Kimi-K3.1-Pro"
         case "codex": model = draft.reviewerModel.isEmpty ? "CLI 默认" : draft.reviewerModel
-        default: model = draft.qwenModel.isEmpty ? "未指定" : draft.qwenModel
+        default: model = draft.reviewModel.isEmpty ? "未指定" : draft.reviewModel
         }
-        let protocolDetail = draft.channel == "qwen" ? " · Responses" : ""
+        let protocolDetail = draft.channel == "qwen" || draft.activeOfficialReview != nil ? " · Responses" : ""
         return "评审服务：" + ReviewService.title(draft.service) + protocolDetail + " / " + model + (draft.mode == "solo" ? "（solo 已停用）" : "")
     }
     static func implementation(_ draft: Draft) -> String {
@@ -54,6 +54,7 @@ enum SettingsSummary {
         else if draft.host == "claude" { detail = "Claude Code 实施代理" }
         else if draft.implementationProvider == "qoder" { detail = "Qoder 订阅 / GLM-5.3" }
         else if draft.implementationProvider == "token_plan" { detail = "千问 Token Plan / " + draft.tokenPlanImplementationModel }
+        else if draft.implementationProvider == "custom_api" { detail = ReviewService.title(draft.implementationService) + " / " + draft.implementationModel }
         else { detail = "Codex / " + (draft.secondaryModel.isEmpty ? "未指定" : draft.secondaryModel) }
         return "实施服务：" + detail + (draft.mode == "solo" ? "（solo 已停用）" : "")
     }
@@ -150,7 +151,61 @@ struct SettingsView: View {
     }
     private var reviewModelID: String {
         if model.draft.host == "agy" { return model.draft.agyReviewModel.isEmpty ? "CLI 默认" : model.draft.agyReviewModel }
-        return model.draft.channel == "qoder" ? "kmodel_latest" : model.draft.channel == "codex" ? (model.draft.reviewerModel.isEmpty ? "CLI 默认" : model.draft.reviewerModel) : model.draft.qwenModel
+        return model.draft.channel == "qoder" ? "kmodel_latest" : model.draft.channel == "codex" ? (model.draft.reviewerModel.isEmpty ? "CLI 默认" : model.draft.reviewerModel) : model.draft.reviewModel
+    }
+    private var reviewService: Binding<String> {
+        Binding(get: { model.reviewFamily }, set: { model.switchReviewFamily($0) })
+    }
+
+    private var preferredReviewVendor: String? {
+        if let id = model.draft.officialReview?.service, ReviewService.vendors.contains(id) { return id }
+        let saved = model.savedReviewFamily
+        return ReviewService.vendors.contains(saved) || saved == "custom_api" ? saved : nil
+    }
+
+    private func serviceGroup(_ service: Binding<String>, preferred: String?) -> Binding<String> {
+        let direct = "api_direct"
+        return Binding(get: {
+            let selected = service.wrappedValue
+            return ReviewService.vendors.contains(selected) || selected == "custom_api" ? direct : selected
+        }, set: { group in
+            if group != direct {
+                service.wrappedValue = group
+            } else if !ReviewService.vendors.contains(service.wrappedValue) && service.wrappedValue != "custom_api" {
+                service.wrappedValue = preferred ?? "qwen"
+            }
+        })
+    }
+
+    private func vendorPicker(_ selection: Binding<String>, custom: Bool) -> some View {
+        field("服务提供方") {
+            Picker("服务提供方", selection: selection) {
+                ForEach(ReviewService.vendors, id: \.self) { id in
+                    Text(ReviewService.title(id)).tag(id)
+                }
+                if custom { Text("自定义服务").tag("custom_api") }
+            }
+        }
+    }
+
+    @ViewBuilder private func vendorAuthentication(_ service: String) -> some View {
+        let credential = model.draft.vendorCredentials[service] ?? VendorCredential()
+        field("厂商 API 密钥") {
+            Picker("厂商 API 密钥", selection: Binding(get: { model.draft.vendorCredentials[service]?.action ?? "retain" }, set: { action in
+                model.draft.vendorCredentials[service] = VendorCredential(action: action)
+            })) {
+                Text("保留已存密钥").tag("retain")
+                Text("更换密钥").tag("replace")
+                Text("清除密钥").tag("clear")
+            }.labelsHidden().disabled(isSolo)
+        }
+        if credential.action == "replace" {
+            field("新密钥") {
+                SecureField("新密钥", text: Binding(get: { model.draft.vendorCredentials[service]?.secret ?? "" }, set: {
+                    model.draft.vendorCredentials[service] = VendorCredential(action: "replace", secret: $0)
+                })).disabled(isSolo)
+            }
+        }
     }
     private func field<Content: View>(_ title: String, @ViewBuilder content: () -> Content) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: SettingsColumns.spacing) {
@@ -255,18 +310,24 @@ struct SettingsView: View {
                             .padding(.leading, SettingsColumns.labelWidth + SettingsColumns.spacing)
                     }
                     ServiceSettingsGroup("评审服务", summary: SettingsSummary.review(model.draft), isExpanded: $reviewExpanded) {
-                        Picker("评审服务", selection: Binding(get: { model.reviewFamily }, set: { model.switchReviewFamily($0) })) {
+                        Picker("评审服务", selection: model.draft.host == "codex" ? serviceGroup(reviewService, preferred: preferredReviewVendor) : reviewService) {
                             if model.draft.host == "claude" || model.draft.host == "agy" { Text("Codex").tag("codex") }
                             if model.draft.host != "agy" {
                                 Text("千问 Token Plan").tag("token_plan")
-                                Text("自定义 API").tag("custom_api")
+                                if model.draft.host == "claude" { Text("自定义 API").tag("custom_api") }
                             }
-                            if model.draft.host == "codex" { Text("Qoder").tag("qoder") }
+                            if model.draft.host == "codex" {
+                                Text(ReviewService.title("qoder")).tag("qoder")
+                                Text("API 直连").tag("api_direct")
+                            }
                             if model.draft.channel == "qoder" && model.draft.host == "claude" { Text("已有 Qoder 配置（Claude 主模型暂不支持）").tag("qoder") }
                             if model.draft.channel == "codex" && model.draft.host == "codex" { Text("已有 Codex 配置（此主模型暂不支持）").tag("codex") }
-                            if !["codex", "qwen", "qoder"].contains(model.draft.channel) { Text("已有配置：\(model.draft.channel)").tag(model.draft.channel) }
+                            if !["codex", "qwen", "qoder", ReviewService.officialChannel].contains(model.draft.channel) { Text("已有配置：\(model.draft.channel)").tag(model.draft.channel) }
                         }.disabled(isSolo)
                     } content: {
+                        if model.draft.host == "codex" && (ReviewService.vendors.contains(model.reviewFamily) || model.reviewFamily == "custom_api") {
+                            vendorPicker(reviewService, custom: true).disabled(isSolo)
+                        }
                         if model.draft.host == "agy" {
                             codexModelPicker("评审模型", selection: $model.draft.agyReviewModel,
                                              options: model.reviewerOptions, custom: $customAgyReview)
@@ -280,26 +341,48 @@ struct SettingsView: View {
                                 TextField("评审模型 ID", text: $model.draft.qwenModel).disabled(isSolo)
                             }
                         } else {
-                            modelPicker("评审模型", selection: model.draft.channel == "qoder" ? .constant("kmodel_latest") : $model.draft.qwenModel, options: model.reviewerOptions).disabled(isSolo || model.draft.channel == "qoder")
+                            modelPicker("评审模型", selection: model.draft.channel == "qoder" ? .constant("kmodel_latest") : $model.draft.reviewModel, options: model.reviewerOptions).disabled(isSolo || model.draft.channel == "qoder")
                         }
-                        if model.showsReviewAddress {
+                        if let official = model.draft.activeOfficialReview {
                             field("评审服务地址（Responses）") {
-                                TextField("评审服务地址（Responses）", text: $model.draft.responsesBaseURL).disabled(isSolo)
+                                if let baseURL = ReviewService.officialURLs[official.service] {
+                                    Text(verbatim: baseURL + "/responses")
+                                        .lineLimit(nil)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                        .textSelection(.enabled)
+                                }
+                            }
+                            if ReviewService.vendors.contains(official.service) {
+                                vendorAuthentication(official.service)
+                                note("同一厂商的官方评审与实施共用此密钥。")
+                            }
+                            if official.service == "kimi" && official.model == "kimi-k3" {
+                                note("Kimi K3 的 Responses 合成方案评审首次失败，复测通过。")
+                            }
+                        } else if model.showsReviewAddress {
+                            field("评审服务地址（Responses）") {
+                                TextField("评审服务地址（Responses）", text: $model.draft.responsesBaseURL, axis: .vertical)
+                                    .lineLimit(1...)
+                                    .disabled(isSolo)
                             }
                         }
                         if model.reviewUsesQwen && !model.showsReviewAddress && model.draft.responsesBaseURL.isEmpty {
                             note("回退列表含 Qwen，保存需要 Responses 地址；请先切换到 API 评审服务填写，再切回 Codex。")
                         }
-                        if model.draft.channel == "qwen" {
-                            field(model.draft.activeAPI == "token_plan" ? "主账号API密钥" : "评审服务API密钥") {
-                                SecureField("API密钥", text: $model.draft.apiKeyInput).disabled(isSolo)
+                        if model.draft.channel == "qwen" || model.draft.activeOfficialReview?.service == "token_plan" {
+                            let tokenPlan = model.draft.service == "token_plan"
+                            let keyInput = model.draft.activeOfficialReview == nil ? $model.draft.apiKeyInput : $model.draft.implementationKeyInput
+                            field(tokenPlan ? "主账号API密钥" : "评审服务API密钥") {
+                                SecureField("API密钥", text: keyInput).disabled(isSolo)
                             }
-                            if model.draft.activeAPI == "token_plan" {
+                            if tokenPlan {
                                 field("备用账号API密钥") { SecureField("备用账号API密钥", text: $model.draft.backupKeyInput).disabled(isSolo) }
                                 Toggle("主账号额度用尽时自动切换", isOn: $model.draft.autoFailover).disabled(isSolo)
                                 note("每次新任务优先主账号；明确额度耗尽后当次任务持续使用备用。两个槽与实施共享，关闭开关保留备用密钥；不显示实时余额。")
                             }
-                            note("Claude 与 Codex 共享当前 API 服务、模型及凭证；两个协议地址独立保存。切换服务保留各自草稿，未保存不写入磁盘。")
+                            if model.draft.activeOfficialReview == nil {
+                                note("此配置沿用共享 API 服务与凭证。两个协议地址独立保存。")
+                            }
                         } else if model.draft.channel == "qoder" {
                             note("使用现有 Qoder CLI 登录；登录状态未检测。当前固定 Kimi-K3.1-Pro；仅支持 Codex 主模型。")
                         }
@@ -328,7 +411,7 @@ struct SettingsView: View {
                         }
                     }
                     ServiceSettingsGroup("实施服务", summary: SettingsSummary.implementation(model.draft), isExpanded: $implementationExpanded) {
-                        Picker("实施服务", selection: model.draft.host == "agy" ? .constant("codex") : (model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : $model.draft.implementationProvider)) {
+                        Picker("实施服务", selection: model.draft.host == "agy" ? .constant("codex") : (model.draft.host == "claude" ? $model.draft.claudeImplementationProvider : serviceGroup($model.draft.implementationService, preferred: model.draft.directImplementation?.service))) {
                             if model.draft.host == "agy" {
                                 Text("Codex（指定模型）").tag("codex")
                             } else if model.draft.host == "claude" {
@@ -337,10 +420,14 @@ struct SettingsView: View {
                             } else {
                                 Text("Codex 原生代理").tag("codex")
                                 Text("千问 Token Plan").tag("token_plan")
-                                Text("Qoder 订阅").tag("qoder")
+                                Text(ReviewService.title("qoder")).tag("qoder")
+                                Text("API 直连").tag("api_direct")
                             }
                         }.disabled(!model.draft.implementationEnabled)
                     } content: {
+                        if model.draft.host == "codex" && model.draft.implementationProvider == "custom_api" {
+                            vendorPicker($model.draft.implementationService, custom: false).disabled(!model.draft.implementationEnabled)
+                        }
                         if model.draft.host == "agy" {
                             codexModelPicker("实施模型 ID", selection: $model.draft.agyImplementationModel,
                                              options: model.secondaryOptions, custom: $customAgyImplementation)
@@ -363,7 +450,7 @@ struct SettingsView: View {
                         }
                         if model.draft.host == "codex" && model.draft.implementationProvider == "token_plan" {
                             field("实施服务地址") {
-                                TextField("实施服务地址", text: $model.draft.implementationURL).disabled(isSolo)
+                                Text(ReviewService.officialURLs["token_plan"] ?? "").textSelection(.enabled)
                             }
                             field("主账号API密钥") {
                                 SecureField("主账号API密钥", text: $model.draft.implementationKeyInput).disabled(isSolo)
@@ -371,7 +458,18 @@ struct SettingsView: View {
                             field("备用账号API密钥") { SecureField("备用账号API密钥", text: $model.draft.backupKeyInput).disabled(isSolo) }
                             Toggle("主账号额度用尽时自动切换", isOn: $model.draft.autoFailover).disabled(isSolo)
                             note("与 Token Plan 评审共享双槽。每次新任务主账号优先；明确额度耗尽后当次任务持续使用备用，不显示实时余额。")
-                            note("可选 glm-5.3 / qwen4-max；与 Token Plan 评审共享地址及凭证草稿，独立于当前评审服务和评审模型。评审测试不证明实施可用；业务材料外发仍需当次授权。仅确认请求模型，服务端实际模型未知。")
+                            note("仅确认请求模型。评审检测不验证实施，业务材料外发需当次授权。")
+                            if model.draft.tokenPlanImplementationModel == "deepseek-v4-pro" {
+                                note("订阅 DeepSeek-V4-Pro 的正式实施复测未通过。此处保留已有配置。")
+                            }
+                        }
+                        if model.draft.host == "codex" && model.draft.implementationProvider == "custom_api" {
+                            let service = model.draft.implementationService
+                            field("实施服务地址") {
+                                Text((ReviewService.officialURLs[service] ?? "") + "/chat/completions").textSelection(.enabled)
+                            }
+                            vendorAuthentication(service)
+                            note("使用 Chat Completions。当次实施需逐项授权外发和写入的文件。")
                         }
                         if model.draft.host == "codex" && model.draft.implementationProvider == "qoder" {
                             note("固定 GLM-5.3；使用已有 Qoder 订阅登录，要求 qodercli 1.1.77。检查配置仅检查版本，不验证登录或实施；评审检测仍走所选评审服务。CLI 报告模型，后端路由未知。工具限制不提供文件或网络硬隔离。")

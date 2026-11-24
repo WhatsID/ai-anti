@@ -17,9 +17,15 @@ class CredentialKeys(unittest.TestCase):
             q = dict(model='fixture', base_url='https://fixture.invalid', credential_paths=[str(secret)])
             for key, expected in [('model_services.token_plan.value','one'),('model_services.custom_api.value','two'),('tokenplan.value','legacy'),(None,'legacy')]:
                 fields = dict(q)
-                if key is not None: fields['credential_key'] = key
+                if key is not None:
+                    fields['credential_key'] = key
+                if key == 'model_services.token_plan.value':
+                    fields['base_url'] = 'https://token-plan.maas.qianwenaiapi.com/apps/anthropic'
                 channel = resolve({'plugins': {'qwen': fields}}, 'qwen', None, root, {})
                 self.assertEqual(child_environment(channel)['ANTHROPIC_API_KEY'], expected)
+            with self.assertRaisesRegex(ConfigError, '官方 HTTPS'):
+                resolve({'plugins': {'qwen': dict(q, credential_key='model_services.token_plan.value')}},
+                        'qwen', None, root, {})
             secret.write_text('{"tokenplan":{"value":"legacy"}}')
             fields = dict(q, credential_key='model_services.custom_api.value')
             with self.assertRaises(ConfigError): child_environment(resolve({'plugins':{'qwen': fields}},'qwen',None,root,{}))

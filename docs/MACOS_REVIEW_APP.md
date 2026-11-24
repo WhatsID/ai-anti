@@ -14,7 +14,7 @@
 所有默认配置影响后续启动或调用，当前会话不会切换；项目、命令行、会话设置可能覆盖。
 菜单表示“当前选中配置”，不表示识别出正在运行的客户端。主导工具只选择编辑组。
 Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停止。
-设置内允许未保存时来回切换主模型，各自保留草稿。Claude 和 Codex 共享 API 配置，三个主模型共享协作配置。一次保存提交实际修改，失败保留草稿。取消、刷新、恢复和保存成功后重建全部草稿。主模型、评审服务与协作模式只在设置窗口中修改。
+设置内允许未保存时来回切换主模型，各自保留草稿。Claude 和 Codex 共享原有自定义 API 配置与 Token Plan 账号。Codex 官方评审独立选择服务与型号，三个主模型共享协作配置。一次保存提交实际修改，失败保留草稿。取消、刷新、恢复和保存成功后重建全部草稿。主模型、评审服务与协作模式只在设置窗口中修改。
 
 没有手工草稿时，后台发现指纹或签名变化会静默重新读取，打开设置也会先读取最新快照，再开放表单编辑。已有手工草稿时，应用会保留草稿并在后台检查。若检测到保存时校验的文件发生变化，操作区会用红字列出对应文件标签。磁盘配置无法读取时也会显示红字提示。重新读取前可先记下草稿修改。
 
@@ -28,7 +28,7 @@ Claude 保留已有回退列表；Codex 主导仍按现有正式流程失败停�
 | `agy_relay`（同一 `config.json`） | Codex 评审和实施的模型 ID 分别写入 `review.model` 和 `implementation.model`，保存保留已有的 `provider` 和 `effort`。空评审模型移除 `review.model`，使用 CLI 默认；移除已保存的实施配置须手工编辑配置。 |
 | Claude `settings.json` | 只改顶层 `model`，保留 permissions、MCP 等 |
 | Codex `config.toml` | 只替换简单顶层单行 model 或在文件开头插入，前后 tomllib 验证其他语义一致 |
-| ai-anti `secrets.json` | 新密钥时更新对应 `model_services.<服务>.value`，保留未知键、0600，并将用户级路径置首 |
+| ai-anti `secrets.json` | 旧 API 使用 `model_services.<服务>.value`。官方厂商使用 `qwen.value`、`kimi.value`、`deepseek.value`。保留未知键，文件权限为 0600 |
 | ai-anti `desktop/` | 进程间锁、上次保存私有备份；0700目录/0600文件 |
 
 双方案配置无效时，该下拉选项停用并提示对应字段。普通保存保留原配置，恢复按原始字节还原。
@@ -111,7 +111,7 @@ model_services（version=1、active_api、固定 token_plan/custom_api profiles�
 不做业务评审启动、任务历史、余额订阅看板、通用网关、全面厂商接入；钥匙串迁移及版本兼容清单增强另评估。
 离线fake CLI与prepare-only用例覆盖边界，不冒充真实模型实测；GUI与实际账号合成检测由独立验收记录。
 
-设置上方保留主模型、主模型 ID、协作模式及通用说明；下方分别用无背景、无边框的折叠分组呈现评审和实施设置，仅通过箭头提示展开/收起，两组默认展开、独立展开/收起并支持键盘操作。评审组包含评审服务/模型/地址/密钥、执行器、评审模型ID及迁移、回退、凭证说明；实施组包含实施服务/模型及 Token Plan 地址/密钥与说明。分组标题行与上方共用标签列和输入列，箭头为独立按钮；展开时同一行显示实际服务选择框，不重复显示摘要，收起时右列显示当前草稿的服务与模型摘要，不包含地址或密钥，Claude 主导实施显示自身代理或 Codex 和所选模型 ID，solo 显示停用提示但仍可展开。折叠不保存配置、不重置草稿，标题行保持固定高度，箭头旋转、选择框与摘要交叉淡入淡出、内容高度及透明度统一使用约 0.2 秒 easeInOut 动画并尊重系统减少动态效果设置。外层纵向布局固定全宽，顶部和两组字段共用固定标签宽度与列间距，说明文字对齐输入列；分组内容无额外缩进，展开/收起不影响全局列宽。底部检测、保存等操作在分组外。`values.host_updates` 保留原两组主导工具独立草稿语义和并发保护，服务 profile 与密钥动作同次事务保存。
+设置上方保留主模型、主模型 ID、协作模式及通用说明；下方分别用无背景、无边框的折叠分组呈现评审和实施设置，仅通过箭头提示展开/收起，两组默认展开、独立展开/收起并支持键盘操作。评审组包含评审服务/模型/地址/密钥、执行器、评审模型ID及迁移、回退、凭证说明；实施组包含实施服务、模型、Token Plan 双槽及厂商直连凭证设置。分组标题行与上方共用标签列和输入列，箭头为独立按钮；展开时同一行显示实际服务选择框，不重复显示摘要，收起时右列显示当前草稿的服务与模型摘要，不包含地址或密钥，Claude 主导实施显示自身代理或 Codex 和所选模型 ID，solo 显示停用提示但仍可展开。折叠不保存配置、不重置草稿，标题行保持固定高度，箭头旋转、选择框与摘要交叉淡入淡出、内容高度及透明度统一使用约 0.2 秒 easeInOut 动画并尊重系统减少动态效果设置。外层纵向布局固定全宽，顶部和两组字段共用固定标签宽度与列间距，说明文字对齐输入列；分组内容无额外缩进，展开/收起不影响全局列宽。底部检测、保存等操作在分组外。`values.host_updates` 保留原两组主导工具独立草稿语义和并发保护，服务 profile 与密钥动作同次事务保存。
 
 空主模型保留已有默认值；空 Codex 评审模型使用 CLI 默认（真实检测需明确 ID）。两组主导工具的模型 ID/通道草稿独立。模式合法值 solo、auto、rules、force，旧 required 拒绝；用户当次指令、项目 .claude/relay-mode.local、全局默认、rules 按此顺序优先，solo 停用交叉评审及独立实施。
 
@@ -121,9 +121,8 @@ Claude 主模型默认使用 Claude Code 实施代理，也可选择 Codex（指
 App 暂无思考深度设置，保存时保留手工设置的 `review.codex_effort`，在维持 Codex 实施服务时保存或更换模型也会保留 `claude_relay.implementation.effort`，切离后再换回 Codex 需重设实施深度，本地检查不校验这两个键，App 的真实评审检测也不传思考深度参数。
 
 Codex 主模型的实施服务缺省为 `codex`。`secondary_model` 保留原生模型历史值；
-`implementation_provider=token_plan` 使用独立的 `token_plan_implementation_model`（默认 `glm-5.3`，可选 `qwen4-max`）。solo 停用独立实施控件；切回、取消及保存/恢复保留对应草稿。
-即使当前评审是自定义 API 或 Qoder，选择 GLM 后仍可编辑 Token Plan Responses 地址/密钥，
-它与 Token Plan 评审绑定同一个 profile 草稿，凭证内容不从后台读回 UI。旧自定义 API
+`implementation_provider=token_plan` 使用独立的 `token_plan_implementation_model`，默认 `glm-5.3`。solo 停用独立实施控件。
+Token Plan 实施使用固定官方 Responses 地址和订阅评审的双槽密钥。评审和实施模型独立。旧自定义 API
 凭证不默认为 Token Plan 凭证。允许保存未填密钥草稿，本地检查对当前启用的实施路径
 明确报缺地址/凭证；Claude/solo 不要求 GLM 配置可用。损坏 provider 始终失败。
 “测试评审模型”只验证评审，不证明实施可用。实施调用须按 skill 取得材料外发授权、
@@ -137,7 +136,7 @@ GLM-5.3），不显示地址/密钥输入，使用已有 Qoder 订阅登录，�
 实施。CLI 身份不证明后端路由；工具限制不提供文件/网络硬隔离。
 
 Token Plan 独立实施字段为 `codex_relay.token_plan_implementation_model`，仅允许
-`glm-5.3` / `qwen4-max`；缺失或 null 默认 GLM，空串、大小写变体、preview 和未知值拒绝，
+`glm-5.3`、`qwen4-max`、`qwen3.8-max`、`deepseek-v4-pro` 和 `deepseek-v4.1-flash`。缺失或 null 默认 GLM，空串、大小写变体、preview 和未知值拒绝，
 非当前服务也校验。桌面保存/刷新/恢复保留该选择，旧客户端省略字段时保留既有值。
 它不改变评审模型或 native `secondary_model`，仍共享 Token Plan profile 的地址与凭证。
 Qwen4 评审和实施请求 high effort；GLM 与既有模型维持 medium。Responses 只记录请求模型，
@@ -156,3 +155,12 @@ Token Plan 评审和实施共享主账号、备用账号及“主账号额度用
 启用前两个槽必须配置有效且不同的密钥。每次新任务主账号优先；真实 HTTP429 的明确额度耗尽 JSON 才允许同一模型、同一 URL、同一请求字节换备用认证重发一次，当次任务的后续阶段与有限暂态重试持续使用备用。CLI 会话及已完成工具操作不重启，备用耗尽不循环。普通429限流、401/403、500、超时、断流、已开始的 SSE、账户绑定的 `previous_response_id` / `conversation` 均不跨账号重放。SSE 内错误暂不切换。
 
 启用时只在本次运行内启动有本地认证的 loopback 转发器，真实密钥只保留于父进程内存；上游要求 HTTPS 并验证证书，保留代理及证书环境。CLI 到 localhost 绕过代理。请求及成功响应各上限8MiB，错误 JSON 上限64KiB，最多4个连接；不支持压缩请求与未知传输编码。超限明确失败，不扩大上下文或另起进程。关闭开关保留备用密钥；回滚旧版前先关闭开关，旧版不提供自动切换。manifest/status 的账号槽与切换原因只是此次运行证据，不是实时余额。prepare-only仅验证公开配置，不读取密钥或联网。
+
+
+## Codex 官方服务
+
+官方评审选择使用 `codex_relay.review_channel=official_api` 和 `official_review={service,model}`。
+来自 Token Plan 与三个官方厂商的 Responses 选项使用固定端点。旧 `qwen` 通道仍读取原有公开配置。
+选用厂商直连实施时，`implementation_provider=custom_api` 与 `direct_implementation={service,model}` 搭配生效。
+两组设置可独立选择服务和模型，并分别编辑各自所选厂商的密钥。每家厂商的官方评审和 Chat Completions 实施共用一个厂商槽。
+正式实施前为该次任务提供明确授权的文件清单。模型清单与历史验证见 [模型路由验证](MODEL_ROUTE_VALIDATION.zh-CN.md)。

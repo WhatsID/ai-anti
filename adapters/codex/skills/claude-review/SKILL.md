@@ -110,7 +110,7 @@ live; offline fixtures do not establish live success.
 
 ## Channel selection
 
-The Skill name remains `claude-review`. Select `--channel claude|qwen`; explicit CLI
+The Skill name remains `claude-review`. Select `--channel claude|qwen|qoder|official_api`; explicit CLI
 selection wins over `codex_relay.review_channel`, whose missing/null default is `claude`.
 `review.channels` only routes the Claude-led workflow. Invalid types or values fail closed.
 Qwen reuses `plugins.qwen.model`, `base_url`, and `credential_paths`; it requires a valid
@@ -171,6 +171,23 @@ routing. All channels use `review.timeout` / `review.idle_timeout` from the user
 900 seconds idle, and 8 MiB output per call. Missing/null budget fields use defaults. Explicit `--idle-timeout` values take precedence within that cap. Idle may exceed total; whichever expires first terminates.
 
 
+## Codex official Responses routes
+
+The macOS Codex settings save `codex_relay.review_channel=official_api` and the
+`codex_relay.official_review` service/model pair. The formal plan and diff entry
+loads that selection by default. Pass `--channel qwen` explicitly to run the
+older Qwen profile. The official channel requires Codex and its fixed Responses
+endpoint. Use the settings or public configuration to change the selected model.
+
+The official review models are Token Plan `qwen4-max`, `qwen3.8-max`,
+`deepseek-v4-pro`, `glm-5.3`; metered Qwen `qwen4-max`; Kimi `kimi-k3.1-pro`,
+`kimi-k3`; and DeepSeek `deepseek-v4-pro`. Token Plan uses the existing account
+profile and backup. Each metered vendor reads only its own `qwen.value`, `kimi.value`
+or `deepseek.value` from the user's `~/.config/ai-anti/secrets.json`. Prepare-only checks
+the route before any credential read. Responses evidence includes the selected service
+and requested model. Model status remains `requested_only`.
+
+
 ## Qwen Responses executor (explicit opt-in)
 
 `codex_relay.qwen_executor` selects `claude|codex` (default `claude`);
@@ -179,7 +196,7 @@ routing. All channels use `review.timeout` / `review.idle_timeout` from the user
 invocation only. Use `--channel qwen --qwen-executor codex --responses-base-url
 https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1`. Reuse the configured
 Qwen model and credential paths. An Anthropic URL is never rewritten. URL overrides
-are rejected outside Qwen Codex; URLs forbid credentials, whitespace, query and fragment.
+apply only to the legacy Qwen Codex channel. URLs forbid credentials, whitespace, query and fragment. Token Plan slots require the corresponding official HTTPS address.
 For Claude-led Qwen reviews through Anthropic, set `claude_relay.qwen_executor = "claude"` manually because the macOS app writes it back to `"codex"` on every save. Codex hosts use Codex CLI for API review, and Claude-to-Codex review uses Codex CLI. Legacy Codex API executor changes require an explicit save; Anthropic and Responses URLs remain independent. The CLI executor override remains available.
 
 Codex configuration semantics are pinned to `codex-cli 0.160.0` or `codex-cli 0.163.0`; unknown versions

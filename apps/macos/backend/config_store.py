@@ -65,9 +65,31 @@ def endpoint(value):
 
 def implementation_provider(value):
     value = 'codex' if value is None else value
-    if not isinstance(value, str) or value not in ('codex', 'token_plan', 'qoder'):
-        raise StoreError('实施服务无效；合法值：codex/token_plan/qoder')
+    if not isinstance(value, str) or value not in services.IMPLEMENTATION_PROVIDERS:
+        raise StoreError('实施服务无效；合法值：codex/token_plan/qoder/custom_api')
     return value
+
+def codex_services(relay):
+    official = services.selection(relay.get('official_review'), services.REVIEW_MODELS,
+                                  'codex_relay.official_review', StoreError)
+    direct = services.selection(relay.get('direct_implementation'), services.DIRECT_MODELS,
+                                'codex_relay.direct_implementation', StoreError)
+    if relay.get('review_channel') == services.OFFICIAL_CHANNEL and official is None:
+        raise StoreError('Codex 官方评审服务未配置')
+    if implementation_provider(relay.get('implementation_provider')) == 'custom_api' and direct is None:
+        raise StoreError('Codex 厂商直连实施服务未配置')
+    return official, direct
+
+
+def codex_destinations(relay, profiles, official):
+    if (relay.get('review_channel') == services.OFFICIAL_CHANNEL and official['service'] == 'token_plan'
+            or relay.get('implementation_provider') == 'token_plan'
+            or relay.get('review_channel') == 'qwen' and profiles['active_api'] == 'token_plan'
+            and relay.get('qwen_executor', 'claude') == 'codex'):
+        url = profiles['profiles']['token_plan']['responses_base_url']
+        if url or relay.get('review_channel') == services.OFFICIAL_CHANNEL:
+            services.token_plan_destination(url, 'responses', StoreError)
+
 
 def lookup(ai, dotted):
     for key in dotted.split('.'):
@@ -230,8 +252,9 @@ class Store:
         primary = claude.get('model', '') if host == 'claude' else codex.get('model', '') if host == 'codex' else ''
         channel = (channels[0] if channels else 'codex') if host == 'claude' else relay.get('review_channel', 'claude') if host == 'codex' else 'codex'
         claude_provider, claude_model = claude_implementation(ai)
+        official, direct = codex_services(relay)
         values = dict(host=host, primary_model=primary, claude_model=claude.get('model', ''), codex_model=codex.get('model', ''),
-                      channel=channel,
+                      channel=channel, official_review=official, direct_implementation=direct,
                       reviewer_model=review.get('codex_model', ''), qwen_model=qwen.get('model', ''),
                       token_plan_implementation_model=token_plan_model(relay.get('token_plan_implementation_model')), secondary_model=relay.get('secondary_model') or '', implementation_provider=implementation_provider(relay.get('implementation_provider')), mode=mode_value, base_url=qwen.get('base_url', ''),
                       responses_base_url=qwen.get('responses_base_url', ''), qwen_executor=relay.get('qwen_executor', 'claude'),
@@ -267,7 +290,10 @@ class Store:
         for key in ('primary_model', 'claude_model', 'codex_model', 'reviewer_model', 'qwen_model', 'secondary_model', 'base_url'):
             if not isinstance(values[key], str):
                 raise StoreError('配置字段类型无效：' + key)
-        if values['channel'] not in ('claude', 'codex', 'qwen', 'qoder', 'same-family'):
+        supported = ('claude', 'codex', 'qwen', 'qoder', 'same-family')
+        if host == 'codex':
+            supported += (services.OFFICIAL_CHANNEL,)
+        if values['channel'] not in supported:
             raise StoreError('评审通道配置无效')
         paths = values['credential_paths']
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
@@ -289,6 +315,7 @@ class Store:
         values['credential_present'] = any(p.is_file() for p in resolved if p is not None)
         credential_paths = [p for profile in profiles['profiles'].values() for p in profile['credential_paths']]
         credential_paths += values['token_plan_accounts']['backup']['credential_paths']
+        credential_paths.append(services.OWN_CREDENTIAL_PATH)
         fingerprints = dict(config_hashes, secrets=fingerprint(self.paths['secrets']))
         return {'values': values, 'fingerprints': fingerprints,
                 'signature': self.signature(credential_paths, config_hashes=config_hashes),
@@ -311,7 +338,11 @@ class Store:
         safe_path(path)
         return path
     def credential_status(self, paths, credential_key='tokenplan.value'):
-        if credential_key not in (*services.KEYS, *accounts.BACKUP_KEYS): raise StoreError('凭证键无效')
+        if credential_key not in (*services.KEYS, *accounts.BACKUP_KEYS, *services.VENDOR_KEYS):
+            raise StoreError('凭证键无效')
+        vendor = credential_key in services.VENDOR_KEYS
+        if vendor and paths != [services.OWN_CREDENTIAL_PATH]:
+            raise StoreError('厂商凭证必须使用用户密钥文件')
         if not isinstance(paths, list) or not all(isinstance(p, str) for p in paths):
             raise StoreError('凭证查找路径必须为字符串列表')
         for raw in paths:
@@ -323,7 +354,8 @@ class Store:
                 continue
             try:
                 token = services.lookup(object_json(path.read_bytes()), credential_key)
-                if isinstance(token, str) and token.strip():
+                valid = services.vendor_token(token) if vendor else isinstance(token, str) and token.strip()
+                if valid:
                     return True, path
             except (StoreError, AttributeError):
                 continue
@@ -360,7 +392,7 @@ class Store:
                 raise StoreError('host_updates 字段无效')
             if 'primary_model' in fields:
                 model(fields['primary_model'], optional=True)
-            if 'channel' in fields and fields['channel'] not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder')):
+            if 'channel' in fields and fields['channel'] not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder', services.OFFICIAL_CHANNEL)):
                 raise StoreError('支持 Claude→Codex、Claude→API、Codex→API/Qoder')
         if host == 'agy':
             if values.get('channel') != 'codex':
@@ -388,6 +420,13 @@ class Store:
         account_config = accounts.normalize(values.get('token_plan_accounts', ai.get('token_plan_accounts')), self.credential_path, StoreError)
         accounts.normalize(ai.get('token_plan_accounts'), self.credential_path, StoreError)
         review, relay, qwen = section(ai, 'review'), section(ai, 'codex_relay'), section(section(ai, 'plugins'), 'qwen')
+        codex_services(relay)  # Validate stored selections before applying a changed draft.
+        for key in ('official_review', 'direct_implementation'):
+            if key in values:
+                if values[key] is None:
+                    relay.pop(key, None)
+                else:
+                    relay[key] = values[key]
         profiles = None
         if any(k in obj for k in ('model_services','review_services') for obj in (values, ai)):
             # Validate stored source/projection before accepting a new draft.
@@ -435,7 +474,7 @@ class Store:
             current['primary_model'] = values['primary_model']
         for h, fields in updates.items():
             route = fields.get('channel', original_channels[h])
-            if 'channel' in fields and route not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder')):
+            if 'channel' in fields and route not in (('codex', 'qwen') if h == 'claude' else ('qwen', 'qoder', services.OFFICIAL_CHANNEL)):
                 raise StoreError('支持 Claude→Codex、Claude→API、Codex→API/Qoder')
             if 'channel' in fields and route != original_channels[h]:
                 if h == 'claude':
@@ -451,10 +490,10 @@ class Store:
             review['codex_model'] = values['reviewer_model']
         else:
             review.pop('codex_model', None)
-        implementation_provider(relay.get('implementation_provider'))  # Reject corrupted stored routes too.
         relay['implementation_provider'] = implementation_provider(values.get('implementation_provider', relay.get('implementation_provider')))
         token_plan_model(relay.get('token_plan_implementation_model'))
         relay['token_plan_implementation_model'] = token_plan_model(values.get('token_plan_implementation_model', relay.get('token_plan_implementation_model')))
+        official, _ = codex_services(relay)
         relay['secondary_model'] = values['secondary_model'] or None
         section(ai, 'relay')['default_mode'] = values['mode']
         section(ai, 'desktop')['primary_host'] = host
@@ -472,6 +511,8 @@ class Store:
             path = self.credential_path(p)
             if path is not None:
                 safe_path(path)
+        projected = profiles or services.load(ai, qwen, endpoint, model, self.credential_path, StoreError)
+        codex_destinations(relay, projected, official)
         output = {}
         legacy_secret = bool(secret) and not any(k in ai for k in ('model_services','review_services'))
         if legacy_secret:
@@ -482,6 +523,8 @@ class Store:
             output['secrets'] = encode(secrets)
             own = '~/.config/ai-anti/secrets.json'
             qwen['credential_paths'] = [own] + [p for p in paths if self.credential_path(p) != self.paths['secrets']]
+        requests = dict(secret_actions or {})
+        vendor_requests = {name: requests.pop(name) for name in services.VENDOR_ENDPOINTS if name in requests}
         if profiles is not None:
             if secret and secret_actions is not None:
                 raise StoreError('服务配置请使用独立凭证动作')
@@ -491,7 +534,6 @@ class Store:
             secrets = object_json(output['secrets']) if 'secrets' in output else (object_json(self.raw('secrets')) if self.paths['secrets'].exists() else {})
             migrated = services.migrate(profiles, account_config, secrets, self.credential_path, self.paths['secrets'], StoreError)
             if migrated or self.paths['secrets'].exists(): output['secrets'] = encode(secrets)
-            requests = secret_actions if secret_actions is not None else {}
             if secret and not legacy_secret: requests = {profiles['active_api']: {'action':'replace','value':secret}}
             if requests:
                 requests = dict(requests)
@@ -503,8 +545,12 @@ class Store:
             ai.pop('review_services', None)
             ai['model_services'] = profiles
             qwen.update(copy.deepcopy(profiles['profiles'][profiles['active_api']]))
-        elif secret_actions:
+        elif requests:
             raise StoreError('凭证动作需要服务配置')
+        if vendor_requests:
+            secrets = object_json(output['secrets']) if 'secrets' in output else (object_json(self.raw('secrets')) if self.paths['secrets'].exists() else {})
+            if services.vendor_actions(vendor_requests, secrets, StoreError):
+                output['secrets'] = encode(secrets)
         if account_config['auto_failover']:
             token_profiles = profiles or services.load(ai, qwen, endpoint, model, self.credential_path, StoreError)
             primary_slot = token_profiles['profiles']['token_plan']
@@ -634,13 +680,16 @@ class Store:
             claude_implementation(restored_ai)
             claude_qwen_executor(restored_ai)
             accounts.normalize(restored_ai.get('token_plan_accounts'), self.credential_path, StoreError)
-            implementation_provider(section(restored_ai, 'codex_relay').get('implementation_provider'))
-            token_plan_model(section(restored_ai, 'codex_relay').get('token_plan_implementation_model'))
-            restored_executor = section(restored_ai, 'codex_relay').get('qwen_executor', 'claude')
+            restored_relay = section(restored_ai, 'codex_relay')
+            restored_official, _ = codex_services(restored_relay)
+            token_plan_model(restored_relay.get('token_plan_implementation_model'))
+            restored_executor = restored_relay.get('qwen_executor', 'claude')
             if restored_executor not in ('claude', 'codex'):
                 raise StoreError('恢复记录 API 评审执行器无效；请先完成一次新保存以刷新恢复点')
             restored_qwen = section(section(restored_ai, 'plugins'), 'qwen')
             restored_profiles = services.load(restored_ai, restored_qwen, endpoint, model, self.credential_path, StoreError)
+            if restored_relay.get('review_channel') == services.OFFICIAL_CHANNEL:
+                codex_destinations(restored_relay, restored_profiles, restored_official)
             accounts.ready(accounts.normalize(restored_ai.get('token_plan_accounts'), self.credential_path, StoreError), restored_profiles['profiles']['token_plan'], StoreError)
             for key in ('base_url', 'responses_base_url'):
                 endpoint(restored_qwen.get(key, ''))

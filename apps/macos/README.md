@@ -59,7 +59,7 @@ Qwen 使用现有正式 `review.py diff --channel qwen` 全部门禁；Codex 需
 
 安装取得官方当前版本，具体工作流的实测版本见兼容性说明。版本显示仅确认 CLI 可执行并返回可识别版本号。
 
-评审服务先选来源，再选模型：千问 Token Plan 提供 Qwen4-Max（qwen4-max）、Qwen3.8-Max（qwen3.8-max）和 DeepSeek-V4-Pro（deepseek-v4-pro）；Qoder 固定 Kimi-K3.1-Pro（kmodel_latest；CLI 明确准入 1.1.74 / 1.1.77，1.1.77 已完成正式 bug-review 实测；桌面路由仅离线验证）；Codex 评审目录含 gpt-6.2-sol、gpt-6.2-astra 等六个模型，支持 CLI 默认及自定义模型 ID；自定义 API 手填模型 ID。目录外模型保留“已有配置”。目录选项不是可调用性验证，DeepSeek 完整流程尚未验证。Qoder 仅 Codex 主模型可新选，Claude 可选择 Codex 评审，AGY 固定使用 Codex 评审；既有其他路由保留显示。
+Codex 主模型的评审和实施先选服务类型。选择「API 直连」后，再选厂商和模型。评审另提供「API 直连 → 自定义服务」，可手填地址与型号。Codex 主模型可用 Token Plan（`qwen4-max`、`qwen3.8-max`、`deepseek-v4-pro`、`glm-5.3`）、千问按量直连（`qwen4-max`）、Kimi 官方直连（`kimi-k3.1-pro`、`kimi-k3`）和 DeepSeek 官方直连（`deepseek-v4-pro`）。这些选择使用 Codex CLI 的 Responses，地址只读。已有 Token Plan 配置保留，Codex 下选择新的订阅评审模型会独立保存。Qoder 仍固定 Kimi-K3.1-Pro（`kmodel_latest`），自定义 API 仍可手填地址和模型。Claude 主模型可选原有 API 或 Codex 评审，AGY 固定使用 Codex 评审。已有其他路由及目录外配置保留显示。各宿主实测范围见 [模型路由验证](../../docs/MODEL_ROUTE_VALIDATION.zh-CN.md)。
 
 API 服务显示服务地址和“认证 / API 密钥”，CLI 服务使用现有 CLI 登录，仅 Qoder 显示“登录状态未检测”。AIAnti 设置窗口对两种主模型的 Qwen 评审统一使用 Codex CLI · Responses。Qwen 为首选或回退时，窗口显示「评审服务地址（Responses）」，Claude 主模型选 Codex 评审服务时隐藏该字段。任一主模型的通道含 Qwen 时，保存需要填写 Responses 地址，保存保留通道顺序。两侧生效的执行器均为 `codex` 时，执行器配置不会阻断检测。任一侧生效值为 `claude` 时，保存后才能检测。需要在 CLI 中使用 Anthropic 时，Claude 主模型手动设置 `claude_relay.qwen_executor = "claude"` 并移除旧键，Codex 主模型手动设置 `codex_relay.qwen_executor = "claude"`。新版 AIAnti 保存会将两项都写回 `codex` 并移除旧键。Responses 路径不支持评审已提交的 commit。 所有真实合成检测统一读取用户配置 `review.timeout` / `review.idle_timeout`（默认1800/900秒，上限3600/900秒，先到者终止）。Qwen/Qoder正式入口外围为总时间+60秒，界面3700秒覆盖最大3600+60并支持取消；极慢本地准备仍可能触发外围预算。Qoder保留2MiB输出上限，保留正式 runner 全部门禁和实际 Kimi-K3.1-Pro 证据校验。
 
@@ -71,11 +71,11 @@ Claude 主模型的「双方案规划」提供 `enable` / `disable` 下拉选项
 
 Claude 主模型选 Codex 评审服务且回退含 Qwen 时，如 Responses 地址为空，可先切到 API 评审服务补填，再切回 Codex 保存。
 
-两个主导工具共享当前 API 服务及其模型、凭证；两种协议地址独立。每个服务独立保留模型、地址、未保存输入及认证动作，切回恢复；同服务换模型不会改密钥。千问新草稿预填官方两种协议地址，自定义留空。取消放弃全部服务与主导工具草稿，保存失败保留草稿，保存仅影响下次调用。菜单栏下拉显示当前配置（主模型、评审服务、实施服务、协作模式各一行）、设置与退出，读取或保存出错时另显示一行错误；具体设置在设置窗口中修改，不保存空地址。
+旧 API 通道沿用 Claude 与 Codex 共享的服务、模型和凭证配置，两种协议地址独立。Codex 中新选的官方评审由 `codex_relay.review_channel=official_api` 和 `codex_relay.official_review={service,model}` 记录。其模型选择独立于共享 API 和实施。切换执行模型会保留已存密钥。千问新草稿预填官方两种协议地址，自定义留空。取消放弃全部服务与主导工具草稿，保存失败保留草稿，保存仅影响下次调用。菜单栏下拉显示当前配置（主模型、评审服务、实施服务、协作模式各一行）、设置与退出，读取或保存出错时另显示一行错误；具体设置在设置窗口中修改，不保存空地址。
 
 认证动作默认为保留；更换后输入非空新密钥，空输入仍保留；清除须显式选择并保存。密钥按服务写入 secrets.json 的 model_services.token_plan.value / model_services.custom_api.value，0600受限明文。清除删除该服务应用管理槽的值、清空其凭证路径并切换为独立键，防止外部旧密钥复活；不删除外部文件，也不删除 legacy tokenplan.value。首次加载只查文件 stat，不读取密钥正文，因此“发现凭证文件”不表示已配置或已登录。动作通过独立 secret_actions 请求传递，不写入公共 values、argv 或日志。
 
-model_services（version=1、active_api、固定 token_plan/custom_api profiles）是 API 配置真源。保存时，plugins.qwen 的五个公开字段 model/base_url/responses_base_url/credential_paths/credential_key 与活动 profile 同步，其他用户字段保留。入口仍为 channel=qwen，profile 不存明文 token。credential_key 仅允许 tokenplan.value、model_services.token_plan.value、model_services.custom_api.value；指定键缺失不回退，只有旧配置缺字段时使用 legacy。旧客户端不懂新槽，请使用配套源码；不承诺新配置兼容旧 runner，新密钥不复制到 legacy。
+model_services（version=1、active_api、固定 token_plan/custom_api profiles）继续管理旧 API 通道和 Token Plan 账号。保存时，plugins.qwen 的五个公开字段 model/base_url/responses_base_url/credential_paths/credential_key 与活动 profile 同步，其他用户字段保留。入口仍为 channel=qwen，profile 不存明文 token。credential_key 仅允许 tokenplan.value、model_services.token_plan.value、model_services.custom_api.value；指定键缺失不回退，只有旧配置缺字段时使用 legacy。旧客户端不懂新槽，请使用配套源码；不承诺新配置兼容旧 runner，新密钥不复制到 legacy。
 
 旧配置首次加载只在内存迁移：所有非空端点必须精确等于已知千问默认地址才归千问，否则（包括空端点、混合地址、尾斜杠）归自定义 API 并保留模型/地址/路径顺序。只有迁移到的一个 profile 继承旧凭证键及路径；另一个没有 legacy 凭证。首次保存才持久化。未知版本、字段错误或 profile/投影冲突拒绝写入。冲突错误只列字段名；修复时备份配置，然后按 model_services.active_api 对应 profile 将 model、base_url、responses_base_url、credential_paths、credential_key 同步到 plugins.qwen，保留其他配置和密钥，再重新读取；不要删除配置或密钥来绕过错误。
 
@@ -122,11 +122,13 @@ PYTHONDONTWRITEBYTECODE=1 /opt/homebrew/bin/python3.11 -m unittest discover -s t
 测试只使用临时 fixture 和 fake CLI，并包含正式入口 prepare-only 契约，不代表线上模型实测。
 产品范围、历史证据及后续边界见 [产品说明](../../docs/MACOS_REVIEW_APP.md)。
 
-Codex 主模型新增独立实施服务：Codex 原生、千问 Token Plan（`glm-5.3` / `qwen4-max`）或 Qoder 订阅固定逻辑 `glm-5.3`。
+Codex 主模型可选 Codex 原生、Qoder 订阅、千问 Token Plan 或厂商直连。Token Plan 实施目录提供 `glm-5.3`、`qwen4-max`、`qwen3.8-max`、`deepseek-v4.1-flash`。已有 `deepseek-v4-pro` 实施配置可回显，此订阅实施路径尚未通过正式验收。
+厂商直连实施使用固定 Chat Completions 端点：千问 `qwen4-max` / `qwen3.8-max`、Kimi `kimi-k3.1-pro` / `kimi-k3`、DeepSeek `deepseek-v4-pro` / `deepseek-flash`。选择分别写入 `codex_relay.implementation_provider=custom_api` 和 `codex_relay.direct_implementation={service,model}`。实施入口按保存值选路，每次调用都要为授权读写和外发的文本文件逐项传 `--file`。
+
+官方厂商凭证分别使用用户级 `secrets.json` 的 `qwen.value`、`kimi.value`、`deepseek.value`。每家厂商的官方评审和直连实施共用该厂商槽，两组设置均可保留、更换或清除。保存时延续现有私有备份与恢复，回滚到旧版前应恢复支持的路由配置。
 Claude 主模型可选 Claude Code 实施代理或 Codex（指定模型）。评审和实施的 Codex ID 独立保存，均支持自定义；检查配置按 Claude 实施入口的版本钉检查 Codex CLI。
 
-原生模型 ID 切换后保留；Token Plan 实施共享 Token Plan Responses 地址和凭证草稿，但不改变当前
-评审服务/模型。solo 停用评审与独立实施控件。允许保存未完成认证的草稿，本地检查仅对
+原生模型 ID 切换后保留。Token Plan 实施与订阅评审共享固定 Responses 地址和双槽凭证，评审模型独立。solo 停用评审与独立实施控件。允许保存未完成认证的草稿，本地检查仅对
 当前实施路由报告缺配置；评审模型测试不证明实施可用。新 GLM 入口需独立业务外发授权，
 Token Plan 引入时只进行离线 fake 验证和构建，不自动安装或执行真实实施。详见 codex-relay skill。
 
@@ -137,7 +139,7 @@ GLM-5.3），不显示地址/密钥输入，使用已有 Qoder 订阅登录，�
 实施。CLI 身份不证明后端路由；工具限制不提供文件/网络硬隔离。
 
 Token Plan 独立实施字段为 `codex_relay.token_plan_implementation_model`，仅允许
-`glm-5.3` / `qwen4-max`；缺失或 null 默认 GLM，空串、大小写变体、preview 和未知值拒绝，
+`glm-5.3`、`qwen4-max`、`qwen3.8-max`、`deepseek-v4-pro` 和 `deepseek-v4.1-flash`。缺失或 null 默认 GLM，空串、大小写变体、preview 和未知值拒绝，
 非当前服务也校验。桌面保存/刷新/恢复保留该选择，旧客户端省略字段时保留既有值。
 它不改变评审模型或 native `secondary_model`，仍共享 Token Plan profile 的地址与凭证。
 Qwen4 评审和实施请求 high effort；GLM 与既有模型维持 medium。Responses 只记录请求模型，

@@ -10,6 +10,7 @@ import time
 from urllib.parse import urlsplit
 
 from ai_anti_config import ConfigError
+from model_services import OWN_CREDENTIAL_PATH, vendor_token
 from implementation_direct_files import (
     fingerprint, git, make_patch, restore_modes, snapshot, text, unchanged, validate_paths, workspace_lock,
 )
@@ -39,12 +40,11 @@ class DirectError(Exception):
 
 def credential(service):
     try:
-        path = Path.home() / '.config' / 'ai-anti' / 'secrets.json'
+        path = Path(OWN_CREDENTIAL_PATH).expanduser()
         with path.open('rb') as source:
             contents = source.read(MAX_STAGE_BYTES + 1)
         value = json.loads(text(contents, MAX_STAGE_BYTES))[service]['value']
-        if (not isinstance(value, str) or not value
-                or any(not 33 <= ord(char) <= 126 for char in value)):
+        if not vendor_token(value):
             raise ValueError
     except (OSError, ValueError, KeyError, TypeError):
         raise DirectError('credential_unavailable') from None

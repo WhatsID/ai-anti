@@ -12,7 +12,7 @@ python3 /resolved/ai-anti/adapters/codex/skills/claude-review/scripts/bug_review
 ```
 
 默认通道是既有 `codex_relay.review_channel`（缺省 Claude），**不是** Claude 工作流的
-`review.channels`。可覆盖 `--channel claude|qwen|qoder`；Claude 支持既有模型别名，Qoder
+`review.channels`。Codex 可覆盖 `--channel claude|qwen|qoder|official_api`。Claude 的命令使用 `--host claude`，Codex 设为官方通道时沿用旧 Qwen 配置。Claude 支持既有模型别名，Qoder
 规范 alias 为 kimi-k3.1-pro；kimi-k3/kmodel_latest 保留输入兼容，均请求 kmodel_latest，且只接受实际模型 Kimi-K3.1-Pro。CLI 明确准入 1.1.74/1.1.77；1.1.77 + Kimi-K3.1-Pro 已完成真实双阶段验收（详见 [兼容记录](COMPATIBILITY.md)）。Qwen 模型来自现有配置且拒绝 --model。Qwen 的
 `--qwen-executor claude|codex`、`--responses-base-url` 与既有评审相同。
 `--config-base` 默认为调用 cwd，只用于相对凭证路径；它不授权读取该目录其他材料。

@@ -233,7 +233,10 @@ class LegacyWrapper(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp, upstream(lambda r,n:(429,QUOTA,{}) if PRIMARY in r[1] else (200,b'ok',{})) as (url,records):
             root=Path(temp); secret=root/'synthetic-secrets.json'
             secret.write_text(json.dumps({'tokenplan':{'value':PRIMARY},'model_services':{'token_plan_backup':{'value':BACKUP}}}))
-            profile=dict(model='glm-5.3',base_url=url+'/anthropic',responses_base_url=url+'/v1',credential_paths=[str(secret)],credential_key='tokenplan.value')
+            anthropic = 'https://token-plan.maas.qianwenaiapi.com/apps/anthropic'
+            responses = 'https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1'
+            profile = dict(model='glm-5.3', base_url=anthropic, responses_base_url=responses,
+                           credential_paths=[str(secret)], credential_key='tokenplan.value')
             custom=dict(model='',base_url='',responses_base_url='',credential_paths=[],credential_key='model_services.custom_api.value')
             config={'plugins':{'qwen':profile},'model_services':{'version':1,'active_api':'token_plan','profiles':{'token_plan':profile,'custom_api':custom}},'token_plan_accounts':{'version':1,'auto_failover':True,'backup':{'credential_paths':[str(secret)],'credential_key':'model_services.token_plan_backup.value'}}}
             path=root/'config.json';path.write_text(json.dumps(config))
@@ -250,7 +253,9 @@ print(json.dumps({'type':'result','subtype':'success','is_error':False,'result':
 ''')
             material=root/'material.txt';material.write_text('fixed source')
             log=root/'review.json';report=root/'report.txt';count=root/'count.txt'
-            def test_proxy(*args,**kwargs): return Proxy(*args,_test_http=True,**kwargs)
+            def test_proxy(destination, *args, **kwargs):
+                self.assertEqual(destination, anthropic)
+                return Proxy(url + '/anthropic', *args, _test_http=True, **kwargs)
             with patch.object(token_plan_transport,'Proxy',side_effect=test_proxy):
                 code=main(['--token-plan-config',str(path),'--log',str(log),'--report',str(report),'--retry-protocol','claude-json','--input',str(material),'--max-retries','0','--',sys.executable,str(script),str(count)])
             self.assertEqual(code,0);self.assertEqual(count.read_text(),'write\n')

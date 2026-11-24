@@ -161,6 +161,23 @@ class DirectImplementation(unittest.TestCase):
 
         return Connection()
 
+    def test_saved_route_still_requires_each_file_for_run_and_prepare(self):
+        self.config.write_text(json.dumps({'codex_relay': {
+            'implementation_provider': 'custom_api',
+            'direct_implementation': {'service': 'kimi', 'model': 'kimi-k3'},
+        }}))
+        with patch.object(implementation.implementation_direct, 'credential', side_effect=AssertionError('credential read')):
+            for prepare_only in (False, True):
+                with self.assertRaises(ConfigError):
+                    self.run_entry(provider=None, model=None, file=None, prepare_only=prepare_only)
+            prepared = self.run_entry(provider=None, model=None, prepare_only=True)
+            self.assertEqual(prepared['status'], 'prepared')
+            self.assertEqual(prepared['endpoint'], 'https://api.moonshot.cn/v1/chat/completions')
+            self.assertEqual(self.requests, [])
+        completed = self.run_entry(provider=None, model=None)
+        self.assertEqual((completed['status'], completed['requested_model']), ('completed', 'kimi-k3'))
+        self.assertEqual(self.requests[0][4]['Authorization'], 'Bearer ' + KEYS['kimi'])
+
     def test_exact_routes_credentials_and_files(self):
         for model, (service, host, path) in ROUTES.items():
             with self.subTest(model=model):

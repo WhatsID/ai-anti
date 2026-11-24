@@ -50,7 +50,7 @@ class ImplementationTests(unittest.TestCase):
 
     def test_provider_and_native_model(self):
         for value in (None, 'codex'): self.assertEqual(provider(value), 'codex')
-        for value in ('', [], {}, True, 1, 'custom_api'):
+        for value in ('', [], {}, True, 1, 'unknown'):
             with self.assertRaises(ConfigError): provider(value)
         default = resolve({}, self.workspace)
         self.assertEqual(default['provider'], 'codex')

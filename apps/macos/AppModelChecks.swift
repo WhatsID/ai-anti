@@ -37,6 +37,7 @@ import Combine
         let snapshot: [String: Any] = ["signature": "a", "fingerprints": ["fixture": "a"], "can_restore": true,
             "values": ["host": "codex", "channel": "qwen", "mode": "rules", "primary_model": "fixture", "qwen_executor": "codex", "claude_qwen_executor": "codex", "credential_present": true, "base_url": "https://fixture.invalid/anthropic", "responses_base_url": "https://fixture.invalid/v1"]]
         checkDualPlanAndReviewAddress(snapshot)
+        checkOfficialRoutes(snapshot)
         checkAgyDualPlan(snapshot)
         checkAgyHost()
         checkExternalChanges()
@@ -115,6 +116,7 @@ import Combine
         model.refresh(); front.complete(.success(apiSnapshot))
         assert(model.reviewFamily == "custom_api" && model.reviewerOptions.contains { $0.id == "custom-api-id" })
         model.switchReviewFamily("custom_api"); assert(!model.dirty)
+        model.switchHost("claude")
         model.draft.secretAction = "replace"; model.draft.secret = "fake-secret"
         model.switchReviewFamily("token_plan")
         assert(model.draft.channel == "qwen" && model.draft.qwenModel == "qwen3.8-max")
@@ -267,8 +269,9 @@ import Combine
                 legacyFront.complete(.success(checked))
             }
         }
-        // Service profiles retain independent protocol addresses and all unsaved actions.
+        // The shared legacy profile editor retains both protocol addresses and all unsaved actions.
         model.refresh(); front.complete(.success(apiSnapshot))
+        model.switchHost("claude")
         model.switchReviewFamily("token_plan")
         model.draft.baseURL = "https://one.invalid/a"; model.draft.responsesBaseURL = "https://one.invalid/r"
         model.draft.secretAction = "replace"; model.draft.secret = "one"
@@ -411,7 +414,7 @@ import Combine
         assert(addressModel.draft.tokenPlanImplementationModel == "glm-5.3", "Old snapshots must initialize a valid default")
         addressModel.draft.implementationProvider = "token_plan"
         addressModel.draft.tokenPlanImplementationModel = "qwen4-max"
-        assert(addressModel.secondaryOptions.map { $0.id } == ["glm-5.3", "qwen4-max"])
+        assert(addressModel.secondaryOptions.map { $0.id } == ["glm-5.3", "qwen4-max", "qwen3.8-max", "deepseek-v4.1-flash"])
         addressModel.draft.activeAPI = "token_plan"
         addressModel.draft.channel = "qwen"
         assert(addressModel.reviewerOptions.contains { $0.id == "qwen4-max" })
@@ -1163,6 +1166,70 @@ import Combine
         assert(menu["mode"] as? String == "solo" && menu["agy_dual_plan_enabled"] == nil)
         front.complete(.success(state))
         print("PASS: AppModel AGY dual-plan settings, summaries, and isolated save payloads")
+    }
+
+    @MainActor static func checkOfficialRoutes(_ snapshot: [String: Any]) {
+        let front = FakeClient()
+        let model = AppModel(foreground: front, background: FakeClient(), automatic: false)
+        var state = snapshot
+        var values = snapshot["values"] as! [String: Any]
+        values["claude_channel"] = "qwen"
+        values["codex_channel"] = "qwen"
+        values["qwen_model"] = "legacy-vendor-model"
+        state["values"] = values
+        model.refresh(); front.complete(.success(state))
+
+        model.switchReviewFamily("kimi")
+        assert(model.draft.activeOfficialReview == RouteSelection(service: "kimi", model: "kimi-k3.1-pro"))
+        model.draft.reviewModel = "kimi-k3"
+        assert(model.reviewerOptions.map(\.id) == ["kimi-k3.1-pro", "kimi-k3"])
+        assert(!model.showsReviewAddress && model.reviewExecutorLabel == "Codex CLI · Responses")
+        model.draft.implementationService = "deepseek"
+        model.draft.implementationModel = "deepseek-flash"
+        assert(model.secondaryOptions.map(\.id) == ["deepseek-v4-pro", "deepseek-flash"])
+        model.draft.vendorCredentials["deepseek"] = VendorCredential(action: "replace", secret: "fixture-implementation")
+        model.draft.vendorCredentials["kimi"] = VendorCredential(action: "clear")
+        model.switchHost("claude")
+        assert(model.reviewFamily == "custom_api" && model.draft.reviewModel == "legacy-vendor-model")
+        model.switchReviewFamily("deepseek")
+        assert(model.reviewFamily == "custom_api")
+        model.switchHost("codex")
+        assert(model.draft.reviewModel == "kimi-k3" && model.draft.implementationModel == "deepseek-flash")
+        model.save()
+        let request = front.requests.last!
+        let posted = request["values"] as! [String: Any]
+        let actions = request["secret_actions"] as! [String: [String: String]]
+        assert(posted["channel"] as? String == "official_api" && posted["qwen_model"] as? String == "legacy-vendor-model")
+        assert(posted["official_review"] as? [String: String] == ["service": "kimi", "model": "kimi-k3"])
+        assert(posted["direct_implementation"] as? [String: String] == ["service": "deepseek", "model": "deepseek-flash"])
+        assert(posted["implementation_provider"] as? String == "custom_api")
+        assert(actions["deepseek"]?["value"] == "fixture-implementation" && actions["kimi"]?["action"] == "clear")
+        assert(actions["qwen"] == nil && posted["secret_actions"] == nil)
+
+        for key in ["channel", "official_review", "direct_implementation", "implementation_provider"] {
+            values[key] = posted[key]
+        }
+        values["codex_channel"] = "official_api"
+        state["values"] = values
+        front.complete(.success(state))
+        assert(!model.dirty && model.reviewFamily == "kimi" && model.draft.implementationService == "deepseek")
+        assert(model.draft.vendorCredentials.values.allSatisfy { $0.secret.isEmpty && $0.action == "retain" })
+
+        let token = ServiceProfile.initial("token_plan")
+        values["channel"] = "qwen"; values["codex_channel"] = "qwen"
+        values["model_services"] = ["version": 1, "active_api": "token_plan",
+                                    "profiles": ["token_plan": token.dictionary, "custom_api": ServiceProfile.initial("custom_api").dictionary]]
+        values["qwen_model"] = token.model
+        values["base_url"] = token.baseURL; values["responses_base_url"] = token.responsesBaseURL
+        state["values"] = values
+        model.refresh(); front.complete(.success(state))
+        assert(model.reviewerOptions.contains(ModelOption(id: "glm-5.3", label: "glm-5.3")))
+        model.draft.reviewModel = "glm-5.3"
+        assert(model.draft.activeOfficialReview == RouteSelection(service: "token_plan", model: "glm-5.3"))
+        assert(model.draft.profiles["token_plan"]?.model == token.model)
+        model.switchHost("claude")
+        assert(model.draft.reviewModel == token.model)
+        print("PASS: AppModel official review, independent implementation and vendor credential drafts")
     }
 
     @MainActor static func checkDualPlanAndReviewAddress(_ snapshot: [String: Any]) {

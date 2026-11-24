@@ -13,6 +13,7 @@ import tempfile
 import time
 import uuid
 from config_store import StoreError, model, effective_executor
+import model_services as services
 
 OPTIONAL_SAVE_KEYS = ('dual_plan_enabled', 'agy_dual_plan_enabled', 'agy_review_model', 'agy_implementation_model')
 CLI_PROBE_NAMES = ('claude', 'codex', 'agy', 'qodercli')
@@ -273,6 +274,50 @@ def local_agy(store, snapshot, source):
     return result('local', 'passed', f'本地检查通过；实施：{route}；评审：Codex · {reviewer}；'
                   f'AGY {version}（{compatibility}）{dual_detail}；未验证登录、额度或实施模型可调用，评审检测不能替代实施证据', snapshot)
 
+def official_review(values):
+    return values['official_review'] if values.get('channel') == services.OFFICIAL_CHANNEL else None
+
+
+def is_token_plan_review(values):
+    official = official_review(values)
+    if official:
+        return official['service'] == 'token_plan'
+    return values['channel'] == 'qwen' and values['model_services']['active_api'] == 'token_plan'
+
+
+def validate_review_destination(values):
+    if not is_token_plan_review(values):
+        return
+    executor = review_executor(values)
+    wire_api = 'responses' if executor == 'codex' else 'anthropic'
+    field = 'responses_base_url' if executor == 'codex' else 'base_url'
+    profile = values['model_services']['profiles']['token_plan']
+    services.token_plan_destination(profile[field], wire_api, CheckError)
+
+
+def review_slot(values):
+    official = official_review(values)
+    if official is None:
+        return values['credential_paths'], values.get('credential_key', 'tokenplan.value')
+    if official['service'] == 'token_plan':
+        profile = values['model_services']['profiles']['token_plan']
+        return profile['credential_paths'], profile['credential_key']
+    return vendor_slot(official)
+
+
+def vendor_slot(selection):
+    return [services.OWN_CREDENTIAL_PATH], selection['service'] + '.value'
+
+
+def review_executor(values):
+    return 'codex' if official_review(values) else effective_executor(values)
+
+
+def review_model(values):
+    official = official_review(values)
+    return official['model'] if official else values['qwen_model']
+
+
 def local(store, source=None):
     snapshot = store.read()
     v = snapshot['values']
@@ -281,6 +326,7 @@ def local(store, source=None):
             if v[key]:
                 raise CheckError(v[key])
     if v['channel'] == 'qoder' and v['host'] != 'codex': raise CheckError('Qoder 暂不支持 Claude 主模型')
+    validate_review_destination(v)
     # Validation builds bytes but never writes them.
     check_values = {k: val for k, val in v.items() if k not in OPTIONAL_SAVE_KEYS}
     store.outputs(check_values, '')
@@ -294,17 +340,22 @@ def local(store, source=None):
             raise CheckError('无法定位 ai-anti 源码，未检查实施版本') from exc
         raise
     review_budgets(store, root)
-    implementation = v['host'] == 'codex' and v['mode'] != 'solo' and v['implementation_provider'] == 'token_plan'
+    active_implementation = v['host'] == 'codex' and v['mode'] != 'solo'
+    implementation = active_implementation and v['implementation_provider'] == 'token_plan'
+    direct_implementation = v['direct_implementation'] if active_implementation and v['implementation_provider'] == 'custom_api' else None
+    api_review = v['channel'] in ('qwen', services.OFFICIAL_CHANNEL)
     if implementation:
         profile = v['model_services']['profiles']['token_plan']
         if not profile['responses_base_url']:
             raise CheckError('实施 Token Plan Responses 地址未配置')
         if not store.credential_status(profile['credential_paths'], profile['credential_key'])[0]:
             raise CheckError('实施 Token Plan 凭证未配置或不可解析')
-    if v['token_plan_accounts']['auto_failover'] and (implementation or (v['channel'] == 'qwen' and v['model_services']['active_api'] == 'token_plan')):
+    if direct_implementation and not store.credential_status(*vendor_slot(direct_implementation))[0]:
+        raise CheckError('实施厂商凭证未配置或不可解析')
+    if v['token_plan_accounts']['auto_failover'] and (implementation or is_token_plan_review(v)):
         validate_accounts(store, v)
-    qoder_implementation = v['host'] == 'codex' and v['mode'] != 'solo' and v['implementation_provider'] == 'qoder'
-    names = {v['host'], effective_executor(v) if v['channel'] == 'qwen' else 'qodercli' if v['channel'] == 'qoder' else 'codex'}
+    qoder_implementation = active_implementation and v['implementation_provider'] == 'qoder'
+    names = {v['host'], review_executor(v) if api_review else 'qodercli' if v['channel'] == 'qoder' else 'codex'}
     if qoder_implementation:
         names.add('qodercli')
     if claude_codex_implementation:
@@ -321,11 +372,13 @@ def local(store, source=None):
                 version = log.read_text('utf-8').strip()
                 if version != '1.1.77':
                     raise CheckError('Qoder 实施要求 qodercli 1.1.77')
-    if v['channel'] == 'qwen' and not store.credential_status(v['credential_paths'], v.get('credential_key', 'tokenplan.value'))[0]:
-        raise CheckError('没有找到可解析的 Qwen 凭证')
+    if api_review and not store.credential_status(*review_slot(v))[0]:
+        raise CheckError('没有找到可解析的评审服务凭证')
     if store.read()['signature'] != snapshot['signature']:
         raise CheckError('检测中配置或凭证发生变化，结果作废')
-    if claude_codex_implementation:
+    if direct_implementation:
+        route = direct_implementation['service'] + ' · ' + direct_implementation['model'] + ' · Chat Completions'
+    elif claude_codex_implementation:
         route = 'Codex · ' + v['claude_implementation_model'] + ' · 关联工作树实施'
     else:
         route = ('停用独立实施' if v['mode'] == 'solo' else 'Claude Code 实施代理' if v['host'] == 'claude' else 'Qoder 订阅 · GLM-5.3 · qodercli 1.1.77' if qoder_implementation else 'Token Plan · ' + v['token_plan_implementation_model'] + ' · Responses' if implementation else 'Codex 原生 · ' + (v['secondary_model'] or '未指定'))
@@ -374,8 +427,11 @@ def codex_events(path, marker):
     return actual
 
 def qwen_evidence(status, manifest, values):
-    executor = effective_executor(values)
-    expected = dict(channel='qwen', executor=executor, wire_api='responses' if executor == 'codex' else 'anthropic', requested_model=values['qwen_model'])
+    executor = review_executor(values)
+    expected = dict(channel='qwen', executor=executor, wire_api='responses' if executor == 'codex' else 'anthropic', requested_model=review_model(values))
+    official = official_review(values)
+    if official:
+        expected['service'] = official['service']
     if status.get('completed') is not True or manifest.get('mode') != 'diff':
         raise ValueError()
     for item in (status, manifest):
@@ -401,10 +457,12 @@ def real(store, source=None, timeout=None):
     if v['mode'] == 'solo': raise CheckError('solo 模式停用交叉评审')
     if v['host'] == 'agy':
         raise CheckError('AGY 主模型暂不支持桌面端合成评审检测；请使用「检查配置」或从 AGY 发起评审')
+    validate_review_destination(v)
     check_values = {k: val for k, val in v.items() if k not in OPTIONAL_SAVE_KEYS}
     store.outputs(check_values, '')
     root = source_root(store, source)
     timeout, idle_timeout = review_budgets(store, root, timeout)
+    api_review = v['channel'] in ('qwen', services.OFFICIAL_CHANNEL)
     with tempfile.TemporaryDirectory(prefix='ai-anti-probe-') as temp:
         temp = Path(temp).resolve()
         os.chmod(temp, 0o700)
@@ -423,24 +481,24 @@ def real(store, source=None, timeout=None):
             if run([git, *args], repo, temp / 'git.log', env=env) != 0:
                 raise CheckError('无法创建隔离合成仓库')
         (repo / 'sample.txt').write_text('synthetic change\nREAD_TOKEN=' + marker + '\n')
-        if v['channel'] == 'qwen':
-            if not store.credential_status(v['credential_paths'], v.get('credential_key', 'tokenplan.value'))[0]:
-                raise CheckError('Qwen 凭证不存在或不可解析')
+        if api_review:
+            if not store.credential_status(*review_slot(v))[0]:
+                raise CheckError('评审服务凭证不存在或不可解析')
             # Formal runner retains full reads, tool/permission and actual model gates.
             argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
                     '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
-                    '--out', str(out), '--channel', 'qwen', '--qwen-executor', effective_executor(v),
+                    '--out', str(out), '--channel', v['channel'], '--qwen-executor', review_executor(v),
                     '--timeout', str(timeout), '--idle-timeout', str(idle_timeout), '--max-output-bytes', str(8*1024*1024)]
-            if effective_executor(v) == 'codex':
+            if v['channel'] == 'qwen' and review_executor(v) == 'codex':
                 argv += ['--responses-base-url', v['responses_base_url']]
             if run(argv, repo, temp / 'runner.log', timeout=timeout+60, limit=8*1024*1024, env=env) != 0:
-                raise CheckError('Qwen 正式入口检测失败；日志已隐藏，已按有限重试策略结束，未降级')
+                raise CheckError('API 评审正式入口检测失败；日志已隐藏，已按有限重试策略结束，未降级')
             try:
                 status = json.loads((out / 'status.json').read_text())
                 manifest = json.loads((out / 'manifest.json').read_text())
                 actual = qwen_evidence(status, manifest, v)
             except (OSError, ValueError, KeyError):
-                raise CheckError('Qwen 正式入口证据不完整或实际模型不匹配') from None
+                raise CheckError('API 评审正式入口证据不完整或实际模型不匹配') from None
         elif v['channel'] == 'qoder':
             argv = [sys.executable, str(root / 'adapters/codex/skills/claude-review/scripts/review.py'), 'diff',
                     '--repo', str(repo), '--files', 'sample.txt', '--scale', '单用户本机合成检测，无部署',
@@ -477,6 +535,6 @@ def real(store, source=None, timeout=None):
         if store.read()['signature'] != snapshot['signature']:
             raise CheckError('检测中配置或凭证发生变化，结果作废')
         reply = result('real', 'passed', '合成评审检测通过；不代表业务评审全量验证', snapshot, actual)
-        if v['channel'] == 'qwen':
-            reply.update(token_plan_accounts=status.get('token_plan_accounts', dict(enabled=False)), requested_model=v['qwen_model'], model_evidence='requested_only' if effective_executor(v) == 'codex' else 'actual')
+        if api_review:
+            reply.update(token_plan_accounts=status.get('token_plan_accounts', dict(enabled=False)), requested_model=review_model(v), model_evidence='requested_only' if review_executor(v) == 'codex' else 'actual')
         return reply

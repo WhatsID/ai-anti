@@ -11,7 +11,18 @@ enum ModelCatalog {
     static let claude = ["claude-fable-5-1", "claude-opus-5-5", "claude-sonnet-5-5", "claude-haiku-5-5"]
     private static let claudeAliases = ["Fable", "Opus", "Sonnet", "Haiku"]
     static let codex = ["gpt-6.2-sol", "gpt-6.2-astra", "gpt-6.1-sol", "gpt-6-astra", "gpt-6-sol", "gpt-6-luna"]
-    static let tokenPlanImplementation = [implementationGLM, "qwen4-max"]
+    static let tokenPlanImplementation = [implementationGLM, "qwen4-max", "qwen3.8-max", "deepseek-v4.1-flash"]
+    static let officialReview = [
+        "token_plan": ["qwen4-max", "qwen3.8-max", "deepseek-v4-pro", implementationGLM],
+        "qwen": ["qwen4-max"],
+        "kimi": ["kimi-k3.1-pro", "kimi-k3"],
+        "deepseek": ["deepseek-v4-pro"]
+    ]
+    static let directImplementation = [
+        "qwen": ["qwen4-max", "qwen3.8-max"],
+        "kimi": ["kimi-k3.1-pro", "kimi-k3"],
+        "deepseek": ["deepseek-v4-pro", "deepseek-flash"]
+    ]
     static let qwen = ["qwen4-max", "qwen3.8-max"]
     static let deepseek = ["deepseek-v4-pro"]
     static func family(channel: String, apiModel: String) -> String {

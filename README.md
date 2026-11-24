@@ -302,14 +302,16 @@ Everything above is enough for daily use. This section covers four further needs
 Codex, implementing with a cheaper model, getting a second opinion on an existing problem analysis, and
 editing settings in a GUI. Skip it if none apply.
 
-- **Codex-led path** (when you mainly work in Codex). The reviewer is chosen by `--channel claude|qwen`, then
-  `codex_relay.review_channel`; failures never fall back automatically. Qwen can run through Claude CLI
+- **Codex-led path** (when you mainly work in Codex). An explicit `--channel claude|qwen|qoder|official_api` takes
+  precedence over `codex_relay.review_channel`. The official channel uses the saved Token Plan or
+  vendor Responses selection. The legacy Qwen channel can run through Claude CLI
   or Codex CLI's Responses executor (`codex_relay.qwen_executor`, `plugins.qwen.responses_base_url`).
   The Claude-led executor is configured separately through `claude_relay.qwen_executor`. Usage and version pins: the
   [codex-relay skill](adapters/codex/skills/codex-relay/SKILL.md) and
   [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
-- **Codex-led implementation sources** (to write code with a cheaper model). Native Codex, Qwen Token Plan (`glm-5.3` / `qwen4-max` and other
-  models), or a Qoder subscription. Qwen Token Plan supports a primary and a backup account with failover on quota exhaustion.
+- **Codex-led implementation sources** (to write code with a cheaper model). Choose native Codex, Qwen Token Plan, a Qoder
+  subscription, or a vendor API. Token Plan supports switching to a backup account on quota exhaustion.
+  Vendor API implementation requires an authorized file list for each invocation.
   Contracts and verification limits: the [codex-relay skill](adapters/codex/skills/codex-relay/SKILL.md)
   and [docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 - **Problem second opinions** (when debugging, to have another model check an existing analysis). This
@@ -319,8 +321,8 @@ editing settings in a GUI. Skip it if none apply.
   evidence, and another model reviews them in two stages: first it sees only the problem and evidence and
   lists possible causes independently; then it checks the original analysis item by item as supported,
   needs verification, or rejected. The result is a second opinion and never changes code. The reviewer
-  comes from `codex_relay.review_channel` (`claude`, `qwen` or `qoder`; default `claude`), not
-  `review.channels`; if it is Claude while Claude Code leads, it counts only as same-family review. On
+  defaults to `codex_relay.review_channel`. Codex can use official routes and Claude Code retains the
+  legacy channels. On
   the Codex side, run `./install.sh --with-codex` first to install the skill. Git is not required. See
   [docs/BUG_REVIEW.md](docs/BUG_REVIEW.md).
 - **macOS menu bar app** (if you prefer not to edit JSON by hand). The optional [menu bar app](apps/macos/README.md) edits default models,

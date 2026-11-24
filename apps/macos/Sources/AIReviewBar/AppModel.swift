@@ -50,8 +50,28 @@ struct Draft: Equatable {
         }
     }
     var accountDictionary: [String: Any] { ["version": 1, "auto_failover": autoFailover, "backup": ["credential_paths": backupProfile.credentialPaths, "credential_key": backupProfile.credentialKey]] }
-    var service: String { channel == "qwen" ? activeAPI : channel }
+    var officialReview: RouteSelection?
+    var directImplementation: RouteSelection?
+    var vendorCredentials = Dictionary(uniqueKeysWithValues: ReviewService.vendors.map { ($0, VendorCredential()) })
+    var activeOfficialReview: RouteSelection? {
+        host == "codex" && channel == ReviewService.officialChannel ? officialReview : nil
+    }
+    var service: String { activeOfficialReview?.service ?? (channel == "qwen" ? activeAPI : channel) }
     var qwenModel: String { get { profile.model } set { profile.model = newValue } }
+    var reviewModel: String {
+        get { activeOfficialReview?.model ?? qwenModel }
+        set {
+            if activeOfficialReview != nil {
+                officialReview?.model = newValue
+            } else if host == "codex" && channel == "qwen" && activeAPI == "token_plan",
+                      ModelCatalog.officialReview["token_plan"]?.contains(newValue) == true {
+                officialReview = RouteSelection(service: "token_plan", model: newValue)
+                channel = ReviewService.officialChannel
+            } else {
+                qwenModel = newValue
+            }
+        }
+    }
     var implementationProvider = "codex"
     var secondaryModel = ""
     var tokenPlanImplementationModel = ModelCatalog.implementationGLM
@@ -91,9 +111,36 @@ struct Draft: Equatable {
     var implementationModelEnabled: Bool {
         implementationEnabled && (host == "codex" || (host == "agy" && agyRelayError.isEmpty) || claudeImplementationProvider == "codex")
     }
+    var implementationService: String {
+        get { implementationProvider == "custom_api" ? (directImplementation?.service ?? "custom_api") : implementationProvider }
+        set {
+            if let models = ModelCatalog.directImplementation[newValue], let first = models.first {
+                if directImplementation?.service != newValue {
+                    directImplementation = RouteSelection(service: newValue, model: first)
+                }
+                implementationProvider = "custom_api"
+            } else {
+                implementationProvider = newValue
+            }
+        }
+    }
     var implementationModel: String {
-        get { implementationProvider == "token_plan" ? tokenPlanImplementationModel : implementationProvider == "qoder" ? ModelCatalog.implementationGLM : secondaryModel }
-        set { if implementationProvider == "codex" { secondaryModel = newValue } else if implementationProvider == "token_plan" { tokenPlanImplementationModel = newValue } }
+        get {
+            switch implementationProvider {
+            case "token_plan": return tokenPlanImplementationModel
+            case "qoder": return ModelCatalog.implementationGLM
+            case "custom_api": return directImplementation?.model ?? ""
+            default: return secondaryModel
+            }
+        }
+        set {
+            switch implementationProvider {
+            case "token_plan": tokenPlanImplementationModel = newValue
+            case "custom_api": directImplementation?.model = newValue
+            case "codex": secondaryModel = newValue
+            default: break
+            }
+        }
     }
     var implementationURL: String {
         get { profiles["token_plan"]!.responsesBaseURL }
@@ -131,11 +178,16 @@ struct Draft: Equatable {
     var serviceDictionary: [String: Any] { ["version": 1, "active_api": activeAPI, "profiles": profiles.mapValues { $0.dictionary }] }
     var secretActions: [String: Any] {
         var result: [String: Any] = profiles.mapValues { ["action": $0.action == "replace" && $0.secret.isEmpty ? "retain" : $0.action, "value": $0.secret] }
+        for (id, credential) in vendorCredentials where credential.request["action"] != "retain" {
+            result[id] = credential.request
+        }
         result["token_plan_backup"] = ["action": backupProfile.action == "replace" && backupProfile.secret.isEmpty ? "retain" : backupProfile.action, "value": backupProfile.secret]
         return result
     }
     var dictionary: [String: Any] {
-        ["token_plan_accounts": accountDictionary, "model_services": serviceDictionary, "host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "token_plan_implementation_model": tokenPlanImplementationModel, "implementation_provider": implementationProvider, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": "codex",
+        ["official_review": officialReview?.dictionary as Any? ?? NSNull(),
+         "direct_implementation": directImplementation?.dictionary as Any? ?? NSNull(),
+         "token_plan_accounts": accountDictionary, "model_services": serviceDictionary, "host": host, "primary_model": primaryModel, "channel": channel, "reviewer_model": reviewerModel, "qwen_model": qwenModel, "secondary_model": secondaryModel, "token_plan_implementation_model": tokenPlanImplementationModel, "implementation_provider": implementationProvider, "mode": mode, "base_url": baseURL, "responses_base_url": responsesBaseURL, "qwen_executor": "codex",
          "claude_implementation_provider": claudeImplementationProvider, "claude_implementation_model": claudeImplementationModel,
          "claude_qwen_executor": "codex", "codex_models": codexModels]
     }
@@ -238,7 +290,7 @@ struct Draft: Equatable {
         }
 
         switch (host, draft.channel) {
-        case (.claude, "codex"), (.claude, "qwen"), (.codex, "qwen"), (.agy, _):
+        case (.claude, "codex"), (.claude, "qwen"), (.codex, "qwen"), (.codex, ReviewService.officialChannel), (.agy, _):
             add(.codex, "评审")
         case (.claude, "same-family"), (.codex, "claude"):
             add(.claude, "评审")
@@ -252,7 +304,9 @@ struct Draft: Equatable {
         }
 
         if host == .codex {
-            add(draft.implementationProvider == "qoder" ? .qodercli : .codex, "实施")
+            if draft.implementationProvider != "custom_api" {
+                add(draft.implementationProvider == "qoder" ? .qodercli : .codex, "实施")
+            }
         } else if host == .agy || draft.claudeImplementationProvider == "codex" {
             add(.codex, "实施")
         }
@@ -272,7 +326,7 @@ struct Draft: Equatable {
     }
     var reviewExecutorLabel: String {
         switch draft.channel {
-        case "qwen": return "Codex CLI · Responses"
+        case "qwen", ReviewService.officialChannel: return "Codex CLI · Responses"
         case "qoder": return "Qoder CLI"
         default: return "Codex CLI"
         }
@@ -286,7 +340,7 @@ struct Draft: Equatable {
         switch saved.channel {
         case "codex": detail = saved.reviewerModel.isEmpty ? "CLI 默认" : saved.reviewerModel
         case "qoder": detail = "Kimi-K3.1-Pro"
-        case "qwen": detail = "Responses · " + saved.qwenModel
+        case "qwen", ReviewService.officialChannel: detail = "Responses · " + saved.reviewModel
         default: detail = saved.qwenModel
         }
         return "\(saved.host == "claude" ? "Claude" : "Codex") → \(service) · \(detail)"
@@ -305,7 +359,16 @@ struct Draft: Equatable {
                                         emptyLabel: "请选择模型", codexModels: draft.codexModels)
         }
         if draft.implementationProvider == "token_plan" {
-            return ModelCatalog.tokenPlanImplementation.map { ModelOption(id: $0, label: $0) }
+            var options = ModelCatalog.tokenPlanImplementation.map { ModelOption(id: $0, label: $0) }
+            let retained = draft.tokenPlanImplementationModel
+            if !ModelCatalog.tokenPlanImplementation.contains(retained) {
+                let status = retained == "deepseek-v4-pro" ? "（正式实施未通过）" : ""
+                options.append(ModelOption(id: retained, label: "已有配置：" + retained + status))
+            }
+            return options
+        }
+        if draft.implementationProvider == "custom_api" {
+            return (ModelCatalog.directImplementation[draft.implementationService] ?? []).map { ModelOption(id: $0, label: $0) }
         }
         if draft.implementationProvider == "qoder" { return [ModelOption(id: ModelCatalog.implementationGLM, label: "GLM-5.3")] }
         return ModelCatalog.options("codex", preserving: [saved.secondaryModel, draft.secondaryModel], emptyLabel: "未指定", codexModels: draft.codexModels)
@@ -320,8 +383,12 @@ struct Draft: Equatable {
             return ModelCatalog.options("codex", preserving: [saved.reviewerModel, draft.reviewerModel],
                                         emptyLabel: "CLI 默认", codexModels: draft.codexModels)
         }
-        let ids = draft.activeAPI == "token_plan" ? ["qwen4-max", "qwen3.8-max", "deepseek-v4-pro"] : []
-        var result = ids.map { ModelOption(id: $0, label: $0 == "qwen4-max" ? "Qwen4-Max" : $0 == "qwen3.8-max" ? "Qwen3.8-Max" : "DeepSeek-V4-Pro") }
+        if let official = draft.activeOfficialReview {
+            return (ModelCatalog.officialReview[official.service] ?? []).map { ModelOption(id: $0, label: $0) }
+        }
+        let ids = draft.activeAPI == "token_plan" ? (draft.host == "codex" ? ModelCatalog.officialReview["token_plan"] ?? [] : ["qwen4-max", "qwen3.8-max", "deepseek-v4-pro"]) : []
+        let labels = ["qwen4-max": "Qwen4-Max", "qwen3.8-max": "Qwen3.8-Max", "deepseek-v4-pro": "DeepSeek-V4-Pro"]
+        var result = ids.map { ModelOption(id: $0, label: labels[$0] ?? $0) }
         for value in [saved.profiles[draft.activeAPI]?.model ?? "", draft.qwenModel] where !result.contains(where: { $0.id == value }) {
             result.append(ModelOption(id: value, label: value.isEmpty ? "请选择模型" : "已有配置：" + value))
         }
@@ -329,13 +396,20 @@ struct Draft: Equatable {
     }
     func switchReviewFamily(_ service: String) {
         guard !busy, loaded, service != reviewFamily else { return }
-        if draft.host == "agy" {
-            guard service == "codex" else { return }
+        if draft.host == "codex", let models = ModelCatalog.officialReview[service], let first = models.first {
+            if draft.officialReview?.service != service {
+                let legacy = draft.profiles[service]?.model ?? ""
+                draft.officialReview = RouteSelection(service: service, model: models.contains(legacy) ? legacy : first)
+            }
+            draft.channel = ReviewService.officialChannel
+        } else if ReviewService.api.contains(service) && draft.host != "agy" {
+            draft.activeAPI = service
+            draft.channel = "qwen"
+        } else if (service == "qoder" && draft.host == "codex") || (service == "codex" && draft.host != "codex") {
+            draft.channel = service
         } else {
-            guard ReviewService.api.contains(service) || (service == "qoder" && draft.host == "codex") || (service == "codex" && draft.host == "claude") else { return }
+            return
         }
-        if ReviewService.api.contains(service) { draft.activeAPI = service; draft.channel = "qwen" }
-        else { draft.channel = service }
         status = "未检测（服务已变化）"; checkSignature = nil
     }
     let modes = [("solo", "独立完成"), ("auto", "自动判断"), ("rules", "按规模评审"), ("force", "始终评审")]
@@ -621,6 +695,8 @@ struct Draft: Equatable {
             }
         }
         d.reviewerModel = text("reviewer_model"); d.qwenModel = text("qwen_model"); d.secondaryModel = text("secondary_model"); d.tokenPlanImplementationModel = v["token_plan_implementation_model"] as? String ?? ModelCatalog.implementationGLM; d.implementationProvider = v["implementation_provider"] as? String ?? "codex"; d.mode = text("mode"); d.baseURL = text("base_url"); d.responsesBaseURL = text("responses_base_url")
+        d.officialReview = RouteSelection(v["official_review"])
+        d.directImplementation = RouteSelection(v["direct_implementation"])
         d.claudeImplementationProvider = v["claude_implementation_provider"] as? String ?? "claude-agent"
         d.claudeImplementationModel = text("claude_implementation_model")
         d.agyReviewModel = text("agy_review_model")
@@ -747,6 +823,12 @@ struct Draft: Equatable {
         guard let target = hostDrafts[host] else { return }
         draft.host = host; draft.primaryModel = target.primaryModel; draft.channel = target.channel
     }
+    private var reviewNeedsSettings: Bool {
+        if draft.activeOfficialReview?.service == "token_plan" {
+            return draft.profiles["token_plan"]?.credentialPaths.isEmpty != false
+        }
+        return draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.responsesBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty)
+    }
     func menuHost(_ host: String) {
         guard !busy, loaded, !dirty else { setMessage("设置草稿尚未保存或配置尚未读取、忙碌", isError: true); return }
         if host == "agy" && !saved.agyRelayError.isEmpty {
@@ -755,7 +837,7 @@ struct Draft: Equatable {
         }
         switchHost(host)
         guard dirty, draft.host == host else { return }
-        if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.responsesBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
+        if reviewNeedsSettings {
             setMessage("请在设置中完成所选服务的地址、模型与认证后保存", isError: true); return
         }
         menuSaving = true; save()
@@ -764,7 +846,7 @@ struct Draft: Equatable {
         guard !busy, loaded, !dirty else { setMessage("设置草稿尚未保存或配置忙碌", isError: true); return }
         switchReviewFamily(family)
         guard dirty else { return }
-        if draft.channel == "qwen" && (draft.qwenModel.isEmpty || draft.responsesBaseURL.isEmpty || draft.profile.credentialPaths.isEmpty) {
+        if reviewNeedsSettings {
             setMessage("请在设置中完成所选服务的地址、模型与认证后保存", isError: true); return
         }
         menuSaving = true; save()

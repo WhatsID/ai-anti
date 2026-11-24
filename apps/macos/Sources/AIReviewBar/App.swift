@@ -84,7 +84,7 @@ extension AppModel {
         switch saved.channel {
         case "codex": detail = saved.reviewerModel.isEmpty ? "CLI 默认" : saved.reviewerModel
         case "qoder": detail = "Kimi-K3.1-Pro"
-        default: detail = saved.qwenModel
+        default: detail = saved.reviewModel
         }
         return ReviewService.title(savedReviewFamily) + " · " + detail
     }
@@ -96,6 +96,7 @@ extension AppModel {
             switch saved.implementationProvider {
             case "token_plan": return "千问 Token Plan · " + saved.tokenPlanImplementationModel
             case "qoder": return "Qoder · GLM-5.3"
+            case "custom_api": return ReviewService.title(saved.implementationService) + " · " + saved.implementationModel
             default: return "Codex · " + (saved.secondaryModel.isEmpty ? "每次任务指定" : saved.secondaryModel)
             }
         default:

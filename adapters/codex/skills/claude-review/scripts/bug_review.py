@@ -37,7 +37,8 @@ def parser():
     p.add_argument('--bundle', required=True)
     p.add_argument('--out', required=True)
     p.add_argument('--config-base', default=str(Path.cwd()))
-    p.add_argument('--channel', choices=('claude', 'qwen', 'qoder'))
+    p.add_argument('--channel', choices=('claude', 'qwen', 'qoder', 'official_api'))
+    p.add_argument('--host', choices=('codex', 'claude'), default='codex')
     p.add_argument('--model')
     p.add_argument('--qwen-executor', choices=('claude', 'codex'))
     p.add_argument('--responses-base-url')
@@ -107,7 +108,7 @@ def main():
         families = model_families(config, MODEL_FAMILIES)
         config_base = directory(args.config_base, '--config-base')
         channel = resolve(config, args.channel, args.model, config_base, families,
-                          args.qwen_executor, args.responses_base_url)
+                          args.qwen_executor, args.responses_base_url, allow_official=args.host == 'codex')
         args.timeout = args.timeout if args.timeout is not None else (1800 if channel['channel'] == 'qwen' else 600)
         args.max_output_bytes = args.max_output_bytes if args.max_output_bytes is not None else (8 if channel['channel'] == 'qwen' else 2) * 1024 * 1024
         if not (0 < args.timeout <= 3600 and 0 < args.idle_timeout <= 900 and 0 < args.max_output_bytes <= 8 * 1024 * 1024):

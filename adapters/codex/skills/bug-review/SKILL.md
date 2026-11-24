@@ -17,7 +17,7 @@ limitations and domain checks. Never reconstruct user words from inference.
 Run the resolved checkout's
 `adapters/codex/skills/claude-review/scripts/bug_review.py --bundle ABS --out NEW_ABS`.
 This entry uses `codex_relay.review_channel` for both hosts, **not** `review.channels`;
-`--channel claude|qwen|qoder` overrides it. It reuses existing service configuration.
+`--channel claude|qwen|qoder|official_api` overrides it. It reuses existing service configuration.
 `--config-base ABS` defaults to cwd and only anchors relative credential paths.
 No Git or repository is required. `--prepare-only` reads no credentials or models.
 

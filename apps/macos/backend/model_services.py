@@ -6,6 +6,84 @@ KEYS = ('tokenplan.value',) + tuple(ns+'.'+service+'.value' for ns in ('model_se
 FIELDS = ('model', 'base_url', 'responses_base_url', 'credential_paths', 'credential_key')
 DEFAULTS = dict(base_url='https://token-plan.maas.qianwenaiapi.com/apps/anthropic', responses_base_url='https://token-plan.maas.qianwenaiapi.com/compatible-mode/v1')
 
+OWN_CREDENTIAL_PATH = '~/.config/ai-anti/secrets.json'
+VENDOR_ENDPOINTS = {
+    'qwen': 'https://maas.qianwenaiapi.com/compatible-mode/v1',
+    'kimi': 'https://api.moonshot.cn/v1',
+    'deepseek': 'https://api.deepseek.com',
+}
+REVIEW_MODELS = {
+    'token_plan': ('qwen4-max', 'qwen3.8-max', 'deepseek-v4-pro', 'glm-5.3'),
+    'qwen': ('qwen4-max',),
+    'kimi': ('kimi-k3.1-pro', 'kimi-k3'),
+    'deepseek': ('deepseek-v4-pro',),
+}
+DIRECT_MODELS = {
+    'qwen': ('qwen4-max', 'qwen3.8-max'),
+    'kimi': ('kimi-k3.1-pro', 'kimi-k3'),
+    'deepseek': ('deepseek-v4-pro', 'deepseek-flash'),
+}
+VENDOR_KEYS = tuple(service + '.value' for service in VENDOR_ENDPOINTS)
+OFFICIAL_CHANNEL = 'official_api'
+IMPLEMENTATION_PROVIDERS = ('codex', 'token_plan', 'qoder', 'custom_api')
+
+
+def selection(value, models, field, error):
+    if value is None:
+        return None
+    if not isinstance(value, dict) or set(value) != {'service', 'model'}:
+        raise error(field + ' 必须为 service/model 对象，服务端点和凭证槽固定')
+    service, model = value['service'], value['model']
+    if not isinstance(service, str) or service not in models or model not in models[service]:
+        raise error(field + ' 服务与模型不匹配')
+    return dict(service=service, model=model)
+
+
+def required_selection(value, models, field, error):
+    chosen = selection(value, models, field, error)
+    if chosen is None:
+        raise error(field + ' 未配置')
+    return chosen
+
+
+def token_plan_destination(url, wire_api, error):
+    if url != DEFAULTS['responses_base_url' if wire_api == 'responses' else 'base_url']:
+        raise error('Token Plan 凭证需要对应协议的官方 HTTPS 端点')
+
+
+def vendor_token(value):
+    return isinstance(value, str) and bool(value) and all(33 <= ord(char) <= 126 for char in value)
+
+
+def vendor_actions(requests, secrets, error):
+    changed = False
+    for service, request in requests.items():
+        if not isinstance(request, dict) or set(request) - {'action', 'value'}:
+            raise error('厂商凭证动作无效')
+        action, value = request.get('action', 'retain'), request.get('value', '')
+        if action not in ('retain', 'replace', 'clear') or not isinstance(value, str):
+            raise error('厂商凭证动作无效')
+        if action == 'replace':
+            if not vendor_token(value):
+                raise error('厂商密钥必须为非空可见 ASCII 字符')
+        elif value:
+            raise error('保留或清除不能包含新密钥')
+        if action == 'retain':
+            continue
+        slot = secrets.get(service, {})
+        if not isinstance(slot, dict):
+            raise error('厂商凭证配置节无效')
+        if action == 'replace':
+            secrets.setdefault(service, {})['value'] = value
+            changed = True
+        elif 'value' in slot:
+            del slot['value']
+            if not slot:
+                del secrets[service]
+            changed = True
+    return changed
+
+
 def lookup(data, key):
     for part in key.split('.'):
         if not isinstance(data, dict): return None

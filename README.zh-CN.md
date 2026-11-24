@@ -265,18 +265,16 @@ Responses 执行器（另配 `plugins.qwen.responses_base_url`）。Claude 主�
 以上内容已经够日常使用。本节面向这几种需求：主要用 Codex 干活、想用更便宜的模型做实施、想对已有的
 问题分析再要一份第二意见，或者想用图形界面改配置。用不到可以跳过。
 
-- **Codex 主导的路径**（主要用 Codex 干活时）：评审通道由 `--channel claude|qwen` 选择，其次是 `codex_relay.review_channel`，
-  失败不自动降级。Qwen 可以选 Claude CLI 或 Codex CLI 的 Responses 执行器
+- **Codex 主导的路径**（主要用 Codex 干活时）：`--channel claude|qwen|qoder|official_api` 优先于 `codex_relay.review_channel`。
+  `official_api` 使用保存的 Token Plan 或厂商 Responses 选择。原有 Qwen 通道可以选 Claude CLI 或 Codex CLI 的 Responses 执行器
   （`codex_relay.qwen_executor`、`plugins.qwen.responses_base_url`）。Claude 主导的执行器由 `claude_relay.qwen_executor` 单独配置。
   调用方式与版本钉见 [codex-relay 技能](adapters/codex/skills/codex-relay/SKILL.md) 和 [兼容性说明](docs/COMPATIBILITY.md)。
-- **Codex 主导的实施来源**（想用更便宜的模型写代码时）：可选原生 Codex、千问 Token Plan（`glm-5.3` / `qwen4-max`等模型）或 Qoder 订阅，
-  千问 Token Plan 还支持主、备两个账号在额度耗尽时自动切换。契约与验证边界见[codex-relay 技能](adapters/codex/skills/codex-relay/SKILL.md) 和 [兼容性说明](docs/COMPATIBILITY.md)。
+- **Codex 主导的实施来源**（想用更便宜的模型写代码时）：可选原生 Codex、千问 Token Plan、Qoder 订阅或厂商直连。Token Plan 支持订阅额度耗尽时切换到备用账号。厂商直连每次须明确授权并提供文件清单。契约与验证边界见[codex-relay 技能](adapters/codex/skills/codex-relay/SKILL.md) 和 [兼容性说明](docs/COMPATIBILITY.md)。
 - **显式问题复核**（排查 bug 时，想让另一个模型复核已有的分析结论）：只在你明确要求时运行，排障时不会
   自动触发。模型给出问题分析后，在 Claude Code 里说「用 /bug-review 复核一下这个分析」，或在 Codex 里说
   「使用 $bug-review 复核……」。模型会把你的原话、它的分析和证据整理成材料包，交给另一个模型分两阶段
   复核：先只看问题和证据，独立列出可能的原因；再对照原分析，逐条给出支持、待验证或驳回。结论只是第二
-  意见，不会自动修改代码。复核方取自 `codex_relay.review_channel`（可选 `claude`、`qwen`、`qoder`，
-  缺省 `claude`），不是 `review.channels`；从 Claude Code 发起时复核方如果也是 Claude，只算同族复核。
+  意见，不会自动修改代码。复核方缺省取自 `codex_relay.review_channel`。Codex 可以使用官方通道，Claude Code 继续使用原有通道。
   Codex 侧需要先运行 `./install.sh --with-codex` 才会装上这个技能。不要求 Git。见
   [docs/BUG_REVIEW.md](docs/BUG_REVIEW.md)。
 - **macOS 菜单栏工具**（不想手改 JSON 配置时）：可选的 [菜单栏应用](apps/macos/README.md)，用来编辑默认模型、评审通道、

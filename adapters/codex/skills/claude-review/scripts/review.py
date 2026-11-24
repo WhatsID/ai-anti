@@ -129,7 +129,7 @@ def parser(families=None):
     result.add_argument("--plan")
     result.add_argument("--scale", required=True)
     result.add_argument("--out", required=True)
-    result.add_argument("--channel", choices=("claude", "qwen", "qoder"))
+    result.add_argument("--channel", choices=("claude", "qwen", "qoder", "official_api"))
     result.add_argument("--qwen-executor", choices=("claude", "codex"))
     result.add_argument("--responses-base-url")
     result.add_argument("--model", default=None, help="Claude aliases: " +

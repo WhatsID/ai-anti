@@ -93,7 +93,7 @@ def run(args):
         return implementation_direct.run(route, workspace, prompt, out, files,
                                          args.prepare_only, limits, CAP, write, digest)
     if files is not None:
-        raise ConfigError('--file requires explicit --provider custom_api')
+        raise ConfigError('--file requires the custom_api implementation route')
     # Native model dispatch remains a host tool operation, never a CLI fallback.
     if route['provider'] == 'codex' and not args.prepare_only:
         raise ConfigError('Codex native implementation must use host spawn_agent, not this CLI')
