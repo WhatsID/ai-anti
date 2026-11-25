@@ -20,6 +20,7 @@
 
 | Item | Evidence / result |
 | --- | --- |
+| Pre-plan alignment summary & approval | [approved approach summary and corresponding user reply, or applicable exemption] |
 | Verbatim request path and fingerprint | [path, SHA-256] |
 | Pre-review plan path and fingerprint | [path, SHA-256] |
 | Plan review materials | [`--files` / `--context`: existing relative paths; no overlap between these two lists; implementation scope may overlap either] |

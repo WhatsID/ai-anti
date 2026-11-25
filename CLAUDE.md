@@ -9,8 +9,8 @@
 本仓库装的就是守门机制本身，**守门机制不得比它守的东西更好改**。因此：
 
 - **全部机制文件都是高风险触发器**——不论改动几个文件、改动多小，一律走接力流程
-  （出方案 → 需求原文 → 跨模型交叉评审 → 分诊裁决 → 需求核对 → implementer 实施 →
-  终审 → 汇报）。具体清单：
+  （理解与思路确认 → 出方案及需求原文 → 跨模型交叉评审 → 分诊裁决 → 需求核对（默认停在待实施） →
+  获明确授权后由 implementer 实施 → 终审 → 汇报）。具体清单：
   - `core/PLANNING.md`、`core/DESIGN.md`、`core/DEBUGGING.md`、`core/TESTING.md`
   - `core/RETRO.md`（复盘与规则维护）
   - `core/WORKFLOW_ENTRY.md`、`adapters/codex/AGENTS.global.md`

@@ -37,17 +37,31 @@ PLANNING / DESIGN to make it replan or redesign. Applicable DEBUGGING/TESTING di
 Use them while preparing the plan; missing required sources are a loading gap,
 never evidence that the method was followed. Do not guess from the business cwd.
 
-Read the business repository's `AGENTS.md` and module authority. Record its
-real repository root, exact current `HEAD^{commit}` SHA, full attached branch
+Read the business repository's `AGENTS.md` and module authority. Apply the shared
+`core/WORKFLOW_ENTRY.md` routing and step 0 exemptions. For a new request routed to
+plan review, step 0 is pre-plan alignment. Do the necessary read-only checks and
+explain the trigger, your understanding of the problem and its boundaries, and
+the proposed approach and tradeoffs. If direct work grows into a reviewable task,
+stop editing immediately, preserve the changes, and report what was touched and
+what remains. Wait for explicit approval of the approach before writing the
+formal plan, creating a planning worktree, running dual planning, or calling an
+external review CLI.
+
+After approval or an applicable exemption, record the real repository root,
+exact current `HEAD^{commit}` SHA, full attached branch
 reference from `git symbolic-ref --quiet HEAD` (exit 1 means detached; any other
 error stops), dirty baseline and scoped fingerprints, complete implementation scope,
 request, and plan. Any branch or detached HEAD with a valid commit is supported;
 no commit or non-Git directory blocks a complete relay. Do not initialize,
 commit, create a branch, or switch the business checkout to manufacture a baseline.
-Preserve other sessions' work. The request is verbatim and follows R2; the plan
-states scale, files and estimated sizes, rollback, and validation. Keep each
-run record outside the business repository by default; use
-[the template](references/run-record.md).
+Preserve other sessions' work. Follow R2 for the verbatim `.request.md`, including
+the user's step 0 replies. Attach verbatim questions or options only when needed
+to resolve the user's short referential reply. Keep the primary's step 0 solution,
+architecture and implementation prose out of the entire `.request.md`, including
+its non-requirements appendix. Record the approved approach summary and the user's
+reply in [the local run record](references/run-record.md) for resumption and step 3b.
+Keep that record outside the business repository by default. The plan states
+scale, files and estimated sizes, rollback, and validation.
 
 Distinguish that complete scope from the existing materials selected for plan review;
 follow the sibling [claude-review parameter rules](../claude-review/SKILL.md) for
@@ -89,11 +103,18 @@ primary-only and is reported as partial, never a complete relay.
 For the same task activated by a loaded trusted skill or project workflow, read
 `root/core/WORKFLOW_CONTINUITY.md`. Required stages are not omitted for small
 steps under rules/auto/force; existing solo and explicit skip priority remains.
-A plan-only request runs plan preparation, actual plan review and adjudication,
-then stops before implementation. Review completion grants no implementation authority.
+At pre-plan alignment, a reply like “continue” or “yes” approves the approach only
+when exactly one clear direction is pending and no choices remain open. If there
+are unresolved choices or the user corrects the approach, summarize the revised
+direction and stay at step 0 for approval. Approval covers steps 1–3b, from plan
+preparation and actual review through R6 adjudication and the requirements check.
+Then default to `plan-only` (awaiting implementation authorization), even if the
+initial request said “implement” or step 3b found no differences. An ambiguous
+“continue” cannot authorize implementation or override a plan-only request.
 On later explicit implementation authorization, read original artifacts and verify
 review/adjudication and the baseline gates above. Reuse a still-valid plan/review
 and resume at implementation; do not repeat investigation or review unconditionally.
+For older run records without alignment evidence, use the existing artifact checks.
 Material changes follow R6. A workflow record describes state, never authorization.
 Primary independent acceptance remains required; another external review is optional.
 
@@ -131,15 +152,20 @@ A diff cannot replace plan review; old task
 receipts cannot prove this review. Observe the CLI discipline for external CLI
 calls.
 
-Read the entire report and adjudicate every finding under core R6. Check the
-revised plan against the request. Continue authorized internal choices; handle
-new user-visible differences under the business project's confirmation rules.
-Do not implement before adjudication. A second review is only for the R6
-conditions; unresolved mandatory items after it block implementation.
+Read the entire report and adjudicate every finding under core R6. For step 3b,
+check the revised plan against the verbatim request and consult the approved
+approach in the run record. Report any user-visible differences and handle their
+confirmation under the business project's rules. If there are no differences,
+say so. After reporting, default to `plan-only` (awaiting implementation authorization).
+Check any explicit conditional implementation authorization against the user's
+exact terms. Stay at this stop if the conditions fail or the user only accepts a
+difference. A second review is only for the R6 conditions. Unresolved mandatory
+items after it block implementation.
 
 ## Isolated implementation
 
-Create an isolated worktree manually from the frozen exact HEAD commit SHA:
+After checking explicit implementation authorization and its conditions, create an
+isolated worktree manually from the frozen exact HEAD commit SHA:
 `git worktree add --detach <path> <frozen-sha>`, using the business project's
 sparse-checkout pattern. Never substitute a moving branch, `main`, `master`, or
 remote default branch for that SHA. Dispatch exactly one implementer through the selected

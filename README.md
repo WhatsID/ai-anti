@@ -51,20 +51,21 @@ New session
        └─ @import CLAUDE.global.md ── @import core/WORKFLOW_ENTRY.md
             └─ the model now knows: relay mode, task sizing, high-risk triggers
 You make a request
-  ├─ small task → done directly
-  └─ large or high-risk task → relay:
-       plan + verbatim request (.claude/plans/)
+  ├─ direct work → brief notice, then execution
+  └─ relay → step 0: explain the trigger, problem and proposed approach, then wait for approval
+       → after approval, draft the plan + verbatim request (.claude/plans/)
          (with dual planning: AGY drafts independently, then the drafts are merged)
        → /codex-review: the command's script reads ~/.config/ai-anti/config.json
          and runs codex exec in a read-only sandbox; results land in a scratch dir
-       → triage → user-visible differences from your request are confirmed with you
-       → implement: implementer subagent, or Codex in an isolated git worktree
+       → triage → requirements check (step 3b) → pause for implementation authorization by default
+       → after explicit authorization: implementer subagent, or Codex in an isolated git worktree
        → final check of the increment → report (commits only when you say so)
 ```
 
 Codex follows the same chain: `AGENTS.md` block → `AGENTS.global.md` → the same
-`core/WORKFLOW_ENTRY.md`. When a relay is needed, it reads the `codex-relay` or `claude-review` skill,
-whose scripts call Claude or Qwen for review. AGY loads the same entry through its plugin.
+`core/WORKFLOW_ENTRY.md`. It loads `codex-relay` for the full relay and `claude-review` for standalone
+plan or diff review. The review script calls the selected channel. AGY loads the same entry
+through its plugin.
 
 ### Two layers of enforcement
 
@@ -82,7 +83,7 @@ business high-risk triggers, where to register findings, or deployment scale; se
 
 **About language:** the rule texts (`core/`, `adapters/`) and the docs under `docs/` are written in
 Chinese and are the only authority. The models read them without difficulty. This README is a summary.
-`core/DESIGN_RATIONALE.md` records the real failure behind each rule.
+`core/DESIGN_RATIONALE.md` records why rules were introduced.
 
 ## The relay
 
@@ -101,8 +102,8 @@ Chinese and are the only authority. The models read them without difficulty. Thi
 - **Two-round limit.** Must-fix items still open after two rounds go to you.
 - **Fallback.** Channels are tried in the configured order (default Codex → same-family).
   Same-family review runs only when every cross-model channel is unavailable, with extra compensating
-  requirements. If none is available, ordinary tasks continue marked "not cross-reviewed", and
-  high-risk tasks stop for you.
+  requirements. If none is available, ordinary tasks proceed to the requirements check marked
+  "not cross-reviewed", and high-risk tasks stop for you.
 
 Full rules: `core/REVIEW_PRINCIPLES.md`.
 
@@ -191,9 +192,13 @@ entry edge cases, what `--status` does and does not prove, and uninstall details
 
 ### Day-to-day use
 
-**Talk to it exactly as you would to a single model; no special phrasing is needed.** For every task, the
-leading tool decides from the relay mode and task size: small tasks are done directly, large or high-risk
-tasks go through the relay automatically, and it tells you its decision before starting.
+**Talk to it as you would to a single model.** The leading tool routes work based on the relay mode
+and task size. For direct work, it gives you a brief heads-up and gets started. For a new request
+routed to plan review, it explains the trigger, its understanding of the problem and its proposed
+approach, then waits for your approval before drafting or sending the plan for review. After review,
+triage and the requirements check, it pauses for explicit implementation authorization by default,
+even if there are no differences. If you say “implement after review if there are no differences”,
+it checks that condition against your exact wording.
 
 To change its decision for a particular run, just say so in your message:
 
@@ -202,6 +207,7 @@ To change its decision for a particular run, just say so in your message:
 | "use the relay" | Always run the relay this time |
 | "just change it" | Skip size-based relay; high-risk triggers are still reviewed |
 | "skip review" | No review, even for high-risk tasks |
+| "skip approach check" or "draft and review the plan directly" | Draft and review the plan this time. Implementation still requires authorization. |
 
 You can also call a single step by hand, e.g. `/codex-review plan <plan.md>` in Claude Code for one plan
 review, or "Use $claude-review to review the plan ..." in Codex. These are optional.
